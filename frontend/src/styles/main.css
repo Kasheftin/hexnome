@@ -1,0 +1,47 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0d0f13;
+  color: #cfd4de;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+a {
+  color: #e8c878;
+}
+
+/* Board chrome is DOM over the canvas — see docs/tech-spec.md, "UI chrome". */
+.chrome-panel {
+  border: 1px solid #3a3222;
+  border-radius: 4px;
+  background: rgb(21 23 28 / 82%);
+  box-shadow: 0 2px 16px rgb(0 0 0 / 45%);
+  backdrop-filter: blur(2px);
+}
+
+.chrome-title {
+  margin: 0;
+  color: #e8c878;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
