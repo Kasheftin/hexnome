@@ -341,14 +341,32 @@ Board plates are deliberately not registered — pressing a plate is how you gra
 
 ### Board backdrop
 
-The empty honeycomb behind the placed tiles is **one large plane with a procedural hex-grid fragment
-shader**, not thousands of outline meshes. A screen-space-derivative-based line width keeps the grid
-one pixel thick at every zoom level, which a texture cannot do without a mip stack that goes soft.
+The board is **one large plane with a procedural hex-grid fragment shader**, not thousands of outline
+meshes, and not a texture — a texture cannot hold a constant thin line across the zoom range without a
+mip stack that goes soft.
 
 It is also *all* the board is: a faint honeycomb on dark slate. The board only ever says where a plate
 may go, which is a minor job, so it stays quiet and the plates carry the colour. An earlier version put
 ornate brass-and-green art on all 1661 cells with flat grey plate sockets on top, which drew the eye to
 the least interesting part of the screen.
+
+**Line width comes from a uniform, not from `fwidth`.** This matters more than it sounds. The shader's
+`d` is the distance to the *current* cell's boundary, and `axialRound` makes it fold there — across a
+boundary the values run `…0.05, 0 | 0.05…`. For a 2×2 quad straddling a boundary the two sides are
+near-equal, so `dFdx(d)` collapses to about zero, `fwidth` with it, and the computed half-width along
+with it, leaving `smoothstep` a zero-width range that returns 1 and erases the line entirely. Whether a
+quad straddles that way depends on sub-pixel phase, so whole families of lines vanished at some zoom
+levels and not others, and the rendered width wandered between 2 and 4 px when it should have been
+constant.
+
+There is no need to estimate it: the board camera is orthographic and axis-aligned, so one pixel is the
+same world distance everywhere on the plane. Passing `unitsPerPixel` in as a uniform is exact and free
+of the fold. Measured across ten zoom steps, grid-line continuity went from 96–100% of sampled columns
+to **100% at every step**.
+
+The half-width is separately floored at one pixel so a line always has a fully covered core. Without
+that floor the falloff begins at `d = 0`, so a line is full strength only exactly on the boundary and
+fades to nothing within a pixel or two of it.
 Faint, low-contrast, no depth write — it is orientation furniture, and it must never compete with the
 tiles.
 
