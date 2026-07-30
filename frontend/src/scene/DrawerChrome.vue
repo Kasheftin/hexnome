@@ -30,6 +30,7 @@ import {
   HIGHLIGHT_COLORS,
   PLATE_SLOT_PX,
 } from './constants'
+import { createChromePanelMaterial, setChromePanelSize, snapPanelRect } from './chromePanel'
 import { registerGrabbable } from './grabbables'
 import { screenToBoard, unitsPerPixel } from './screenProjection'
 import { useDrawerLayout } from './useDrawerLayout'
@@ -51,10 +52,12 @@ const FLAT = new Euler(-Math.PI / 2, 0, 0)
 /** Slot ring radius in pixels — the same fraction of a slot the tiles use. */
 const RING_PX = (DRAWER_SLOT_PX / 2) * DRAWER_TILE_FILL
 
-const panel = new Mesh(
-  new PlaneGeometry(1, 1),
-  new MeshBasicMaterial({ color: '#0e1216', transparent: true, opacity: 0.88, side: DoubleSide }),
-)
+/**
+ * The tray, styled as a `.chrome-panel` so it belongs to the same family as the header and the
+ * help card over in the DOM — 1px border, 4px radius, translucent slate.
+ */
+const panelMaterial = createChromePanelMaterial()
+const panel = new Mesh(new PlaneGeometry(1, 1), panelMaterial)
 panel.rotation.copy(FLAT)
 panel.renderOrder = 10
 
@@ -78,15 +81,14 @@ highlight.renderOrder = 13
 /**
  * Plate bays, drawn as plain rounded rectangles rather than hex outlines: a plate is a
  * seven-cell flower, so a hexagonal socket would misdescribe what goes there.
+ *
+ * Same panel styling as the tray, which is what makes them read as bays recessed into it: two
+ * translucent slate layers stack to something darker than one, so the depth comes for free rather
+ * than from a second hand-picked grey.
  */
 const bays: Mesh[] = []
 const bayGeometry = new PlaneGeometry(1, 1)
-const bayMaterial = new MeshBasicMaterial({
-  color: '#181d22',
-  transparent: true,
-  opacity: 0.95,
-  side: DoubleSide,
-})
+const bayMaterial = createChromePanelMaterial()
 const bayHighlight = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({
   transparent: true,
   opacity: 0.22,
@@ -131,10 +133,15 @@ onBeforeRender(() => {
   const upp = unitsPerPixel(cam, h)
   const l = layout.value
 
-  // Panel: a pixel-sized rectangle placed at its screen centre.
-  const centre = screenToBoard(cam, w, h, l.left + l.width / 2, l.top + l.height / 2)
+  // Panel: a pixel-sized rectangle placed at its screen centre, snapped to the pixel grid so its
+  // 1px border comes out as crisp as the DOM panels' rather than straddling two rows.
+  const tray = snapPanelRect(l.left + l.width / 2, l.top + l.height / 2, l.width, l.height)
+  const centre = screenToBoard(cam, w, h, tray.x, tray.y)
   panel.position.set(centre.x, DRAWER_CHROME_Y, centre.z)
-  panel.scale.set(l.width * upp, l.height * upp, 1)
+  panel.scale.set(tray.width * upp, tray.height * upp, 1)
+  // The shader draws its border in pixel space, so it needs the size in pixels rather than the
+  // world scale above. Zoom changes the scale and leaves this alone — which is the point.
+  setChromePanelSize(panelMaterial, tray.width, tray.height)
 
   for (let slot = 0; slot < rings.length; slot++) {
     const ring = rings[slot]
@@ -146,13 +153,20 @@ onBeforeRender(() => {
     ring.scale.setScalar(upp)
   }
 
-  const bayW = (PLATE_SLOT_PX - 6) * upp
-  const bayH = (l.plateSlotHeight - 4) * upp
+  // Every bay is the same size, so they share one material and one pixel size. Only their centres
+  // differ, and each is snapped independently — rounding the shared size once would still leave
+  // individual bays off the grid.
+  const bayWPx = Math.round(PLATE_SLOT_PX - 6)
+  const bayHPx = Math.round(l.plateSlotHeight - 4)
+  setChromePanelSize(bayMaterial, bayWPx, bayHPx)
+  const bayW = bayWPx * upp
+  const bayH = bayHPx * upp
   for (let slot = 0; slot < bays.length; slot++) {
     const bay = bays[slot]
     if (!bay) continue
     const c = l.plateSlotCentre(slot)
-    const p = screenToBoard(cam, w, h, c.x, c.y)
+    const rect = snapPanelRect(c.x, c.y, bayWPx, bayHPx)
+    const p = screenToBoard(cam, w, h, rect.x, rect.y)
     bay.position.set(p.x, DRAWER_CHROME_Y + 0.005, p.z)
     bay.scale.set(bayW, bayH, 1)
   }
@@ -196,7 +210,7 @@ onBeforeUnmount(() => {
   scene.value?.remove(panel)
   scene.value?.remove(highlight)
   panel.geometry.dispose()
-  ;(panel.material as MeshBasicMaterial).dispose()
+  panelMaterial.dispose()
   ringGeometry.dispose()
   ringMaterial.dispose()
   highlight.geometry.dispose()

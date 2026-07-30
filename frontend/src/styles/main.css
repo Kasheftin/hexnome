@@ -28,7 +28,13 @@ a {
   color: #e8c878;
 }
 
-/* Board chrome is DOM over the canvas — see docs/tech-spec.md, "UI chrome". */
+/*
+ * Board chrome is DOM over the canvas — see docs/tech-spec.md, "UI chrome".
+ *
+ * The drawer tray and plate bays cannot be DOM (they sit under live 3D tiles), so they reproduce
+ * this in a shader. Their copy of these values is CHROME_PANEL in src/scene/constants.ts, and the
+ * two sit side by side on screen — change one, change the other.
+ */
 .chrome-panel {
   border: 1px solid #3a3222;
   border-radius: 4px;

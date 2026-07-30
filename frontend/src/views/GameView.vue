@@ -28,15 +28,26 @@ import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { createDeck } from '@/game/deck'
+import {
+  canConfirmDraft,
+  draftAttribute,
+  draftStates as draftStatesOf,
+  toggleDraftSelection,
+  type DraftTile,
+} from '@/game/draft'
 import { hexRectangle } from '@/game/hex'
-import { createTableau } from '@/game/tableau'
+import { createTableau, type TileSpec } from '@/game/tableau'
+import { IDLE, turnOptions, type TurnAction, type TurnPhase } from '@/game/turn'
 import type { Axial } from '@/game/hex'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
 import DrawerChrome from '@/scene/DrawerChrome.vue'
 import HexGridFloor from '@/scene/HexGridFloor.vue'
+import SourceChrome from '@/scene/SourceChrome.vue'
 import TileEnvironment from '@/scene/TileEnvironment.vue'
 import TableauView from '@/scene/TableauView.vue'
+import ActionBar from '@/ui/ActionBar.vue'
 import {
   BOARD_HALF_COLS,
   BOARD_HALF_ROWS,
@@ -44,9 +55,10 @@ import {
   DRAWER_COLS,
   DRAWER_ROWS,
   PLATE_SLOTS,
+  SOURCE_LOTS,
+  SOURCE_TILES_PER_LOT,
 } from '@/scene/constants'
 import { createDrawerLayout } from '@/scene/drawerLayout'
-import { TILE_COLORS } from '@/scene/tileMaterials'
 import { modeInfo, type GameSettings } from '@/game/gameSettings'
 import { useSavedGames } from '@/composables/useSavedGames'
 
@@ -79,39 +91,46 @@ onMounted(() => {
 const cells = hexRectangle(BOARD_HALF_COLS, BOARD_HALF_ROWS)
 const DRAWER_SLOTS = DRAWER_COLS * DRAWER_ROWS
 
-const tableau = createTableau({ cells, drawerSlots: DRAWER_SLOTS, plateSlots: PLATE_SLOTS })
-
-const randomTile = () => ({
-  color: Math.floor(Math.random() * TILE_COLORS.length),
-  value: 1 + Math.floor(Math.random() * 6),
+const tableau = createTableau({
+  cells,
+  drawerSlots: DRAWER_SLOTS,
+  plateSlots: PLATE_SLOTS,
+  sourceLots: SOURCE_LOTS,
+  sourceTilesPerLot: SOURCE_TILES_PER_LOT,
 })
 
-function shuffled(n: number): number[] {
-  const out = [...Array(n).keys()]
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const swap = out[i] as number
-    out[i] = out[j] as number
-    out[j] = swap
-  }
-  return out
-}
+/**
+ * The opening deal: fill the shared source, and leave the drawer empty.
+ *
+ * **The drawer starts empty on purpose.** A turn is either draft-from-source or place-from-drawer,
+ * so with nothing in the drawer the only legal first move is a draft — which is exactly the rule,
+ * expressed as a starting position rather than as a check.
+ *
+ * A lot is one plate dealt **face down**, with four loose tiles heaped on top of it. The plate's own
+ * tile is not created at all while it is face down: the model has no hidden state to leak, so
+ * nothing can accidentally read it (see `Plate.faceDown`).
+ *
+ * Everything comes off the top of the bags this id seeds (game/deck.ts), so the same link always
+ * opens on the same lot — the same plate under the same four tiles, scattered the same way.
+ *
+ * Only one lot is filled so far. Filling all six, and refilling them between rounds, waits on the
+ * round structure.
+ */
+const OPENING_LOTS = 1
 
-/** Prefill half the tile slots, and both plate bays. */
 {
-  for (const slot of shuffled(DRAWER_SLOTS).slice(0, 8)) {
-    tableau.addTile(randomTile(), { kind: 'drawer', slot })
-  }
-  // Each plate arrives with one random petal already filled and the other five empty.
-  for (let slot = 0; slot < PLATE_SLOTS; slot++) {
-    const plate = tableau.addPlate({ kind: 'plateSlot', slot })
-    if (!plate) continue
-    // `fixed`: the plate's own tile. Part of the plate, never separable from it.
-    tableau.addTile(
-      randomTile(),
-      { kind: 'onPlate', plateId: plate.id, petal: Math.floor(Math.random() * 6) },
-      { fixed: true },
-    )
+  const deck = createDeck(gameId.value)
+  let nextTile = 0
+
+  for (let lot = 0; lot < Math.min(OPENING_LOTS, SOURCE_LOTS); lot++) {
+    const dealt = deck.plates[lot]
+    if (dealt) tableau.addPlate({ kind: 'source', lot }, { faceDown: true })
+
+    for (let index = 0; index < SOURCE_TILES_PER_LOT; index++) {
+      const spec = deck.tiles[nextTile++]
+      if (!spec) break
+      tableau.addTile(spec, { kind: 'source', lot, index })
+    }
   }
 }
 
@@ -134,6 +153,116 @@ const counts = computed(() => {
     platesHeld: plates.filter(p => p.location.kind === 'plateSlot').length,
   }
 })
+
+/* ── the turn ──────────────────────────────────────────────────────────────────
+ *
+ * A turn is **one** action: draft from the source, place one item, or pass. The phase lives here
+ * rather than in the scene because it governs both the board and the DOM bar, and because the rules
+ * that decide what is legal are pure modules (game/turn.ts, game/draft.ts) that neither knows about.
+ *
+ * Nothing on the table is interactive while idle. That is not a cosmetic choice: a turn is a
+ * commitment, and a drag that lands before the player has chosen "Put" would spend their turn for
+ * them.
+ */
+const phase = shallowRef<TurnPhase>(IDLE)
+
+/** Every tile in the shared source, as drafting sees it. */
+const sourceTiles = computed<DraftTile[]>(() => {
+  void revision.value
+  return tableau.tiles()
+    .filter(tile => tile.location.kind === 'source')
+    .map(tile => ({ id: tile.id, color: tile.color, value: tile.value }))
+})
+
+const freeSlots = computed(() => {
+  void revision.value
+  return tableau.freeDrawerSlots()
+})
+
+const options = computed(() => turnOptions({
+  sourceTiles: sourceTiles.value.length,
+  drawerItems: counts.value.drawer + counts.value.platesHeld,
+  freeDrawerSlots: freeSlots.value.length,
+}))
+
+const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.selected : [])
+
+/** Null unless drafting, which is what tells the scene to stop showing draft states at all. */
+const draftStates = computed(() => phase.value.kind === 'taking'
+  ? draftStatesOf(sourceTiles.value, selectedIds.value)
+  : null)
+
+/** The selected tiles in click order, for the bar to display. */
+const selection = computed<TileSpec[]>(() => {
+  const byId = new Map(sourceTiles.value.map(tile => [tile.id, tile]))
+  return selectedIds.value.flatMap(id => {
+    const tile = byId.get(id)
+    return tile ? [{ color: tile.color, value: tile.value }] : []
+  })
+})
+
+/**
+ * A legal sweep *and* somewhere to put it.
+ *
+ * The room check matters: a four-tile draft into three free slots is a valid draft that cannot be
+ * carried out, and lighting the button would be promising something we would then have to refuse.
+ */
+const canConfirm = computed(() => canConfirmDraft(sourceTiles.value, selectedIds.value)
+  && selectedIds.value.length <= freeSlots.value.length)
+
+const draftAttr = computed(() => draftAttribute(sourceTiles.value, selectedIds.value))
+
+/**
+ * In singleplayer it is always your turn, so this is a status line. Multiplayer will put
+ * "Player 2's turn" here and hide the actions.
+ */
+const turnLabel = computed(() => 'Your turn')
+
+function chooseAction(action: TurnAction): void {
+  if (action === 'take') phase.value = { kind: 'taking', selected: [] }
+  else if (action === 'put') phase.value = { kind: 'putting' }
+  else endTurn()
+}
+
+/** Back to the action list, with any part-built selection discarded. */
+function cancelAction(): void {
+  phase.value = IDLE
+}
+
+/**
+ * End the turn.
+ *
+ * Singleplayer, so the same player goes again and this is just a return to the action list. Advancing
+ * to another player — and to the next round — waits on the round structure.
+ */
+function endTurn(): void {
+  phase.value = IDLE
+}
+
+function onSelectTile(id: string): void {
+  const current = phase.value
+  if (current.kind !== 'taking') return
+  phase.value = {
+    kind: 'taking',
+    selected: toggleDraftSelection(sourceTiles.value, current.selected, id),
+  }
+}
+
+function confirmTake(): void {
+  if (!canConfirm.value) return
+  const slots = freeSlots.value
+  selectedIds.value.forEach((id, i) => {
+    const slot = slots[i]
+    if (slot !== undefined) tableau.moveTile(id, { kind: 'drawer', slot })
+  })
+  revision.value++
+  endTurn()
+}
+
+/** A `put` turn is spent the moment something reaches the board. */
+function onPlaced(): void {
+  if (phase.value.kind === 'putting') endTurn()
+}
 
 function onTarget(cells: Axial[], valid: boolean): void {
   targetCells.value = cells
@@ -233,6 +362,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :cells="targetCells"
         :valid="targetValid"
       />
+      <SourceChrome />
       <DrawerChrome
         :target-slot="targetTileSlot"
         :target-plate-slot="targetPlateSlot"
@@ -240,6 +370,11 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
       <TableauView
         :tableau="tableau"
+        :game-id="gameId"
+        :draggable="phase.kind === 'putting'"
+        :draft-states="draftStates"
+        @select-tile="onSelectTile"
+        @placed="onPlaced"
         @target="onTarget"
         @drawer-target="onDrawerTarget"
         @hover-plate-slot="onHoverPlateSlot"
@@ -305,6 +440,20 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         </svg>
       </button>
     </div>
+
+    <ActionBar
+      :phase="phase"
+      :options="options"
+      :selection="selection"
+      :can-confirm="canConfirm"
+      :attribute="draftAttr"
+      :anchor-x="drawerLayout.left + drawerLayout.width / 2"
+      :anchor-y="drawerLayout.top"
+      :turn-label="turnLabel"
+      @choose="chooseAction"
+      @confirm="confirmTake"
+      @cancel="cancelAction"
+    />
 
     <header class="chrome-panel top">
       <h1 class="chrome-title">

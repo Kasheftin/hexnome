@@ -1,4 +1,5 @@
 import { Color, MeshStandardMaterial } from 'three'
+import { TILE_COLOR_COUNT } from '@/game/deck'
 
 /**
  * The six tile colours, and the material they share.
@@ -17,6 +18,17 @@ export const TILE_COLORS = [
 ] as const
 
 export type TileColorIndex = 0 | 1 | 2 | 3 | 4 | 5
+
+/**
+ * The palette must be exactly as long as the rules believe.
+ *
+ * `game/deck.ts` builds the bags from `TILE_COLOR_COUNT`, so it deals indices 0…5 without ever
+ * consulting this list. Shortening the palette would deal tiles with no paint — and
+ * `createTileMaterial` falls back to the first colour, so they would silently come out the wrong
+ * colour rather than fail. This makes that a typecheck error instead.
+ */
+const paletteLengthMatchesRules: typeof TILE_COLOR_COUNT = TILE_COLORS.length
+void paletteLengthMatchesRules
 
 /**
  * Solid moulded plastic, not glass.

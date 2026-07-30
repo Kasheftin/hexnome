@@ -104,7 +104,7 @@ export const DRAWER_ROWS = 2
  * zooms beneath it, so its layout is specified in pixels and converted to world units
  * every frame (scene/screenProjection.ts).
  */
-export const DRAWER_SLOT_PX = 64
+export const DRAWER_SLOT_PX = 83
 export const DRAWER_PADDING_PX = 13
 /** Gap between the drawer and the bottom of the canvas. */
 export const DRAWER_BOTTOM_PX = 22
@@ -119,16 +119,74 @@ export const DRAWER_TILE_FILL = 0.9
  * wide against a tile's `1.732`. It needs roughly triple a tile slot, which is why the
  * plate slots sit in one row spanning the drawer's full height rather than in the tile
  * grid.
+ *
+ * Scaled with the tile slots, so the bay stays very nearly plate-shaped. A plate is 1.039 times
+ * wider than tall, and two rows of 83px slots make the bay 192px tall — so 198 keeps the plate
+ * filling its bay rather than floating in a portrait box with slack above and below.
  */
 export const PLATE_SLOTS = 2
-export const PLATE_SLOT_PX = 152
+export const PLATE_SLOT_PX = 198
 /** Gap between the plate slots and the tile grid. */
 export const DRAWER_GROUP_GAP_PX = 16
 /** Plate width as a fraction of its slot. */
 export const PLATE_SLOT_FILL = 0.92
 
+/* ── Shared source (the pick-from column) ────────────────────────────────────── */
+
+/**
+ * Lots in the shared source. Each is one face-down plate with loose tiles heaped on it.
+ *
+ * A column down the left, under the title, rather than a row: six lots side by side would be wider
+ * than the board and would fight the drawer for the bottom of the screen.
+ */
+export const SOURCE_LOTS = 6
+/** Loose tiles heaped on each lot's face-down plate. */
+export const SOURCE_TILES_PER_LOT = 4
+
+export const SOURCE_LEFT_PX = 14
+/** Clear of the title panel, which is 14px down and about 40px tall. */
+export const SOURCE_TOP_PX = 66
+export const SOURCE_PADDING_PX = 9
+/** Between lots. Small: they read as one stack, not six unrelated panels. */
+export const SOURCE_LOT_GAP_PX = 5
+/** Clearance kept below the column — from the drawer if it is in the way, else the canvas edge. */
+export const SOURCE_BOTTOM_GAP_PX = 12
+
+/**
+ * Lot width bounds, in screen pixels.
+ *
+ * Lots are sized to fit the available height rather than fixed, because six of them stacked is a
+ * *vertical* constraint and the viewport is the thing that varies. The min stops the plates becoming
+ * unreadable on a short screen, accepting that the column may then be clipped rather than pretending
+ * six fit where they do not.
+ *
+ * The max is set by tile parity, not by taste: a lot needs about `SOURCE_HEAP_SPAN` tile-radii to hold
+ * four drawer-sized tiles legibly, which is ~172px. Capping below that would make parity unreachable
+ * at *any* viewport size, so the cap sits just above it — see sourceTileScale in TableauView.vue.
+ */
+export const SOURCE_LOT_MIN_PX = 54
+export const SOURCE_LOT_MAX_PX = 176
+/**
+ * Plate width as a fraction of its lot.
+ *
+ * Fuller than the drawer's bays, because here the plate has to be a surface for the heap rather than
+ * just an object on display: the tiles spread to about 4.3 tile-radii across, and a plate much smaller
+ * than that has tiles hanging over its edge with nothing under them.
+ */
+export const SOURCE_PLATE_FILL = 0.95
+
 /** World width of a plate flower, in units of HEX_SIZE: hole plus two petals across. */
 export const PLATE_WORLD_WIDTH = 3 * Math.sqrt(3)
+
+/**
+ * World height of a plate flower, in units of HEX_SIZE.
+ *
+ * Petal centres reach ±1.5 in z (`axialToWorld` of `(0, ±1)`), and each hex adds its own
+ * circumradius of 1 beyond that, so the flower spans 5 — very slightly less than its 5.196 width.
+ * A plate is nearly square but not quite, and the pick area's lots have to use the real ratio or
+ * the plates in them sit off-centre.
+ */
+export const PLATE_WORLD_HEIGHT = 5
 
 /**
  * World height of a plate's underside. Just clear of the board plane rather than level with
@@ -187,9 +245,54 @@ export const DRAWER_CHROME_Y = 1.8
 export const DRAWER_TILE_Y = 2
 export const HELD_TILE_Y = 3
 
+/**
+ * The shared source, on the same tier as the drawer: both are screen-anchored UI above the board.
+ *
+ * A hair below the drawer so that if the two ever overlap — a very short viewport — the drawer wins,
+ * since that is where the piece you are moving ends up.
+ */
+export const SOURCE_CHROME_Y = 1.75
+export const SOURCE_PLATE_Y = 1.9
+/**
+ * Loose tiles sit above their lot's plate, and each one above the last.
+ *
+ * They genuinely overlap — that is what a heap looks like — so without a per-tile step they would
+ * z-fight against each other wherever they cross.
+ */
+export const SOURCE_TILE_Y = 1.95
+export const SOURCE_TILE_LAYER_STEP = 0.012
+
+/**
+ * Extra height for a tile selected during a draft.
+ *
+ * Enough to clear every layer step, so a selected tile sits above the whole heap. Not decoration: its
+ * mint ring was otherwise partly hidden behind whichever tile happened to be heaped on top of it, and
+ * a selection indicator that another object can occlude is not an indicator.
+ */
+export const SOURCE_TILE_SELECT_LIFT = 0.1
+
 export const HIGHLIGHT_COLORS = {
   valid: '#8fe6c0',
   invalid: '#6a4b4b',
+} as const
+
+/**
+ * The `.chrome-panel` look, for the panels drawn in the canvas.
+ *
+ * **Kept in step with `.chrome-panel` in src/styles/main.css by hand.** The drawer tray and plate
+ * bays are quads in the scene rather than DOM (see scene/chromePanel.ts for why), so they cannot
+ * inherit the CSS — but they sit right next to the header and help card, and a border a shade off
+ * would be obvious. If you change one, change the other.
+ *
+ * Pixels, not world units: the panel shader works in screen space so these hold at any zoom.
+ */
+export const CHROME_PANEL = {
+  borderPx: 1,
+  radiusPx: 4,
+  border: '#3a3222',
+  borderOpacity: 1,
+  fill: '#15171c',
+  fillOpacity: 0.82,
 } as const
 
 /**

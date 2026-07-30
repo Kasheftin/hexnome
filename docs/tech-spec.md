@@ -118,6 +118,50 @@ Two consequences worth knowing before you look at the screen and think something
 `plateGrid.ts` owns both directions of this mapping and is the first thing to unit-test — an error
 here is invisible in the data and glaringly wrong on screen.
 
+### Seeded bags
+
+`game/random.ts` holds the primitives — `cyrb128` → `sfc32` → descending Fisher-Yates — and
+`game/deck.ts` derives the draw order of both bags — 36 plates, 108 tiles — from the game's id. A
+game is already minted with a uuid and stored against it so `/game?id=…` survives a refresh, so
+reusing that id as the seed makes the deck **a property of the id** rather than of the moment the
+page loaded.
+
+```
+createDeck(gameId) → { plates: DealtPlate[36], tiles: TileSpec[108] }
+```
+
+Three things this buys, in order of when they matter:
+
+1. A refresh returns to the game you were looking at, not to a new one sharing a URL.
+2. A bug report is reproducible from the URL alone.
+3. Later, two clients can agree on a deck **without exchanging it** — the id is the deck.
+
+**`cyrb128` → `sfc32` → descending Fisher-Yates**, in `game/random.ts`. `Math.random()` is
+deliberately unseedable, so this needs its own generator. Both the hash and the generator are built from exact 32-bit integer
+operations (`Math.imul`, shifts, xor) plus a single exact `/ 2**32`, which is what makes the sequence
+bit-identical on every JS engine — a deck that derived differently per browser would defeat the point.
+
+**Two independent streams**, seeded `` `${id}:plates` `` and `` `${id}:tiles` ``. If they shared one
+stream, changing how many plates were drawn would shift every tile after it, coupling two things the
+game has no reason to couple. `deck.spec.ts` tests exactly that: varying `tileCopies` leaves the
+plate order untouched.
+
+**The derivation is a frozen contract.** Changing the hash, the generator, the order the bag is built
+in (colour-major then value), or the shuffle direction all silently deal a *different* deck for ids
+already handed out — and nothing at runtime can detect it. `deck.spec.ts` therefore pins the exact
+first five plates and tiles for two known ids. A failure there is a question about intent, not a
+prompt to update the numbers. The pins live in `deck.spec.ts` but the contract covers `random.ts`
+too, since everything derives from it — including the source's loose-tile scatter.
+
+One claim not being made: a uuid carries 122 bits of entropy against `36! × 108!` possible orders, so
+this samples a small subset rather than shuffling uniformly. Irrelevant to play, but it is not a
+uniform shuffle.
+
+The colour count lives in `game/deck.ts`, while the palette lives in `scene/tileMaterials.ts`, so the
+deck deals indices `0…5` without consulting the palette. `tileMaterials.ts` carries a type-level
+assertion tying the two together, because `createTileMaterial` falls back to the first colour on an
+out-of-range index — drift would silently render the wrong colour rather than fail.
+
 ## Rendering
 
 The goal is thick, glossy, physical-feeling tiles: **enamel under a clear glaze**, set in the dark
@@ -566,6 +610,146 @@ supply right; drawer bottom-centre; cost legend and end-turn bottom corners.
 The contract between CSS and WebGL is one-way and narrow: chrome elements declare empty placeholder
 divs for the three 3D regions, and `scene/layout.ts` reads their bounding rects to set viewports. CSS
 owns layout; the renderer follows.
+
+### Turns and drafting
+
+`game/turn.ts` holds the phase (`idle` / `taking` / `putting`) and which actions are open;
+`game/draft.ts` holds the draft rule. Both pure, both unit-tested — the rule is where the bugs that
+matter live, and it is entirely testable without a canvas.
+
+`GameView` owns the phase because it governs both the scene and the DOM bar; `ui/ActionBar.vue` renders
+it. `TableauView` receives a `draggable` flag and a `draftStates` map and reports clicks back. It never
+decides anything.
+
+**Nothing is interactive while idle.** `draggable` is false outside `putting`, so a press before the
+player has chosen an action does nothing at all. A turn is a commitment and a stray drag would spend it.
+
+**Two pickers, not one.** `pick()` walks to the first *draggable* owner and so steps straight over
+source tiles, which are deliberately undraggable. Clicking one is a different gesture, so
+`pickSourceTile()` exists alongside it. It returns inactive tiles too — deliberately, so an inactive
+tile still *absorbs* the press instead of letting it fall through to whatever is behind, which would
+select a tile the player was not pointing at.
+
+**Only a board placement ends a `putting` turn.** Reordering the drawer is not spending your turn, so
+`TableauView` emits `placed` only when the destination is the board — for a tile, that means the plate
+it landed on is itself on the board.
+
+**Draft states are drawn as overlays, not by restyling the tile.** Tiles share one material per palette
+colour, so dimming one would dim every tile of that colour everywhere. The alternative — a material
+clone per tile — has to be mutated back when the tile leaves the source and kept in step with the
+palette, which is two ways to leave a tile stuck looking wrong. `scene/draftDecor.ts` adds a
+translucent black hex and a mint ring per tile and toggles `visible`, which is exactly reversible. It
+also dims the *symbol*, because it sits above it; restyling the tile material would not have.
+
+The one thing the overlay misses is the bevelled rim, which keeps its colour. Tolerable — it reads as a
+dimmed tile catching a little light.
+
+**The selection ring ignores depth** (`depthTest: false`, high `renderOrder`). It extends past the tile
+it belongs to, so with depth testing on it was sliced wherever a neighbouring tile crossed it — the
+outline stopped mid-edge and looked like a rendering fault. Lifting the selected tile
+(`SOURCE_TILE_SELECT_LIFT`) helps but cannot guarantee it, because neighbours sit at their own heights.
+A marker another object can cut through is not a marker. Switching depth off is safe *here
+specifically*: it is a thin UI outline on a tile, drawn only while drafting, and always being visible is
+the whole point of it.
+
+Two affordance details worth keeping: `take` requires a free drawer slot as well as a non-empty source,
+and confirm additionally requires enough free slots for the whole selection. Both exist so the bar never
+lights a button leading to a move that would then have to be refused.
+
+### The shared source column
+
+`scene/sourceLayout.ts` + `SourceChrome.vue`, mirroring the drawer: pixel-space layout, chrome-panel
+column, one nested bay per lot. Six lots down the left, under the title.
+
+Two things about it are not obvious:
+
+**Lots are sized to fit the height, not fixed.** Six plates stacked is a *vertical* constraint, and at
+a fixed 152px bay (the drawer's size) the column would be 900px tall and overflow most viewports. So
+the lot width is derived from the space available and clamped to `[54, 124]`. Height follows from the
+real plate aspect — a flower is 5 tall by 5.196 wide in `HEX_SIZE` units, verified numerically — because
+using 1:1 leaves the plate visibly off-centre in its lot.
+
+**The column yields to the drawer, but only when it has to.** The drawer is bottom-centre and the
+column is on the left, so on a wide viewport they never meet and the column can run to the bottom
+edge; on a narrow one it stops above the drawer. The overlap test uses the column's *widest possible*
+form rather than its actual width — the actual width depends on the height this decides, so using it
+would be circular.
+
+**Loose tiles are positioned from the lot, not from the plate they lie on.** Tempting to parent them
+to the plate, as petal tiles are — but a lot's plate can be drafted away while its tiles remain, and
+parenting would leave them hanging off nothing. They take the plate's *scale* (so a heaped tile is the
+same size as a seated one) without taking its transform.
+
+`scene/sourceScatter.ts` places them, seeded on `${gameId}:scatter:${lot}` from `game/random.ts` so a
+lot looks the same after a refresh.
+
+**The four tiles never overlap, by construction.** Two identical hexagons are centrally symmetric, so
+they clear each other once their centres are `2` circumradii apart *in any direction* — the true bound
+runs from `√3` flat-on to `2` at the vertices. Four tiles a quarter-turn apart at radius `r` sit `r√2`
+apart, so `r ≥ √2 ≈ 1.414`; the floor is 1.45.
+
+Angular jitter had to go to get that. Nudging neighbours together narrows their gap and the radius
+needed to stay clear grows as `1 / sin(gap/2)` — even ±8° pushes it past 1.66, costing enough lot height
+to shrink the tiles visibly. Variety now comes from rotating the whole ring per lot, which is free.
+Radial jitter is also free, and not by luck: separation is `√(r₁² + r₂²)`, smallest when both sit at the
+floor, so jitter can only help.
+
+`sourceScatter.spec.ts` asserts the clearance over 1800 generated heaps rather than pinning example
+values — what must hold is that *no* arrangement the generator can produce overlaps.
+
+The cost is real and worth knowing: `SOURCE_HEAP_SPAN` went 4.6 → 5.1, so pick-area tiles dropped from
+88% to 80% of drawer size at 1080p. Non-overlapping tiles need more room than overlapping ones; there is
+no version of this that is free.
+
+**Face-down plates** get `scene/plateBackVisual.ts`: the same slab geometry as the front — identical
+silhouette, so a flip will not change shape — with no sockets and a subtle embossed seal. Note the
+material: **low metalness on purpose**. A metal is lit almost entirely by what it reflects and this
+scene's studio environment is deliberately dark, so the first attempt at metalness 0.55 rendered the
+slab near-black and the plate read as a hole in the lot. Same trap made a bright seal look like a gap
+between the tiles heaped over it.
+
+**Draggable is not the same as movable.** `canDragTile`/`canDragPlate` are the drag affordance the
+picker consults; `moveTile`/`movePlate` are the mechanism. Source items are undraggable but still
+movable, because drafting will move them — conflating the two would either let a drag lift a tile out
+of the source or leave drafting with no way to take one. Only `fixed` (a plate's own tile) is an
+absolute bar, enforced inside `moveTile` for every caller.
+
+Target resolution needs its own guard for the column, exactly as it has for the drawer: the column is
+drawn over the board, so without one the cell *hidden behind it* resolves as the drop target and a
+piece lands somewhere the player cannot see.
+
+### Panels that have to live in the canvas
+
+The drawer tray and the plate bays are the exception. They sit *under* live 3D tiles, so an opaque
+DOM panel would cover its own contents — they have to be quads in the scene. `scene/chromePanel.ts`
+gives them the `.chrome-panel` look, and matching it pixel-for-pixel took three things that are each
+easy to get wrong:
+
+1. **Work in pixel space, not world space.** The shader takes `uSizePx` — the panel's size in CSS
+   pixels — and builds a rounded-rect distance field from it, so distances are in CSS pixels. The
+   mesh's world scale and `uSizePx` come from the same layout, so zooming changes the world size and
+   leaves pixel space untouched: the border stays 1 CSS pixel with no uniform to update. Verified
+   across a 3× zoom range — the border measured exactly one row of RGB(58,50,34) at every level.
+2. **Analytic coverage, not `smoothstep`.** `smoothstep(-aa, aa, d)` blends over `2*aa`, which
+   smeared a 1px border across two rows at 40% brightness. `clamp(0.5 - d/aa, 0, 1)` with
+   `aa = fwidth(d)` blends over exactly one device pixel and preserves the line's energy.
+   (`fwidth` is safe on this field, unlike the grid lines: the `abs()` folds run down the panel's
+   centre lines, far from any antialiased edge.)
+3. **Snap the rect to whole pixels.** An edge landing at y = 517.6 splits a 1px line across two rows
+   at partial coverage — correct, but visibly softer than the DOM panels beside it. `snapPanelRect`
+   rounds the *origin* and the size, so both edges land on the grid at any size. CSS gets this for
+   free; the canvas does not.
+
+**Chrome is not tone-mapped.** The canvas uses ACES, which exists to fit scene radiance into a
+display range. Chrome is UI that happens to be drawn in the canvas, and the DOM panels it must match
+never see a tone-mapping curve — running the fill through ACES crushed RGB(21,23,28) to (5,6,9)
+against the DOM panel's (17,18,23). So the panel shader includes `colorspace_fragment` but
+deliberately **not** `tonemapping_fragment`. Alpha then blends in the sRGB framebuffer exactly as it
+does for a DOM element.
+
+The one unavoidable duplication: `CHROME_PANEL` in `scene/constants.ts` restates the border colour,
+radius and fill from `.chrome-panel` in `src/styles/main.css`, because GL cannot read CSS. They sit
+side by side on screen, so a shade of drift would be obvious — both carry a comment saying so.
 
 ## State
 

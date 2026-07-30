@@ -12,6 +12,10 @@
  *
  * Board coverage is derived from the plates rather than stored alongside them, so the two
  * cannot disagree.
+ *
+ * **Three places an item can be**, and they behave differently: your own board and drawer, and the
+ * **shared source** — the pick-from column everyone drafts out of. Source plates lie face down, and
+ * a lot's loose tiles are heaped *on* its plate without belonging to it. See `TileLocation`.
  */
 import { axialKey, type Axial } from './hex'
 import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
@@ -19,10 +23,23 @@ import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './p
 export type PlateLocation =
   | { readonly kind: 'board', readonly hole: Axial }
   | { readonly kind: 'plateSlot', readonly slot: number }
+  /** Face-down in a lot of the shared source, waiting to be picked. */
+  | { readonly kind: 'source', readonly lot: number }
 
 export type TileLocation =
   | { readonly kind: 'drawer', readonly slot: number }
   | { readonly kind: 'onPlate', readonly plateId: string, readonly petal: number }
+  /**
+   * Lying loose in a lot of the shared source.
+   *
+   * Deliberately **not** a petal of the lot's plate. These tiles are heaped on top of a face-down
+   * plate, and they are drafted separately from it — a draft takes every item of one colour or one
+   * value, which may be some of a lot's tiles, its plate, or both. Addressing them as petals would
+   * claim they belong to the plate, and then picking the plate would wrongly carry them along.
+   *
+   * `index` is a slot within the lot, so two tiles cannot occupy one position.
+   */
+  | { readonly kind: 'source', readonly lot: number, readonly index: number }
 
 export interface Plate {
   readonly id: string
@@ -39,6 +56,18 @@ export interface Plate {
    * 300° lurch backwards. Every logical use takes it modulo six.
    */
   readonly rotation: number
+  /**
+   * True while the plate is reverse side up and its own tile is not shown.
+   *
+   * Plates in the shared source arrive face down, so what you are drafting is partly hidden: you
+   * can see the loose tiles heaped on a lot but not which tile the plate itself carries.
+   *
+   * The plate's own tile is **not created while it is face down**. Nothing should be able to read a
+   * hidden value out of the model — not the renderer, not a future opponent's client — and the
+   * surest way to guarantee that is for it not to be there. The tile is added on reveal, from the
+   * deck that dealt it.
+   */
+  readonly faceDown: boolean
 }
 
 export interface TileSpec {
@@ -71,25 +100,38 @@ export interface Coverage {
 }
 
 export function plateLocationKey(location: PlateLocation): string {
-  return location.kind === 'board'
-    ? `plate:board:${axialKey(location.hole)}`
-    : `plate:slot:${location.slot}`
+  switch (location.kind) {
+    case 'board': return `plate:board:${axialKey(location.hole)}`
+    case 'plateSlot': return `plate:slot:${location.slot}`
+    case 'source': return `plate:source:${location.lot}`
+  }
 }
 
 export function tileLocationKey(location: TileLocation): string {
-  return location.kind === 'drawer'
-    ? `tile:drawer:${location.slot}`
-    : `tile:plate:${location.plateId}:${location.petal}`
+  switch (location.kind) {
+    case 'drawer': return `tile:drawer:${location.slot}`
+    case 'onPlate': return `tile:plate:${location.plateId}:${location.petal}`
+    case 'source': return `tile:source:${location.lot}:${location.index}`
+  }
 }
 
 export interface Tableau {
   readonly drawerSlots: number
   readonly plateSlots: number
+  /** Lots in the shared source — the pick-from area. */
+  readonly sourceLots: number
+  /** Loose tiles a source lot has room for, heaped on its face-down plate. */
+  readonly sourceTilesPerLot: number
 
   tiles(): readonly Tile[]
   plates(): readonly Plate[]
   plate(id: string): Plate | undefined
   tile(id: string): Tile | undefined
+
+  /** The face-down plate in a source lot, if it still holds one. */
+  plateInSourceLot(lot: number): Plate | undefined
+  /** Loose tiles in a source lot, in index order. */
+  tilesInSourceLot(lot: number): readonly Tile[]
 
   /** Which plate, if any, covers this board cell, and as what. */
   coverageAt(cell: Axial): Coverage | undefined
@@ -99,14 +141,26 @@ export interface Tableau {
   canPlacePlate(location: PlateLocation, movingId?: string): boolean
   canPlaceTile(location: TileLocation, movingId?: string): boolean
   /**
-   * May this tile be picked up at all? False for a plate's own tile.
+   * May the player drag this tile? False for a plate's own tile, and for anything in the source.
    *
-   * The single source of truth for that rule: `moveTile` refuses anything this rejects, and
-   * the UI consults it so it never offers a grab it cannot complete.
+   * The UI consults this so it never offers a grab it cannot complete. Note what it is *not*: a
+   * source tile is undraggable but still movable — drafting will move it via `moveTile`. Only
+   * `fixed` is an absolute bar, and `moveTile` enforces that one itself.
    */
-  canMoveTile(id: string): boolean
+  canDragTile(id: string): boolean
+  /**
+   * May the player drag this plate? False while it sits in the shared source.
+   *
+   * Drafting is a different gesture from dragging a plate around your own tableau — it takes every
+   * item of a colour or value at once, not one object under the cursor — so the drag controller must
+   * not offer it. `movePlate` still works, which is how drafting will get plates out.
+   */
+  canDragPlate(id: string): boolean
 
-  addPlate(location: PlateLocation, rotation?: number): Plate | undefined
+  addPlate(
+    location: PlateLocation,
+    options?: { readonly rotation?: number, readonly faceDown?: boolean },
+  ): Plate | undefined
   /** Turn a plate by `steps` sixth-turns; positive is clockwise on screen. */
   rotatePlate(id: string, steps: number): boolean
   addTile(
@@ -134,10 +188,14 @@ export function createTableau({
   cells,
   drawerSlots,
   plateSlots,
+  sourceLots = 0,
+  sourceTilesPerLot = 0,
 }: {
   cells: readonly Axial[]
   drawerSlots: number
   plateSlots: number
+  sourceLots?: number
+  sourceTilesPerLot?: number
 }): Tableau {
   const boardCells = new Set(cells.map(axialKey))
   const platesById = new Map<string, Plate>()
@@ -179,22 +237,46 @@ export function createTableau({
     return true
   }
 
+  function inRange(n: number, limit: number): boolean {
+    return Number.isInteger(n) && n >= 0 && n < limit
+  }
+
+  /**
+   * Can the player pick this up with the pointer?
+   *
+   * Distinct from whether the model will move it, and the distinction is load-bearing. Being in the
+   * shared source makes an item undraggable but not immovable: drafting will take items out of the
+   * source, and it will do that through `moveTile`/`movePlate`. So this is the drag *affordance*,
+   * while `fixed` — a plate's own tile — is an invariant the mutations enforce for every caller.
+   *
+   * Conflating the two would either let a drag lift a tile out of the source or leave drafting with
+   * no way to move one.
+   */
+  function tileCanDrag(id: string): boolean {
+    const tile = tilesById.get(id)
+    if (!tile || tile.fixed) return false
+    return tile.location.kind !== 'source'
+  }
+
+  function plateCanDrag(id: string): boolean {
+    const plate = platesById.get(id)
+    return plate !== undefined && plate.location.kind !== 'source'
+  }
+
   function canPlacePlate(location: PlateLocation, movingId?: string): boolean {
-    if (location.kind === 'plateSlot') {
-      if (!Number.isInteger(location.slot) || location.slot < 0 || location.slot >= plateSlots) {
-        return false
-      }
-      const occupant = occupants.get(plateLocationKey(location))
-      return occupant === undefined || occupant === movingId
-    }
-    return plateFits(location.hole, movingId)
+    if (location.kind === 'board') return plateFits(location.hole, movingId)
+    if (location.kind === 'plateSlot' && !inRange(location.slot, plateSlots)) return false
+    if (location.kind === 'source' && !inRange(location.lot, sourceLots)) return false
+    const occupant = occupants.get(plateLocationKey(location))
+    return occupant === undefined || occupant === movingId
   }
 
   function canPlaceTile(location: TileLocation, movingId?: string): boolean {
     if (location.kind === 'drawer') {
-      if (!Number.isInteger(location.slot) || location.slot < 0 || location.slot >= drawerSlots) {
-        return false
-      }
+      if (!inRange(location.slot, drawerSlots)) return false
+    } else if (location.kind === 'source') {
+      if (!inRange(location.lot, sourceLots)) return false
+      if (!inRange(location.index, sourceTilesPerLot)) return false
     } else {
       if (!isPetal(location.petal)) return false
       if (!platesById.has(location.plateId)) return false
@@ -206,11 +288,28 @@ export function createTableau({
   return {
     drawerSlots,
     plateSlots,
+    sourceLots,
+    sourceTilesPerLot,
 
     tiles: () => [...tilesById.values()],
     plates: () => [...platesById.values()],
     plate: id => platesById.get(id),
     tile: id => tilesById.get(id),
+
+    plateInSourceLot(lot) {
+      const id = occupants.get(plateLocationKey({ kind: 'source', lot }))
+      return id === undefined ? undefined : platesById.get(id)
+    },
+
+    tilesInSourceLot(lot) {
+      const found: Tile[] = []
+      for (let index = 0; index < sourceTilesPerLot; index++) {
+        const id = occupants.get(tileLocationKey({ kind: 'source', lot, index }))
+        const tile = id === undefined ? undefined : tilesById.get(id)
+        if (tile) found.push(tile)
+      }
+      return found
+    },
 
     coverageAt: cell => coverage.get(axialKey(cell)),
 
@@ -227,14 +326,17 @@ export function createTableau({
     canPlacePlate,
     canPlaceTile,
 
-    canMoveTile(id) {
-      const tile = tilesById.get(id)
-      return tile !== undefined && !tile.fixed
-    },
+    canDragTile: tileCanDrag,
+    canDragPlate: plateCanDrag,
 
-    addPlate(location, rotation = 0) {
+    addPlate(location, options) {
       if (!canPlacePlate(location)) return undefined
-      const plate: Plate = { id: `p${nextId++}`, location, rotation }
+      const plate: Plate = {
+        id: `p${nextId++}`,
+        location,
+        rotation: options?.rotation ?? 0,
+        faceDown: options?.faceDown ?? false,
+      }
       platesById.set(plate.id, plate)
       occupants.set(plateLocationKey(location), plate.id)
       reindexCoverage()
@@ -258,7 +360,7 @@ export function createTableau({
       const plate = platesById.get(id)
       if (!plate || !canPlacePlate(location, id)) return false
       occupants.delete(plateLocationKey(plate.location))
-      const moved: Plate = { id, location, rotation: plate.rotation }
+      const moved: Plate = { ...plate, location }
       platesById.set(id, moved)
       occupants.set(plateLocationKey(location), id)
       // Tiles on this plate need no update at all — they are addressed by petal.
@@ -277,7 +379,9 @@ export function createTableau({
 
     moveTile(id, location) {
       const tile = tilesById.get(id)
-      // A plate's own tile is part of the plate and never moves on its own.
+      // A plate's own tile is part of the plate and never moves on its own — an invariant, not
+      // an affordance, so it is checked here rather than via tileCanDrag. Source tiles are
+      // deliberately still movable: that is how drafting will take them.
       if (!tile || tile.fixed || !canPlaceTile(location, id)) return false
       occupants.delete(tileLocationKey(tile.location))
       const moved: Tile = { ...tile, location }

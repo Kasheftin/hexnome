@@ -47,11 +47,16 @@ import {
 import { onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { axialToWorld, worldToAxial, type Axial } from '@/game/hex'
 import { petalCell } from '@/game/plate'
+import type { DraftTileState } from '@/game/draft'
 import type { PlateLocation, Tableau, TileLocation } from '@/game/tableau'
 import {
   DRAWER_SLOT_PX,
   DRAWER_TILE_FILL,
   DRAWER_TILE_Y,
+  SOURCE_PLATE_Y,
+  SOURCE_TILE_LAYER_STEP,
+  SOURCE_TILE_SELECT_LIFT,
+  SOURCE_TILE_Y,
   HELD_TILE_Y,
   HEX_SIZE,
   PLATE_BASE_Y,
@@ -65,15 +70,44 @@ import {
   TILE_SIZE,
   TILE_THICKNESS,
 } from './constants'
+import {
+  attachDraftDecor,
+  disposeDraftDecor,
+  disposeDraftDecorAssets,
+  showDraftState,
+  type DraftDecor,
+} from './draftDecor'
 import { registerGrabbable } from './grabbables'
+import { createPlateBackVisual, disposePlateBackAssets } from './plateBackVisual'
 import { createPlateVisual, disposePlateVisualAssets, petalOffset } from './plateVisual'
 import { boardToScreen, screenToBoard, unitsPerPixel } from './screenProjection'
 import { createSymbolPlane } from './symbolPlane'
 import { createTileGeometry, hexApothemOf } from './tileGeometry'
+import { SOURCE_HEAP_SPAN, sourceScatter, type ScatterOffset } from './sourceScatter'
 import { createTileMaterial, type TileColorIndex } from './tileMaterials'
 import { useDrawerLayout } from './useDrawerLayout'
+import { useSourceLayout } from './useSourceLayout'
 
-const props = defineProps<{ tableau: Tableau }>()
+const props = defineProps<{
+  tableau: Tableau
+  /** Seeds the loose-tile scatter, so a lot looks the same after a refresh. */
+  gameId: string
+  /**
+   * Whether dragging is allowed at all.
+   *
+   * False outside the `putting` phase. A turn is one chosen action, so until the player has picked
+   * "Put" nothing on the table should respond to a drag — otherwise a stray press commits a move they
+   * never chose.
+   */
+  draggable: boolean
+  /**
+   * Drafting state per source tile, or null when not drafting.
+   *
+   * Passed in rather than derived here: the rule lives in game/draft.ts and the selection belongs to
+   * the turn, so the view's job is only to show it and report clicks.
+   */
+  draftStates: ReadonlyMap<string, DraftTileState> | null
+}>()
 
 const emit = defineEmits<{
   /** Cells to mark as the drop target, and whether dropping there is legal. */
@@ -82,12 +116,17 @@ const emit = defineEmits<{
   drawerTarget: [tileSlot: number | null, plateSlot: number | null, valid: boolean]
   /** A plate resting in a drawer bay is hovered — or null. Drives the rotate buttons. */
   hoverPlateSlot: [slot: number | null]
+  /** A source tile was clicked while drafting. The turn decides what that means. */
+  selectTile: [id: string]
+  /** An item was placed on the board, which is what ends a `putting` turn. */
+  placed: []
   changed: []
 }>()
 
 const { scene, camera, renderer, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
 const layout = useDrawerLayout()
+const sourceLayout = useSourceLayout()
 
 const tileGeometry: BufferGeometry = createTileGeometry({
   circumradius: TILE_SIZE,
@@ -121,6 +160,8 @@ interface View {
    * between drawer size and board size.
    */
   settled: boolean
+  /** Drafting overlays. Tiles only; undefined on plate views. */
+  decor?: DraftDecor
 }
 
 const plateViews = new Map<string, View>()
@@ -189,6 +230,60 @@ function drawerPlateScale(upp: number): number {
 }
 
 /**
+ * Plate scale when sitting in a source lot.
+ *
+ * Takes the width from the layout rather than a constant, because source lots are sized to fit the
+ * viewport's height (sourceLayout.ts) instead of being fixed like the drawer's bays.
+ *
+ * A lot's loose tiles use this same scale: in a petal a tile is scale 1 relative to its plate, so
+ * matching the plate's scale is what makes a heaped tile the same size as a seated one.
+ */
+function sourcePlateScale(upp: number, plateWidthPx: number): number {
+  return (plateWidthPx * upp) / PLATE_WORLD_WIDTH
+}
+
+/**
+ * Tile scale for a lot's loose tiles: **drawer size**, shrunk only if the lot cannot hold four.
+ *
+ * Deliberately *not* the plate's scale. A tile heaped on a lot is not seated in a petal, and it is
+ * about to be drafted into the drawer — so it is drawn at the size it will be there, and drafting
+ * moves it without resizing it. (A tile that *is* in a petal still takes the plate's scale, because
+ * there it really is part of the plate.)
+ *
+ * The clamp is the honest half of this. Four tiles heaped legibly need about `SOURCE_HEAP_SPAN`
+ * tile-radii of room, which at drawer size is roughly 172px. Lots are sized to fit six in the viewport
+ * height, so on a short window they are far smaller than that — and drawing drawer-sized tiles anyway
+ * would spill the heap over its neighbours and hide three tiles behind the fourth. So parity is the
+ * target, not a guarantee: it holds on a tall viewport and degrades to whatever fits below that.
+ *
+ * Bounded by the **plate's** height, not the lot's. The plate is the shorter of the two — a flower is
+ * wider than it is tall, while the heap is taller than it is wide — so clamping to the lot let the top
+ * and bottom tiles hang off the brass with nothing under them. Clamping to the plate costs a few
+ * percent of parity and buys tiles that actually look like they are lying on something.
+ */
+function sourceTileScale(upp: number, plateHeightPx: number): number {
+  const fitsOnPlate = ((plateHeightPx / SOURCE_HEAP_SPAN) * upp) / TILE_SIZE
+  return Math.min(drawerTileScale(upp), fitsOnPlate)
+}
+
+/**
+ * Scatter offsets per lot, computed once.
+ *
+ * Deterministic from the game id, so recomputing would give the same answer — but it runs per tile
+ * per frame, and hashing a string sixty times a second to learn something that never changes is
+ * waste, not safety.
+ */
+const scatterCache = new Map<number, ScatterOffset[]>()
+
+function scatterFor(lot: number): ScatterOffset[] {
+  const cached = scatterCache.get(lot)
+  if (cached) return cached
+  const computed = sourceScatter(props.gameId, lot, props.tableau.sourceTilesPerLot)
+  scatterCache.set(lot, computed)
+  return computed
+}
+
+/**
  * Move `object` under `parent`, keeping it exactly where it appears.
  *
  * Reparenting is what makes a tile rigid with its plate, but three's `add()` only
@@ -248,22 +343,62 @@ function pointerToCanvas(e: PointerEvent): { x: number, y: number } | null {
  * to — so pressing anywhere on a plate, its own tile included, drags the plate. That is
  * what makes the pair feel like one object in the hand and not merely in the rulebook.
  * Refusing the grab outright would have been enforcement; this is affordance.
+ *
+ * Items in the shared source are undraggable, so the walk passes over them too and finds nothing.
+ * Drafting is a different gesture — it takes every item of one colour or value at once — and until
+ * it exists the column is inert. Being transparent to picking is also what stops a press there from
+ * silently starting a drag that could never be completed.
  */
-function pick(canvasX: number, canvasY: number): { kind: 'tile' | 'plate', id: string } | null {
+function castTo(canvasX: number, canvasY: number): Object3D[] | null {
   const cam = activeCamera()
   const el = canvasEl()
   if (!cam || !el) return null
   ndc.set((canvasX / el.clientWidth) * 2 - 1, -(canvasY / el.clientHeight) * 2 + 1)
   raycaster.setFromCamera(ndc, cam)
+  return [...tileViews.values(), ...plateViews.values()].map(v => v.object)
+}
 
-  const roots = [...tileViews.values(), ...plateViews.values()].map(v => v.object)
+/**
+ * The topmost source tile under the pointer, whatever its drafting state.
+ *
+ * Separate from `pick` because these tiles are deliberately undraggable, so `pick` steps straight
+ * over them. Clicking one is a different gesture from dragging it, and it needs its own path.
+ *
+ * Inactive tiles are returned too. The turn ignores the click (`toggleDraftSelection` refuses it),
+ * but stopping the walk here means an inactive tile still *absorbs* the press rather than letting it
+ * fall through to whatever is behind — which would otherwise select a tile the player was not
+ * pointing at.
+ */
+function pickSourceTile(canvasX: number, canvasY: number): string | null {
+  const roots = castTo(canvasX, canvasY)
+  if (!roots) return null
   for (const hit of raycaster.intersectObjects(roots, true)) {
     let node: Object3D | null = hit.object
     while (node) {
       const owner = owners.get(node)
-      if (owner && (owner.kind !== 'tile' || props.tableau.canMoveTile(owner.id))) {
-        return owner
+      if (owner) {
+        if (owner.kind !== 'tile') return null
+        const tile = props.tableau.tile(owner.id)
+        return tile?.location.kind === 'source' ? owner.id : null
       }
+      node = node.parent
+    }
+  }
+  return null
+}
+
+function pick(canvasX: number, canvasY: number): { kind: 'tile' | 'plate', id: string } | null {
+  const roots = castTo(canvasX, canvasY)
+  if (!roots) return null
+  for (const hit of raycaster.intersectObjects(roots, true)) {
+    let node: Object3D | null = hit.object
+    while (node) {
+      const owner = owners.get(node)
+      const draggable = owner
+        && (owner.kind === 'tile'
+          ? props.tableau.canDragTile(owner.id)
+          : props.tableau.canDragPlate(owner.id))
+      if (owner && draggable) return owner
       // An immovable tile is transparent to picking: keep climbing, and since it is
       // parented to its plate the very next owner found is that plate.
       node = node.parent
@@ -295,6 +430,21 @@ function resolveTarget(): void {
   const l = layout.value
   const at = heldPoint()
   const overDrawer = l.contains(at.x, at.y)
+
+  /*
+   * Over the shared source: no target at all, valid or otherwise.
+   *
+   * The column is drawn over the board, so without this the cell *hidden behind it* would resolve as
+   * the target and the piece would drop onto a cell the player cannot see. The drawer already has
+   * exactly this guard; the source needs its own because it is a separate rectangle.
+   *
+   * Returning nothing rather than an invalid target is the honest answer: putting something back into
+   * the source is not a move that exists.
+   */
+  if (sourceLayout.value.contains(at.x, at.y)) {
+    emitTarget()
+    return
+  }
 
   if (current.kind === 'tile') {
     if (overDrawer) {
@@ -355,6 +505,19 @@ function onPointerDown(e: PointerEvent): void {
   if (e.button !== 0) return
   const c = pointerToCanvas(e)
   if (!c) return
+
+  // Drafting: a click on a source tile is a selection, never a drag.
+  if (props.draftStates) {
+    const tileId = pickSourceTile(c.x, c.y)
+    if (tileId !== null) {
+      emit('selectTile', tileId)
+      return
+    }
+  }
+
+  // Outside the `putting` phase nothing is draggable — see the `draggable` prop.
+  if (!props.draggable) return
+
   const hit = pick(c.x, c.y)
   if (!hit) return
 
@@ -390,10 +553,19 @@ function onWindowPointerUp(): void {
   const current = held.value
 
   if (current && targetValid) {
+    const ontoBoard = current.kind === 'tile'
+      // A tile only ever goes into a petal, so "onto the board" means its plate is on the board.
+      ? targetTile?.kind === 'onPlate'
+        && props.tableau.plate(targetTile.plateId)?.location.kind === 'board'
+      : targetPlate?.kind === 'board'
     const moved = current.kind === 'tile'
       ? targetTile !== null && props.tableau.moveTile(current.id, targetTile)
       : targetPlate !== null && props.tableau.movePlate(current.id, targetPlate)
-    if (moved) emit('changed')
+    if (moved) {
+      emit('changed')
+      // Placing on the board is the whole of a `put` action; rearranging the drawer is not.
+      if (ontoBoard) emit('placed')
+    }
   }
 
   held.value = null
@@ -478,6 +650,7 @@ onBeforeRender(({ delta }) => {
   const ease = Math.min(1, delta * 16)
   const current = held.value
   const l = layout.value
+  const src = sourceLayout.value
 
   // Plates first: tiles are positioned through them.
   for (const [id, view] of plateViews) {
@@ -500,6 +673,14 @@ onBeforeRender(({ delta }) => {
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, DRAWER_TILE_Y, p.z)
       approachScale(view, drawerPlateScale(upp), ease)
+    } else if (plate.location.kind === 'source') {
+      setRegime(view, 'source')
+      const c = src.lotCentre(plate.location.lot)
+      view.screenX += (c.x - view.screenX) * ease
+      view.screenY += (c.y - view.screenY) * ease
+      const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
+      view.world.set(p.x, SOURCE_PLATE_Y, p.z)
+      approachScale(view, sourcePlateScale(upp, src.plateWidth), ease)
     } else {
       setRegime(view, 'board')
       const c = axialToWorld(plate.location.hole, HEX_SIZE)
@@ -527,6 +708,17 @@ onBeforeRender(({ delta }) => {
     const tile = props.tableau.tile(id)
     if (!tile) continue
 
+    /*
+     * Drafting overlays.
+     *
+     * Driven every frame from the incoming map rather than on change, so a tile leaving the source —
+     * or the draft being cancelled — clears its overlay without anything having to remember to. The
+     * map is null when not drafting, which reads as "no state, show none".
+     */
+    if (view.decor) {
+      showDraftState(view.decor, props.draftStates?.get(id) ?? 'active')
+    }
+
     if (current?.kind === 'tile' && current.id === id) {
       setRegime(view, 'held')
       reparent(view.object, scene.value)
@@ -551,6 +743,41 @@ onBeforeRender(({ delta }) => {
       approachScale(view, drawerTileScale(upp), ease)
       view.object.position.copy(view.world)
       view.object.scale.setScalar(view.scale)
+      view.object.rotation.y = 0
+    } else if (tile.location.kind === 'source') {
+      /*
+       * Heaped on the lot's face-down plate, not seated in a petal.
+       *
+       * Positioned from the **lot**, not from the plate, even though it lands on top of it. The
+       * plate can be drafted away while its tiles remain, and parenting to it would leave them
+       * with nothing to hang off. The scatter offsets are in plate-scale world units, so
+       * multiplying by the same scale the plate uses keeps the heap in proportion with it.
+       */
+      setRegime(view, 'source')
+      reparent(view.object, scene.value)
+      const lot = tile.location.lot
+      const c = src.lotCentre(lot)
+      view.screenX += (c.x - view.screenX) * ease
+      view.screenY += (c.y - view.screenY) * ease
+      const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
+      const s = sourceTileScale(upp, src.plateHeight)
+      // Scatter offsets are in tile-radii, so they convert with the tile's own world radius — which
+      // is what keeps the heap's shape identical whether the tiles are at drawer size or clamped.
+      const radius = TILE_SIZE * s
+      const offset = scatterFor(lot)[tile.location.index]
+      const layer = offset ? offset.layer : 0
+      // A selected tile rides above the heap so its ring cannot be occluded by a neighbour.
+      const lift = props.draftStates?.get(id) === 'selected' ? SOURCE_TILE_SELECT_LIFT : 0
+      view.world.set(
+        p.x + (offset?.x ?? 0) * radius,
+        SOURCE_TILE_Y + layer * SOURCE_TILE_LAYER_STEP + lift,
+        p.z + (offset?.z ?? 0) * radius,
+      )
+      approachScale(view, s, ease)
+      view.object.position.copy(view.world)
+      view.object.scale.setScalar(view.scale)
+      // Upright, like every other tile. A tossed angle would read well but would tilt the symbol,
+      // and keeping symbols square to the screen is a rule the plates already follow.
       view.object.rotation.y = 0
     } else {
       // Rigid with the plate: parented to it, so it inherits the plate's position and
@@ -596,7 +823,9 @@ function build(symbols: Texture[]): void {
   if (disposed) return
 
   for (const plate of props.tableau.plates()) {
-    const group: Group = createPlateVisual()
+    // A face-down plate shows its blank reverse. Built once here rather than swapped later: nothing
+    // flips a plate yet, and revealing one will need to rebuild its view regardless.
+    const group: Group = plate.faceDown ? createPlateBackVisual() : createPlateVisual()
     group.renderOrder = 1
     plateViews.set(plate.id, {
       object: group,
@@ -633,6 +862,7 @@ function build(symbols: Texture[]): void {
       spin: 0,
       regime: '',
       settled: false,
+      decor: attachDraftDecor(mesh),
     })
     owners.set(mesh, { kind: 'tile', id: tile.id })
     scene.value.add(mesh)
@@ -678,6 +908,7 @@ onBeforeUnmount(() => {
   unregisters.length = 0
 
   for (const view of tileViews.values()) {
+    if (view.decor) disposeDraftDecor(view.decor)
     view.object.parent?.remove(view.object)
     for (const child of view.object.children) {
       const mesh = child as Mesh
@@ -696,6 +927,9 @@ onBeforeUnmount(() => {
   textures.length = 0
   tileGeometry.dispose()
   disposePlateVisualAssets()
+  disposePlateBackAssets()
+  disposeDraftDecorAssets()
+  scatterCache.clear()
 })
 </script>
 

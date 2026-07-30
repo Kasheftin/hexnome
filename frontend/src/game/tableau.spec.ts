@@ -143,7 +143,7 @@ describe("a plate's own tile is not separable", () => {
 
   it('cannot be moved to another petal, or to the drawer', () => {
     const { t, p, own } = withOwnTile()
-    expect(t.canMoveTile(own.id)).toBe(false)
+    expect(t.canDragTile(own.id)).toBe(false)
     expect(t.moveTile(own.id, onPetal(p.id, 4))).toBe(false)
     expect(t.moveTile(own.id, inDrawer(0))).toBe(false)
     expect(t.tile(own.id)!.location).toEqual(onPetal(p.id, 2))
@@ -169,7 +169,7 @@ describe("a plate's own tile is not separable", () => {
   it('does not restrict the player\'s own tiles on the same plate', () => {
     const { t, p } = withOwnTile()
     const mine = t.addTile(BLUE, onPetal(p.id, 5))!
-    expect(t.canMoveTile(mine.id)).toBe(true)
+    expect(t.canDragTile(mine.id)).toBe(true)
     expect(t.moveTile(mine.id, inDrawer(0))).toBe(true)
   })
 
@@ -177,7 +177,7 @@ describe("a plate's own tile is not separable", () => {
     const t = tableau()
     const tile = t.addTile(RED, inDrawer(0))!
     expect(tile.fixed).toBe(false)
-    expect(t.canMoveTile(tile.id)).toBe(true)
+    expect(t.canDragTile(tile.id)).toBe(true)
   })
 })
 
@@ -298,5 +298,105 @@ describe('plate slots', () => {
     expect(t.freePlateSlots()).toEqual([0, 1])
     expect(t.movePlate(p.id, inPlateSlot(0))).toBe(true)
     expect(t.coverageAt({ q: 0, r: 0 })).toBeUndefined()
+  })
+})
+
+describe('the shared source', () => {
+  function withSource() {
+    return createTableau({
+      cells: hexRectangle(6, 6),
+      drawerSlots: 16,
+      plateSlots: 2,
+      sourceLots: 6,
+      sourceTilesPerLot: 4,
+    })
+  }
+
+  const inLot = (lot: number): PlateLocation => ({ kind: 'source', lot })
+  const looseIn = (lot: number, index: number): TileLocation =>
+    ({ kind: 'source', lot, index })
+
+  it('holds at most one plate per lot, and only in a lot that exists', () => {
+    const t = withSource()
+    expect(t.addPlate(inLot(0))).toBeDefined()
+    expect(t.canPlacePlate(inLot(0))).toBe(false)
+    expect(t.addPlate(inLot(6))).toBeUndefined()
+    expect(t.addPlate(inLot(-1))).toBeUndefined()
+  })
+
+  it('heaps loose tiles in a lot without using its plate petals', () => {
+    const t = withSource()
+    const plate = t.addPlate(inLot(2), { faceDown: true })!
+    for (let index = 0; index < 4; index++) {
+      expect(t.addTile(RED, looseIn(2, index))).toBeDefined()
+    }
+    expect(t.tilesInSourceLot(2)).toHaveLength(4)
+    // The point of a separate location kind: none of this touched the plate.
+    expect(t.tiles().filter(tile => tile.location.kind === 'onPlate')).toHaveLength(0)
+    expect(t.plateInSourceLot(2)!.id).toBe(plate.id)
+  })
+
+  it('refuses a fifth loose tile, and a second in one index', () => {
+    const t = withSource()
+    for (let index = 0; index < 4; index++) t.addTile(RED, looseIn(1, index))
+    expect(t.addTile(BLUE, looseIn(1, 4))).toBeUndefined()
+    expect(t.addTile(BLUE, looseIn(1, 0))).toBeUndefined()
+  })
+
+  it('keeps a lot separate from every other lot', () => {
+    const t = withSource()
+    t.addTile(RED, looseIn(0, 0))
+    expect(t.addTile(BLUE, looseIn(1, 0))).toBeDefined()
+    expect(t.tilesInSourceLot(0)).toHaveLength(1)
+    expect(t.tilesInSourceLot(1)).toHaveLength(1)
+    expect(t.plateInSourceLot(3)).toBeUndefined()
+  })
+
+  it('leaves source items undraggable, since drafting is not a drag', () => {
+    const t = withSource()
+    const plate = t.addPlate(inLot(0), { faceDown: true })!
+    const tile = t.addTile(RED, looseIn(0, 0))!
+    expect(t.canDragPlate(plate.id)).toBe(false)
+    expect(t.canDragTile(tile.id)).toBe(false)
+  })
+
+  it('but still movable, which is how drafting will take them', () => {
+    // The distinction that matters: undraggable is an affordance, not an invariant. If moveTile
+    // refused source tiles, drafting would have no mechanism at all.
+    const t = withSource()
+    const tile = t.addTile(RED, looseIn(0, 0))!
+    expect(t.moveTile(tile.id, inDrawer(0))).toBe(true)
+    expect(t.canDragTile(tile.id)).toBe(true)
+    expect(t.tilesInSourceLot(0)).toHaveLength(0)
+  })
+
+  it('still refuses to move a plate own tile, which is an invariant', () => {
+    const t = withSource()
+    const plate = t.addPlate(inPlateSlot(0))!
+    const own = t.addTile(RED, onPetal(plate.id, 0), { fixed: true })!
+    expect(t.moveTile(own.id, inDrawer(0))).toBe(false)
+  })
+
+  it('lets a plate leave the source and become draggable', () => {
+    const t = withSource()
+    const plate = t.addPlate(inLot(0), { faceDown: true })!
+    expect(t.movePlate(plate.id, inPlateSlot(0))).toBe(true)
+    expect(t.canDragPlate(plate.id)).toBe(true)
+    expect(t.plateInSourceLot(0)).toBeUndefined()
+    // faceDown is a property of the plate, not of where it is, so it survives the move.
+    expect(t.plate(plate.id)!.faceDown).toBe(true)
+  })
+
+  it('creates no tile for a face-down plate, so its value cannot be read', () => {
+    const t = withSource()
+    t.addPlate(inLot(0), { faceDown: true })
+    expect(t.tiles()).toHaveLength(0)
+  })
+
+  it('has no source at all unless one was configured', () => {
+    const t = tableau()
+    expect(t.sourceLots).toBe(0)
+    expect(t.addPlate({ kind: 'source', lot: 0 })).toBeUndefined()
+    expect(t.canPlaceTile({ kind: 'source', lot: 0, index: 0 })).toBe(false)
   })
 })
