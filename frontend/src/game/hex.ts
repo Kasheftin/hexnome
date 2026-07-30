@@ -82,21 +82,6 @@ export function neighbors(h: Axial): Axial[] {
 }
 
 /**
- * Every cell within `radius` steps of the origin, in reading order.
- *
- * Count is `3r² + 3r + 1` — 169 cells at radius 7.
- */
-export function hexDisc(radius: number): Axial[] {
-  const out: Axial[] = []
-  for (let q = -radius; q <= radius; q++) {
-    const lo = Math.max(-radius, -q - radius)
-    const hi = Math.min(radius, -q + radius)
-    for (let r = lo; r <= hi; r++) out.push({ q, r })
-  }
-  return out
-}
-
-/**
  * Cells filling a **rectangle** in world space, centred on the origin.
  *
  * `halfCols` is measured in column widths (`√3·size`) and `halfRows` in row pitches
@@ -151,19 +136,6 @@ export function insetBounds(
     minZ: bounds.minZ + z,
     maxZ: bounds.maxZ - z,
   }
-}
-
-/**
- * A stable pseudo-random number in [0, 1) for a cell.
- *
- * Used to pick which plate variant a cell gets and to jitter its tint. Position-
- * derived rather than random so the board looks identical on every reload — a
- * board that reshuffles its texture variants on refresh reads as a bug.
- */
-export function axialHash(h: Axial): number {
-  let n = Math.imul(h.q, 0x27d4eb2d) ^ Math.imul(h.r, 0x165667b1)
-  n = Math.imul(n ^ (n >>> 15), 0x2545f491)
-  return ((n ^ (n >>> 16)) >>> 0) / 0x100000000
 }
 
 /** Cell centre in world coordinates. */

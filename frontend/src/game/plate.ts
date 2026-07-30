@@ -8,7 +8,7 @@
  * tile ever sits on a bare board cell — so tiles are addressed as (plate, petal) rather
  * than by cell, and a plate therefore carries its tiles with it when it moves.
  */
-import { NEIGHBOR_DIRS, axialAdd, axialEquals, type Axial } from './hex'
+import { NEIGHBOR_DIRS, axialAdd, type Axial } from './hex'
 
 export const PETAL_COUNT = 6
 
@@ -24,16 +24,6 @@ export function petalCell(hole: Axial, petal: number): Axial {
 /** All seven cells a plate covers: the hole first, then the six petals in order. */
 export function plateCells(hole: Axial): Axial[] {
   return [hole, ...PETAL_DIRS.map(dir => axialAdd(hole, dir))]
-}
-
-/**
- * Which petal of this plate a cell is, or null if it is the hole or outside the plate.
- */
-export function petalIndexOf(hole: Axial, cell: Axial): number | null {
-  for (let petal = 0; petal < PETAL_COUNT; petal++) {
-    if (axialEquals(petalCell(hole, petal), cell)) return petal
-  }
-  return null
 }
 
 export function isPetal(petal: number): boolean {

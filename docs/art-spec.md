@@ -19,13 +19,17 @@ highlight sits still while the real one moves with the camera and the tile.
 The tint-a-grayscale-master principle still applies, just not to the tile body. It is the right
 approach for **symbols** and **frames**.
 
-## Asset 0 — Board plate tiles (in hand)
+## Asset 0 — Plate socket art (in hand)
 
 **File:** `frontend/public/textures/plate-full.png` — currently one tile, from
 `external assets/fullTile200x230.png`.
 
 A full-bleed pointy-top hexagon: brass ornate frame, dark mottled green face, fully transparent
-corners. This is the board cell, and it is what the plated board is built from today.
+corners. It dresses a plate's six **petal sockets** — the places a tile actually goes.
+
+It began as the board cell art, tiled across all 1661 cells. That put the richest thing on screen
+underneath flat grey sockets, drawing the eye to the least interesting part of the board, so the two
+swapped: the board is now a bare honeycomb on dark slate and this art moved onto the petals.
 
 **Hard requirement — the bounding box ratio.** A pointy-top hexagon of edge length 1 is `√3` wide and
 `2` tall, so the image must be **`√3 : 2` = 0.86603**. For a 200 px width that is **230.94 px**, not
@@ -36,20 +40,23 @@ Other requirements:
 
 - The hexagon fills the bounding box exactly: apex touching top and bottom edges, flat sides touching
   left and right. The renderer maps the hexagon's extent to the full 0–1 UV range
-  ([tech-spec.md](tech-spec.md#board-plates)).
+  ([tech-spec.md](tech-spec.md#plates-and-how-tiles-are-addressed)).
 - **Transparent corners**, and ideally the frame colour bled a few pixels into them — the corners are
   never sampled, but bleeding costs nothing and protects against filtering at coarse mip levels.
-- Lighting painted from the **upper left**, consistently across every variant. Plates are never
-  rotated on the board, precisely so this direction stays uniform.
+- Lighting painted from the **upper left**, consistently across every variant. Note that plates *can*
+  be rotated in sixth-turns, which turns this art with them — so the painted highlight will disagree
+  with the scene's key light at four of the six rotations. Keep the shading soft and close to
+  rotationally neutral; a hard directional highlight will read as wrong once a plate is turned.
 
-**More variants are a drop-in.** Add files and list them in `PLATE_TEXTURE_URLS`; cells pick one by
-position hash. Nothing else changes. With a single texture, the only variation across 169 cells is a
-±5% brightness jitter, so two or three more tiles would do a lot of work here.
+**More variants are a drop-in.** Add files and list them in `PLATE_SOCKET_TEXTURE_URLS`. Note that all
+six petals of a plate currently share the first entry — the per-cell hash that picked a variant belonged
+to the board cells and went with them, so choosing per petal is a small change in `plateVisual.ts` if
+you want the sockets to differ.
 
 ## Asset 1 — Lighting environment (for the game tiles)
 
 Needed for the **glossy game tiles**, not the board plates — the plates are unlit, because their
-lighting is painted in ([tech-spec.md](tech-spec.md#board-plates)). `clearcoat` renders what it
+lighting is painted in ([tech-spec.md](tech-spec.md#plates-and-how-tiles-are-addressed)). `clearcoat` renders what it
 reflects; with an empty environment the game tiles come out flat and plastic, and no amount of material
 tweaking rescues them.
 

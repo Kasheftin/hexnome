@@ -17,7 +17,7 @@ import {
   PLATE_BASE_MARGIN,
   PLATE_BASE_THICKNESS,
   PLATE_SOCKET_Y,
-  PLATE_TEXTURE_URLS,
+  PLATE_SOCKET_TEXTURE_URLS,
 } from './constants'
 import { createHexPlateGeometry } from './hexPlateGeometry'
 import { createPlateBaseGeometry } from './plateBaseGeometry'
@@ -73,7 +73,7 @@ const baseMaterial = new MeshStandardMaterial({
  * it again doubles up and darkens it away from what was drawn.
  */
 const socketMaterial = new MeshBasicMaterial({ transparent: true, side: DoubleSide })
-const socketTextureUrl = PLATE_TEXTURE_URLS[0]
+const socketTextureUrl = PLATE_SOCKET_TEXTURE_URLS[0]
 if (socketTextureUrl) {
   new TextureLoader().load(socketTextureUrl, texture => {
     // The PNG holds sRGB values; without this three reads them as linear and it washes out.

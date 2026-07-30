@@ -80,18 +80,6 @@ export const TILE_THICKNESS = 0.4
  */
 export const TILE_BEVEL = 0.15
 
-/** Height of a tile's centre when resting on a plate. */
-export const TILE_REST_HEIGHT = 0.04 + TILE_THICKNESS / 2
-
-/**
- * Height of a tile's centre while dragged.
- *
- * Free to be generous now that the camera looks straight down: with zero tilt,
- * changing height does not move a thing's screen position, so a lifted tile stays
- * exactly under the cursor. Under the old 20° tilt this would have slid it sideways.
- */
-export const TILE_DRAG_HEIGHT = 1.1
-
 /**
  * Strength of the reflected environment on the glossy tiles: the single knob for
  * tile gloss.
@@ -143,8 +131,8 @@ export const PLATE_SLOT_FILL = 0.92
 export const PLATE_WORLD_WIDTH = 3 * Math.sqrt(3)
 
 /**
- * World height of a plate's underside. Just clear of the board cells at PLATE_Y, rather than
- * level with them — coplanar faces z-fight along their shared silhouette.
+ * World height of a plate's underside. Just clear of the board plane rather than level with
+ * it — coplanar faces z-fight along their shared silhouette.
  */
 export const PLATE_BASE_Y = 0.03
 
@@ -218,31 +206,15 @@ export const SYMBOL_TEXTURE_URLS = [
 ]
 
 /**
- * Tile textures. Each is a full-bleed pointy-top hexagon with transparent corners,
+ * Art for a plate's petal sockets: a full-bleed pointy-top hexagon with transparent corners,
  * drawn to a `√3 : 2` bounding box.
  *
- * Cells pick one by position hash, so adding more files here is all it takes to get
- * real variety across the board — no other change needed.
+ * This used to texture every board cell. It now dresses the six petals instead, which is where
+ * a tile actually goes — the board itself is only a honeycomb on dark slate.
  */
-export const PLATE_TEXTURE_URLS = [
+export const PLATE_SOCKET_TEXTURE_URLS = [
   '/textures/plate-full.png',
 ]
-
-/**
- * Plate size as a fraction of the cell. Slightly under 1 so neighbours do not
- * share an exact edge, which leaves a hairline seam instead of two frames fusing.
- */
-export const PLATE_INSET = 0.985
-
-/** Plates sit just above the floor plane to avoid z-fighting with it. */
-export const PLATE_Y = 0.02
-
-/**
- * Per-plate brightness variation, ± this fraction. Keeps 169 copies of one texture
- * from reading as a single flat sheet. Subtle on purpose — brass should not shift
- * hue from cell to cell.
- */
-export const PLATE_TINT_JITTER = 0.05
 
 export const COLORS = {
   /**
@@ -255,5 +227,4 @@ export const COLORS = {
   boardBackground: '#12151a',
   gridLine: '#333b47',
   canvasClear: '#0d0f13',
-  cube: '#e8c878',
 } as const
