@@ -3,7 +3,6 @@ import {
   PLATE_WORLD_WIDTH,
   SOURCE_BOTTOM_GAP_PX,
   SOURCE_LEFT_PX,
-  SOURCE_LOTS,
   SOURCE_LOT_GAP_PX,
   SOURCE_LOT_MAX_PX,
   SOURCE_LOT_MIN_PX,
@@ -57,7 +56,16 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n))
 }
 
-export function createSourceLayout(canvasWidth: number, canvasHeight: number): SourceLayout {
+/**
+ * @param lots how many slots the column shows — one per plate the round deals, so it varies with the
+ * `platesPerRound` setting rather than being fixed. Fewer slots means taller lots and bigger tiles.
+ */
+export function createSourceLayout(
+  canvasWidth: number,
+  canvasHeight: number,
+  lots: number,
+): SourceLayout {
+  const lotCount = Math.max(1, Math.floor(lots))
   /**
    * How far down the column may run.
    *
@@ -76,14 +84,14 @@ export function createSourceLayout(canvasWidth: number, canvasHeight: number): S
 
   // Fit the lots to what is left, then let the panel hug them.
   const available = Math.max(0, bottomLimit - SOURCE_TOP_PX)
-  const forLots = available - SOURCE_PADDING_PX * 2 - SOURCE_LOT_GAP_PX * (SOURCE_LOTS - 1)
+  const forLots = available - SOURCE_PADDING_PX * 2 - SOURCE_LOT_GAP_PX * (lotCount - 1)
   // Clamp the *width* and re-derive the height from it, so clamping never distorts the aspect.
-  const lotWidth = clamp(forLots / SOURCE_LOTS / LOT_ASPECT, SOURCE_LOT_MIN_PX, SOURCE_LOT_MAX_PX)
+  const lotWidth = clamp(forLots / lotCount / LOT_ASPECT, SOURCE_LOT_MIN_PX, SOURCE_LOT_MAX_PX)
   const lotHeight = lotWidth * LOT_ASPECT
 
   const width = lotWidth + SOURCE_PADDING_PX * 2
-  const height = SOURCE_LOTS * lotHeight
-    + SOURCE_LOT_GAP_PX * (SOURCE_LOTS - 1)
+  const height = lotCount * lotHeight
+    + SOURCE_LOT_GAP_PX * (lotCount - 1)
     + SOURCE_PADDING_PX * 2
   const left = SOURCE_LEFT_PX
   const top = SOURCE_TOP_PX
@@ -97,7 +105,7 @@ export function createSourceLayout(canvasWidth: number, canvasHeight: number): S
     top,
     width,
     height,
-    lotCount: SOURCE_LOTS,
+    lotCount,
     lotWidth,
     lotHeight,
     plateWidth: lotWidth * SOURCE_PLATE_FILL,
@@ -113,7 +121,7 @@ export function createSourceLayout(canvasWidth: number, canvasHeight: number): S
     lotAt(x, y) {
       if (x < lotsLeft || x > lotsLeft + lotWidth) return null
       const lot = Math.floor((y - lotsTop) / pitch)
-      if (lot < 0 || lot >= SOURCE_LOTS) return null
+      if (lot < 0 || lot >= lotCount) return null
       // Inside the gap between two lots rather than on either.
       if ((y - lotsTop) - lot * pitch > lotHeight) return null
       return lot

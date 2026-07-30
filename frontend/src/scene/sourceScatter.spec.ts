@@ -19,7 +19,7 @@ describe('a heap never overlaps itself', () => {
     let worst = Infinity
     for (const seed of SEEDS) {
       for (let lot = 0; lot < 6; lot++) {
-        const offsets = sourceScatter(seed, lot)
+        const offsets = sourceScatter(seed, `p${lot}`)
         for (let i = 0; i < offsets.length; i++) {
           for (let j = i + 1; j < offsets.length; j++) {
             const d = distance(offsets[i] as never, offsets[j] as never)
@@ -36,7 +36,7 @@ describe('a heap never overlaps itself', () => {
   it('stays inside the room the renderer reserves for it', () => {
     let furthest = 0
     for (const seed of SEEDS) {
-      const offsets = sourceScatter(seed, 0)
+      const offsets = sourceScatter(seed, 'p0')
       for (const offset of offsets) {
         // Plus 1 for the tile's own radius: this is the heap's outer edge, not its centres.
         furthest = Math.max(furthest, Math.hypot(offset.x, offset.z) + 1)
@@ -47,13 +47,13 @@ describe('a heap never overlaps itself', () => {
 })
 
 describe('a heap still varies', () => {
-  it('presents its tiles at different bearings in different lots', () => {
+  it('presents its tiles at different bearings for different plates', () => {
     // Guaranteed clearance came at the cost of per-tile jitter, so the per-lot ring rotation is now
     // the only thing making lots look unalike. If it ever stopped working every lot would be identical,
     // which is exactly the kind of regression that is easy to miss on screen.
     const bearings = new Set(
       Array.from({ length: 6 }, (_, lot) => {
-        const first = sourceScatter('a-fixed-game', lot)[0]
+        const first = sourceScatter('a-fixed-game', `p${lot}`)[0]
         return first ? Math.round(Math.atan2(first.z, first.x) * 100) : 0
       }),
     )
@@ -61,10 +61,10 @@ describe('a heap still varies', () => {
   })
 
   it('is identical for the same game and lot', () => {
-    expect(sourceScatter('same', 2)).toEqual(sourceScatter('same', 2))
+    expect(sourceScatter('same', 'p2')).toEqual(sourceScatter('same', 'p2'))
   })
 
   it('differs between games', () => {
-    expect(sourceScatter('one', 0)).not.toEqual(sourceScatter('two', 0))
+    expect(sourceScatter('one', 'p0')).not.toEqual(sourceScatter('two', 'p0'))
   })
 })

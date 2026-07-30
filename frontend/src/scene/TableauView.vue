@@ -44,7 +44,7 @@ import {
   type OrthographicCamera,
   type Texture,
 } from 'three'
-import { onBeforeUnmount, onMounted, shallowRef } from 'vue'
+import { onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { axialToWorld, worldToAxial, type Axial } from '@/game/hex'
 import { petalCell } from '@/game/plate'
 import type { DraftTileState } from '@/game/draft'
@@ -107,6 +107,13 @@ const props = defineProps<{
    * the turn, so the view's job is only to show it and report clicks.
    */
   draftStates: ReadonlyMap<string, DraftTileState> | null
+  /**
+   * Bumped by the owner on every model mutation.
+   *
+   * The tableau is plain mutable data, not reactive, so this is how the view learns that plates or
+   * tiles may have been added or removed.
+   */
+  revision: number
 }>()
 
 const emit = defineEmits<{
@@ -126,7 +133,7 @@ const emit = defineEmits<{
 const { scene, camera, renderer, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
 const layout = useDrawerLayout()
-const sourceLayout = useSourceLayout()
+const sourceLayout = useSourceLayout(() => props.tableau.sourceLots)
 
 const tileGeometry: BufferGeometry = createTileGeometry({
   circumradius: TILE_SIZE,
@@ -160,6 +167,22 @@ interface View {
    * between drawer size and board size.
    */
   settled: boolean
+  /**
+   * True until this view has been positioned once.
+   *
+   * A view created mid-game starts with no screen anchor, and the easing below would slide it in from
+   * the canvas corner. A fresh view snaps to where it belongs on its first frame instead — appearing
+   * in place is what "a new lot was dealt" should look like.
+   */
+  fresh: boolean
+  /**
+   * Which face this plate view was built for. Undefined on tile views.
+   *
+   * The face is baked into the mesh at creation, so a plate turning over needs its view rebuilt rather
+   * than restyled — reconciliation compares this against the model and replaces the view when they
+   * disagree.
+   */
+  faceDown?: boolean
   /** Drafting overlays. Tiles only; undefined on plate views. */
   decor?: DraftDecor
 }
@@ -169,7 +192,7 @@ const tileViews = new Map<string, View>()
 /** Maps a picked object back to what it belongs to. */
 const owners = new Map<Object3D, { kind: 'tile' | 'plate', id: string }>()
 const unregisters: (() => void)[] = []
-const textures: Texture[] = []
+const symbolTextures: Texture[] = []
 let disposed = false
 
 const held = shallowRef<{ kind: 'tile' | 'plate', id: string } | null>(null)
@@ -267,19 +290,38 @@ function sourceTileScale(upp: number, plateHeightPx: number): number {
 }
 
 /**
- * Scatter offsets per lot, computed once.
+ * Which draft item a tile represents.
  *
- * Deterministic from the game id, so recomputing would give the same answer — but it runs per tile
- * per frame, and hashing a string sixty times a second to learn something that never changes is
- * waste, not safety.
+ * Usually itself. But a **plate's token** is drafted as the *plate* — taking it costs a bay and brings
+ * the whole plate — so the token tile shows the plate's state and answers to the plate's id. Putting the
+ * marker on the token rather than on the slab is deliberate: the token is what the player is matching
+ * colours and symbols against, so that is where the eye already is.
  */
-const scatterCache = new Map<number, ScatterOffset[]>()
+function draftKeyOfTile(tile: { id: string, fixed: boolean, location: TileLocation }): string {
+  if (!tile.fixed || tile.location.kind !== 'onPlate') return tile.id
+  const plate = props.tableau.plate(tile.location.plateId)
+  return plate?.location.kind === 'source' ? plate.id : tile.id
+}
 
-function scatterFor(lot: number): ScatterOffset[] {
-  const cached = scatterCache.get(lot)
+/**
+ * Scatter offsets per heap, computed once each.
+ *
+ * Keyed on the lot's **plate**, not its slot: the source is a stack, so a lot's slot changes whenever a
+ * fresh lot is pushed on top, and keying on the slot would re-scatter every heap in the column each time
+ * that happened (see sourceScatter.ts).
+ *
+ * Cached because it is deterministic — recomputing would give the same answer, but it runs per tile per
+ * frame, and hashing a string sixty times a second to learn something that never changes is waste, not
+ * safety. Keying on the plate id also means the cache never needs invalidating: the answer for a given
+ * heap is fixed for the heap's whole life.
+ */
+const scatterCache = new Map<string, ScatterOffset[]>()
+
+function scatterFor(heapKey: string): ScatterOffset[] {
+  const cached = scatterCache.get(heapKey)
   if (cached) return cached
-  const computed = sourceScatter(props.gameId, lot, props.tableau.sourceTilesPerLot)
-  scatterCache.set(lot, computed)
+  const computed = sourceScatter(props.gameId, heapKey, props.tableau.sourceTilesPerLot)
+  scatterCache.set(heapKey, computed)
   return computed
 }
 
@@ -317,6 +359,23 @@ function approachScale(view: View, target: number, ease: number): void {
     view.scale = target
     view.settled = true
   }
+}
+
+/**
+ * Ease a view's screen anchor toward a target — or snap to it, if the view has just been created.
+ *
+ * Both cases go through one function so no branch can forget to clear `fresh` and leave a view
+ * permanently snapping.
+ */
+function easeScreen(view: View, x: number, y: number, ease: number): void {
+  if (view.fresh) {
+    view.screenX = x
+    view.screenY = y
+    view.fresh = false
+    return
+  }
+  view.screenX += (x - view.screenX) * ease
+  view.screenY += (y - view.screenY) * ease
 }
 
 /** Restart the scale ease when an object changes container. */
@@ -369,7 +428,7 @@ function castTo(canvasX: number, canvasY: number): Object3D[] | null {
  * fall through to whatever is behind — which would otherwise select a tile the player was not
  * pointing at.
  */
-function pickSourceTile(canvasX: number, canvasY: number): string | null {
+function pickSourceItem(canvasX: number, canvasY: number): string | null {
   const roots = castTo(canvasX, canvasY)
   if (!roots) return null
   for (const hit of raycaster.intersectObjects(roots, true)) {
@@ -377,9 +436,17 @@ function pickSourceTile(canvasX: number, canvasY: number): string | null {
     while (node) {
       const owner = owners.get(node)
       if (owner) {
-        if (owner.kind !== 'tile') return null
+        if (owner.kind === 'plate') {
+          // The slab of a revealed source plate. A face-down one is not draftable and absorbs the press.
+          const plate = props.tableau.plate(owner.id)
+          return plate?.location.kind === 'source' && !plate.faceDown ? owner.id : null
+        }
         const tile = props.tableau.tile(owner.id)
-        return tile?.location.kind === 'source' ? owner.id : null
+        if (!tile) return null
+        // A loose source tile answers for itself; a plate's token answers for its plate.
+        if (tile.location.kind === 'source') return tile.id
+        const key = draftKeyOfTile(tile)
+        return key === tile.id ? null : key
       }
       node = node.parent
     }
@@ -508,9 +575,9 @@ function onPointerDown(e: PointerEvent): void {
 
   // Drafting: a click on a source tile is a selection, never a drag.
   if (props.draftStates) {
-    const tileId = pickSourceTile(c.x, c.y)
-    if (tileId !== null) {
-      emit('selectTile', tileId)
+    const itemId = pickSourceItem(c.x, c.y)
+    if (itemId !== null) {
+      emit('selectTile', itemId)
       return
     }
   }
@@ -662,22 +729,21 @@ onBeforeRender(({ delta }) => {
       const at = heldPoint()
       view.screenX = at.x
       view.screenY = at.y
+      view.fresh = false
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, HELD_TILE_Y, p.z)
       approachScale(view, 1, ease)
     } else if (plate.location.kind === 'plateSlot') {
       setRegime(view, 'drawer')
       const c = l.plateSlotCentre(plate.location.slot)
-      view.screenX += (c.x - view.screenX) * ease
-      view.screenY += (c.y - view.screenY) * ease
+      easeScreen(view, c.x, c.y, ease)
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, DRAWER_TILE_Y, p.z)
       approachScale(view, drawerPlateScale(upp), ease)
     } else if (plate.location.kind === 'source') {
       setRegime(view, 'source')
       const c = src.lotCentre(plate.location.lot)
-      view.screenX += (c.x - view.screenX) * ease
-      view.screenY += (c.y - view.screenY) * ease
+      easeScreen(view, c.x, c.y, ease)
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, SOURCE_PLATE_Y, p.z)
       approachScale(view, sourcePlateScale(upp, src.plateWidth), ease)
@@ -685,7 +751,8 @@ onBeforeRender(({ delta }) => {
       setRegime(view, 'board')
       const c = axialToWorld(plate.location.hole, HEX_SIZE)
       desired.set(c.x, PLATE_BASE_Y, c.z)
-      view.world.lerp(desired, ease)
+      if (view.fresh) { view.world.copy(desired); view.fresh = false }
+      else view.world.lerp(desired, ease)
       approachScale(view, 1, ease)
       const s = boardToScreen(cam, w, h, view.world.x, view.world.z)
       view.screenX = s.x
@@ -716,7 +783,7 @@ onBeforeRender(({ delta }) => {
      * map is null when not drafting, which reads as "no state, show none".
      */
     if (view.decor) {
-      showDraftState(view.decor, props.draftStates?.get(id) ?? 'active')
+      showDraftState(view.decor, props.draftStates?.get(draftKeyOfTile(tile)) ?? 'active')
     }
 
     if (current?.kind === 'tile' && current.id === id) {
@@ -725,6 +792,7 @@ onBeforeRender(({ delta }) => {
       const at = heldPoint()
       view.screenX = at.x
       view.screenY = at.y
+      view.fresh = false
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, HELD_TILE_Y, p.z)
       approachScale(view, 1, ease)
@@ -736,8 +804,7 @@ onBeforeRender(({ delta }) => {
       setRegime(view, 'drawer')
       reparent(view.object, scene.value)
       const c = l.slotCentre(tile.location.slot)
-      view.screenX += (c.x - view.screenX) * ease
-      view.screenY += (c.y - view.screenY) * ease
+      easeScreen(view, c.x, c.y, ease)
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, DRAWER_TILE_Y, p.z)
       approachScale(view, drawerTileScale(upp), ease)
@@ -756,15 +823,17 @@ onBeforeRender(({ delta }) => {
       setRegime(view, 'source')
       reparent(view.object, scene.value)
       const lot = tile.location.lot
+      // The heap's identity is its plate, so its arrangement survives the stack shifting down. Falls
+      // back to the slot only if the lot somehow has no plate, which nothing can currently cause.
+      const heapKey = props.tableau.plateInSourceLot(lot)?.id ?? `lot${lot}`
       const c = src.lotCentre(lot)
-      view.screenX += (c.x - view.screenX) * ease
-      view.screenY += (c.y - view.screenY) * ease
+      easeScreen(view, c.x, c.y, ease)
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       const s = sourceTileScale(upp, src.plateHeight)
       // Scatter offsets are in tile-radii, so they convert with the tile's own world radius — which
       // is what keeps the heap's shape identical whether the tiles are at drawer size or clamped.
       const radius = TILE_SIZE * s
-      const offset = scatterFor(lot)[tile.location.index]
+      const offset = scatterFor(heapKey)[tile.location.index]
       const layer = offset ? offset.layer : 0
       // A selected tile rides above the heap so its ring cannot be occluded by a neighbour.
       const lift = props.draftStates?.get(id) === 'selected' ? SOURCE_TILE_SELECT_LIFT : 0
@@ -790,8 +859,9 @@ onBeforeRender(({ delta }) => {
       desired.set(offset.x, PLATE_TILE_LIFT, offset.z)
       // Ease into the petal, then sit exactly in it. A lerp only ever converges
       // asymptotically, and "almost rigid" is what the lag looked like in the first place.
-      if (view.object.position.distanceToSquared(desired) < 1e-6) {
+      if (view.fresh || view.object.position.distanceToSquared(desired) < 1e-6) {
         view.object.position.copy(desired)
+        view.fresh = false
       } else {
         view.object.position.lerp(desired, ease)
       }
@@ -819,11 +889,32 @@ function tileMaterialFor(colorIndex: number): Material {
   return created
 }
 
-function build(symbols: Texture[]): void {
-  if (disposed) return
+/**
+ * Bring the scene in line with the model: create views for anything new, drop views for anything gone.
+ *
+ * **Not a one-off build.** The source restocks during play — a fresh face-down plate and four tiles are
+ * pushed on at the start of a turn — so objects appear after mount. An `onMounted`-only build left those
+ * with no mesh at all: the model was correct and the top slot rendered empty, which is a whole class of
+ * bug that looks like broken rules.
+ *
+ * Driven by the `revision` prop rather than run every frame. Every model mutation bumps it, so this
+ * fires exactly when something could have changed and never allocates in the render loop.
+ */
+function reconcileViews(): void {
+  // Tile views need their symbol texture, so there is nothing to do until the textures land. The
+  // revision watcher will call again, and the load itself calls once.
+  if (disposed || symbolTextures.length === 0) return
 
   for (const plate of props.tableau.plates()) {
-    // A face-down plate shows its blank reverse. Built once here rather than swapped later: nothing
+    const existing = plateViews.get(plate.id)
+    if (existing) {
+      // A plate that turned over: its face is baked into the mesh, so rebuild rather than restyle.
+      if (existing.faceDown === plate.faceDown) continue
+      scene.value?.remove(existing.object)
+      owners.delete(existing.object)
+      plateViews.delete(plate.id)
+    }
+    // A face-down plate shows its blank reverse. Chosen at creation rather than swapped later: nothing
     // flips a plate yet, and revealing one will need to rebuild its view regardless.
     const group: Group = plate.faceDown ? createPlateBackVisual() : createPlateVisual()
     group.renderOrder = 1
@@ -836,6 +927,8 @@ function build(symbols: Texture[]): void {
       spin: -plate.rotation * (Math.PI / 3),
       regime: '',
       settled: false,
+      fresh: true,
+      faceDown: plate.faceDown,
     })
     group.rotation.y = -plate.rotation * (Math.PI / 3)
     owners.set(group, { kind: 'plate', id: plate.id })
@@ -844,9 +937,12 @@ function build(symbols: Texture[]): void {
   }
 
   for (const tile of props.tableau.tiles()) {
+    if (tileViews.has(tile.id)) continue
     const mesh = new Mesh(tileGeometry, tileMaterialFor(tile.color))
     mesh.renderOrder = 4
-    const texture = symbols[Math.min(symbols.length, Math.max(1, tile.value)) - 1]
+    const texture = symbolTextures[
+      Math.min(symbolTextures.length, Math.max(1, tile.value)) - 1
+    ]
     if (texture) {
       mesh.add(createSymbolPlane(texture, {
         fitRadius: hexApothemOf(TILE_SIZE) * 0.84,
@@ -862,13 +958,33 @@ function build(symbols: Texture[]): void {
       spin: 0,
       regime: '',
       settled: false,
+      fresh: true,
       decor: attachDraftDecor(mesh),
     })
     owners.set(mesh, { kind: 'tile', id: tile.id })
     scene.value.add(mesh)
     unregisters.push(registerGrabbable(mesh))
   }
+
+  // Anything the model no longer has. Nothing removes plates or tiles yet, but leaving the orphan
+  // branch out would mean the first thing that does silently leaks a mesh into the scene.
+  for (const [id, view] of [...plateViews]) {
+    if (props.tableau.plate(id)) continue
+    scene.value?.remove(view.object)
+    owners.delete(view.object)
+    plateViews.delete(id)
+  }
+  for (const [id, view] of [...tileViews]) {
+    if (props.tableau.tile(id)) continue
+    if (view.decor) disposeDraftDecor(view.decor)
+    view.object.parent?.remove(view.object)
+    owners.delete(view.object)
+    tileViews.delete(id)
+  }
 }
+
+// Objects can appear or vanish at any point in play, so views follow the model rather than the mount.
+watch(() => props.revision, reconcileViews)
 
 let canvas: HTMLCanvasElement | null = null
 
@@ -888,8 +1004,8 @@ onMounted(() => {
     ),
   )
     .then(loaded => {
-      textures.push(...loaded)
-      build(loaded)
+      symbolTextures.push(...loaded)
+      reconcileViews()
     })
     .catch((error: unknown) => {
       console.error('[hexnome] failed to load symbol textures', error)
@@ -923,8 +1039,8 @@ onBeforeUnmount(() => {
 
   for (const material of tileMaterials.values()) material.dispose()
   tileMaterials.clear()
-  for (const texture of textures) texture.dispose()
-  textures.length = 0
+  for (const texture of symbolTextures) texture.dispose()
+  symbolTextures.length = 0
   tileGeometry.dispose()
   disposePlateVisualAssets()
   disposePlateBackAssets()

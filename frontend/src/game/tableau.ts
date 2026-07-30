@@ -132,6 +132,8 @@ export interface Tableau {
   plateInSourceLot(lot: number): Plate | undefined
   /** Loose tiles in a source lot, in index order. */
   tilesInSourceLot(lot: number): readonly Tile[]
+  /** A plate's own tile — the one it arrived with. Absent while the plate is face down. */
+  plateToken(plateId: string): Tile | undefined
 
   /** Which plate, if any, covers this board cell, and as what. */
   coverageAt(cell: Axial): Coverage | undefined
@@ -161,6 +163,19 @@ export interface Tableau {
     location: PlateLocation,
     options?: { readonly rotation?: number, readonly faceDown?: boolean },
   ): Plate | undefined
+  /**
+   * Turn a face-down plate over, giving it the tile it has been carrying all along.
+   *
+   * Flipping and creating the token are one operation because they are one fact: `faceDown` means "this
+   * plate's token is not known here". Letting a caller do half of it would allow a face-up plate with no
+   * token, or a face-down plate whose token can be read — both of which the rest of the code assumes
+   * cannot happen.
+   *
+   * The spec comes from outside because the model genuinely does not have it. That is the point: a
+   * face-down plate holds no hidden value, so nothing local can leak it, and in multiplayer the reveal
+   * will arrive from the server rather than being uncovered from data the client already had.
+   */
+  revealPlate(id: string, spec: TileSpec, petal: number): boolean
   /** Turn a plate by `steps` sixth-turns; positive is clockwise on screen. */
   rotatePlate(id: string, steps: number): boolean
   addTile(
@@ -311,6 +326,15 @@ export function createTableau({
       return found
     },
 
+    plateToken(plateId) {
+      for (const tile of tilesById.values()) {
+        if (tile.fixed && tile.location.kind === 'onPlate' && tile.location.plateId === plateId) {
+          return tile
+        }
+      }
+      return undefined
+    },
+
     coverageAt: cell => coverage.get(axialKey(cell)),
 
     cellOfTile(id) {
@@ -354,6 +378,19 @@ export function createTableau({
       tilesById.set(tile.id, tile)
       occupants.set(tileLocationKey(location), tile.id)
       return tile
+    },
+
+    revealPlate(id, spec, petal) {
+      const plate = platesById.get(id)
+      if (!plate || !plate.faceDown) return false
+      const location: TileLocation = { kind: 'onPlate', plateId: id, petal }
+      if (!canPlaceTile(location)) return false
+
+      platesById.set(id, { ...plate, faceDown: false })
+      const tile: Tile = { ...spec, id: `t${nextId++}`, location, fixed: true }
+      tilesById.set(tile.id, tile)
+      occupants.set(tileLocationKey(location), tile.id)
+      return true
     },
 
     movePlate(id, location) {

@@ -104,7 +104,8 @@ There are two kinds of objects: **tiles** and **plates**.
 
 ### How the source presents itself
 
-The source is a **column of six lots** down the left of the screen, under the title. A lot is:
+The source is a **column of lots** down the left of the screen, under the title — **one slot per plate
+the round deals**, so a 4-plates-per-round game shows four. A lot is:
 
 - one **plate, face down** — you can see that a plate is there but not which tile it carries;
 - **four loose tiles** heaped on top of it, face up.
@@ -118,6 +119,63 @@ see, not the seventh you would also be taking. That is deliberate, and it is why
 does not exist in the model at all until it is revealed — there is no hidden value for a client to
 read (`Plate.faceDown` in `src/game/tableau.ts`).
 
+### Turning a plate over
+
+A plate in the source lies face down **while tiles are heaped on it**. The moment its lot is picked
+clean, it turns over and its token is revealed.
+
+A revealed plate then **drafts as its token**. A plate showing blue-4 is a blue item and a 4 item, swept
+by either strategy exactly as a blue-4 tile would be:
+
+> Source shows a revealed **blue-4 plate**, plus loose **blue-3** and **blue-2**.
+> Taking `blue-3` alone is legal — it is the only 3. But add `blue-2` and the colour pins, so the sweep
+> now has to include the **blue-4 plate** as well.
+
+**A plate counts as its token, full stop.** A revealed red-1 plate and a loose red-1 tile are the same
+kind, so a draft takes one or the other — never both. They repeat, and the one-per-kind rule applies
+across tiles and plates alike.
+
+Which one you take is a real choice, not a formality: the plate brings a whole plate and costs a bay,
+the tile costs a tile slot. With both bays full, taking the tile instead can be what makes a sweep fit.
+
+A face-down plate is not draftable at all. Its token is unknown, and an unknown cannot be matched
+against a criterion.
+
+### Drawer capacity
+
+Drafted tiles go to the drawer's **16 tile slots**; drafted plates go to its **2 plate bays**. They are
+separate, and so are their limits:
+
+- Tile slots full → you cannot take tiles.
+- Both bays full → you cannot take plates.
+- **Take** is only offered when at least one kind is both showing in the source and housable.
+
+Because a sweep can drag a plate along with the tiles, a selection can be a perfectly legal sweep and
+still not fit — all the blues might include a plate when both bays are taken. That is not an illegal
+draft, it is an impossible one, and the action bar says **"out of space"** rather than silently refusing.
+
+### When the source restocks
+
+The source is a **stack that grows from the top**. Lot 0 is the newest and sits at the top of the
+column; everything older sits below it.
+
+- The game opens with **one lot**: a face-down plate under four tiles.
+- At the **start of every turn**, if the **topmost lot is no longer full** — someone has drafted a tile
+  out of it — then every lot **shifts down one slot** and a fresh face-down plate with four new tiles is
+  pushed in at the top.
+- Only the *topmost* lot's fullness matters. Drafting out of a lower lot leaves the stack alone; the
+  source restocks only once its newest offering has been touched.
+- A round deals **`platesPerRound` plates in total**. Once they are gone, nothing new appears and the
+  source only shrinks as it is drafted.
+
+The slot count and the plate quota being the same number is not a coincidence — it is the same fact
+twice. Lots never leave the source (a plate cannot be drafted yet), so the number of occupied lots
+equals the number of plates dealt, and the column is exactly full when the round's plates run out.
+Nothing can ever be pushed off the bottom.
+
+A draft always sweeps the **whole source**, not one lot. Once there are several lots, taking "all the
+reds" takes them from wherever they are sitting.
+
 ### What a draft takes
 
 A draft is defined by **one attribute** — a color or a symbol — and takes every **distinct** tile in
@@ -126,9 +184,10 @@ the source carrying it. Three parts, and the third is the one that catches peopl
 1. **Pick any tile to start.** Its color and its symbol are both still live as the criterion.
 2. **The second pick pins the criterion.** Two tiles sharing only a color can only be a color draft, so
    every remaining symbol match drops out.
-3. **At most one of each distinct tile.** The bag holds three copies of every tile, so duplicates show
+3. **At most one of each distinct kind.** The bag holds three copies of every tile, so duplicates show
    up in the source often. Selecting one red-2 rules out any *other* red-2 — it is already
-   represented, and the copy stays in the source.
+   represented, and the copy stays in the source. A revealed plate counts as its token here too, so a
+   red-1 plate and a red-1 tile are the same kind.
 
 So "all the reds" means all *kinds* of red, not all copies of red.
 
@@ -140,9 +199,28 @@ Worked example, source showing `red-4  red-2  red-2  blue-1`:
 | select `red-2` | criterion pins to **color**; the other `red-2` inactive (already represented) |
 | confirm | takes `{red-4, red-2}` — one `red-2` is left behind |
 
-A single tile can be a complete draft: if only one distinct 4 is showing, selecting it already *is*
-"all the 4s". Conversely a partial sweep is never legal — you commit to an attribute, not to
-favourites.
+**Two strategies, and finishing either one is enough.** From the moment you pick your first tile, both a
+**colour** sweep and a **symbol** sweep are on the table:
+
+- A strategy is **finished** when every distinct tile of that attribute is selected.
+- Finishing one is enough to confirm — **even if tiles matching the other are still sitting there
+  unselected**. You have committed to a sweep and completed it; the road you did not take is irrelevant.
+- The **second pick decides** which strategy you are on. Two tiles sharing only a colour means a colour
+  draft, and the symbol strategy is off the table for the rest of that draft.
+
+Worked example, source showing `blue-1  blue-3  red-3  yellow-3`:
+
+| Selection | Confirmable? | Why |
+|---|---|---|
+| `yellow-3` | **yes** | the only yellow, so the colour sweep is done — the two other 3s do not block it |
+| `red-3` | **yes** | likewise the only red |
+| `blue-1` | **yes** | the only 1, even though `blue-3` is also blue |
+| `blue-3` | no | unique in neither: another blue and two more 3s outstanding |
+| `yellow-3` + `red-3` | no | they share only the symbol, so the value strategy pinned — `blue-3` is missing |
+| `yellow-3` + `red-3` + `blue-3` | **yes** | every 3 taken |
+
+A partial sweep is never legal: each click is fine on its own, but confirming means you have taken
+everything one attribute offers.
 
 Every tile in the source is therefore in one of three states — **active**, **selected**,
 **inactive** — and the states are recomputed after every click, because deselecting can widen the
@@ -182,6 +260,10 @@ On your turn you choose **one** action:
    - a **plate** must **connect edge-to-edge** to an existing plate;
    - placing requires **payment** (below).
 3. **Pass**.
+
+Turns are numbered **within a round**, so the header reads "round 2, turn 5" for the fifth turn of that
+round. Every completed action advances the count, a pass included; abandoning a part-built action does
+not.
 
 The **drawer starts empty**, so the first turn can only be a draft. That is a starting position
 rather than a rule to check — there is simply nothing to place yet.

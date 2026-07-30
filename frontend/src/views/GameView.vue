@@ -28,17 +28,28 @@ import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { createDeck } from '@/game/deck'
+import { createBag } from '@/game/bag'
+import { createDeck, type DealtPlate } from '@/game/deck'
 import {
   canConfirmDraft,
+  completedStrategies,
   draftAttribute,
+  draftFits,
   draftStates as draftStatesOf,
   toggleDraftSelection,
-  type DraftTile,
+  type DraftItem,
 } from '@/game/draft'
 import { hexRectangle } from '@/game/hex'
-import { createTableau, type TileSpec } from '@/game/tableau'
-import { IDLE, turnOptions, type TurnAction, type TurnPhase } from '@/game/turn'
+import { platesToReveal, pushLot, shouldRefill } from '@/game/source'
+import { createTableau } from '@/game/tableau'
+import {
+  FIRST_TURN,
+  IDLE,
+  nextTurn,
+  turnOptions,
+  type TurnAction,
+  type TurnPhase,
+} from '@/game/turn'
 import type { Axial } from '@/game/hex'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
@@ -55,11 +66,15 @@ import {
   DRAWER_COLS,
   DRAWER_ROWS,
   PLATE_SLOTS,
-  SOURCE_LOTS,
   SOURCE_TILES_PER_LOT,
 } from '@/scene/constants'
 import { createDrawerLayout } from '@/scene/drawerLayout'
-import { modeInfo, type GameSettings } from '@/game/gameSettings'
+import {
+  DEFAULT_PLATES_PER_ROUND,
+  modeInfo,
+  roundsOf,
+  type GameSettings,
+} from '@/game/gameSettings'
 import { useSavedGames } from '@/composables/useSavedGames'
 
 const route = useRoute()
@@ -91,48 +106,72 @@ onMounted(() => {
 const cells = hexRectangle(BOARD_HALF_COLS, BOARD_HALF_ROWS)
 const DRAWER_SLOTS = DRAWER_COLS * DRAWER_ROWS
 
+/**
+ * One source slot per plate the round deals.
+ *
+ * These are the same number by design rather than by coincidence: lots never leave the source, so the
+ * column is exactly full when the round's plates run out and nothing can be pushed off the bottom
+ * (game/source.ts).
+ */
+const platesPerRound = settings.value?.platesPerRound ?? DEFAULT_PLATES_PER_ROUND
+
 const tableau = createTableau({
   cells,
   drawerSlots: DRAWER_SLOTS,
   plateSlots: PLATE_SLOTS,
-  sourceLots: SOURCE_LOTS,
+  sourceLots: platesPerRound,
   sourceTilesPerLot: SOURCE_TILES_PER_LOT,
 })
 
 /**
- * The opening deal: fill the shared source, and leave the drawer empty.
+ * The bags this game's id seeds, and how far into them play has got.
  *
- * **The drawer starts empty on purpose.** A turn is either draft-from-source or place-from-drawer,
- * so with nothing in the drawer the only legal first move is a draft — which is exactly the rule,
- * expressed as a starting position rather than as a check.
- *
- * A lot is one plate dealt **face down**, with four loose tiles heaped on top of it. The plate's own
- * tile is not created at all while it is face down: the model has no hidden state to leak, so
- * nothing can accidentally read it (see `Plate.faceDown`).
- *
- * Everything comes off the top of the bags this id seeds (game/deck.ts), so the same link always
- * opens on the same lot — the same plate under the same four tiles, scattered the same way.
- *
- * Only one lot is filled so far. Filling all six, and refilling them between rounds, waits on the
- * round structure.
+ * The *order* is a frozen contract derived from the id (game/deck.ts); the cursor is ordinary play state
+ * that resets with the board. A restock draws one plate and a full heap of tiles off the top of each.
  */
-const OPENING_LOTS = 1
+const deck = createDeck(gameId.value)
+const plateBag = createBag(deck.plates)
+const tileBag = createBag(deck.tiles)
 
-{
-  const deck = createDeck(gameId.value)
-  let nextTile = 0
+/** Plates dealt into the source this round. The round is over as a supply once this reaches its quota. */
+const platesDealt = shallowRef(0)
 
-  for (let lot = 0; lot < Math.min(OPENING_LOTS, SOURCE_LOTS); lot++) {
-    const dealt = deck.plates[lot]
-    if (dealt) tableau.addPlate({ kind: 'source', lot }, { faceDown: true })
+/**
+ * The token each face-down plate is carrying, held outside the tableau.
+ *
+ * The model deliberately does not store it — see `Plate.faceDown` — so this is where it waits until the
+ * plate turns over. In multiplayer this is the server's job; keeping it here rather than in the model
+ * means moving it there later changes one file, not the shape of the game state.
+ */
+const dealtTokens = new Map<string, DealtPlate>()
 
-    for (let index = 0; index < SOURCE_TILES_PER_LOT; index++) {
-      const spec = deck.tiles[nextTile++]
-      if (!spec) break
-      tableau.addTile(spec, { kind: 'source', lot, index })
-    }
-  }
+/**
+ * Push a fresh lot onto the top of the source, drawing from the bags.
+ *
+ * The opening deal and every later restock both come through here, so the first lot cannot drift from
+ * the rest. Draws the plate first and checks it: with no plate there is no lot, and dealing the tiles
+ * anyway would leave a heap floating over an empty slot.
+ */
+function dealLot(): boolean {
+  const dealt = plateBag.take(1)[0]
+  if (!dealt) return false
+  if (!pushLot(tableau, tileBag.take(tableau.sourceTilesPerLot))) return false
+
+  // pushLot puts the new plate at the top of the stack; remember what it is carrying until it flips.
+  const plate = tableau.plateInSourceLot(0)
+  if (plate) dealtTokens.set(plate.id, dealt)
+  platesDealt.value++
+  return true
 }
+
+/**
+ * The opening deal: one lot in the source, and an empty drawer.
+ *
+ * **The drawer starts empty on purpose.** A turn is either draft-from-source or place-from-drawer, so
+ * with nothing in the drawer the only legal first move is a draft — the rule expressed as a starting
+ * position rather than as a check.
+ */
+dealLot()
 
 const targetCells = shallowRef<Axial[]>([])
 const targetValid = shallowRef(false)
@@ -166,12 +205,44 @@ const counts = computed(() => {
  */
 const phase = shallowRef<TurnPhase>(IDLE)
 
-/** Every tile in the shared source, as drafting sees it. */
-const sourceTiles = computed<DraftTile[]>(() => {
+/**
+ * Which round, and which turn of it.
+ *
+ * The round is stuck on 1: advancing it needs the round structure — when a round ends, what refills,
+ * what resets — none of which is designed. `nextRound` exists in game/turn.ts and already resets the
+ * turn count, so wiring it up is one call, not a decision.
+ */
+const count = shallowRef(FIRST_TURN)
+
+/** Rounds the chosen mode plays, so the header can read "1 / 4" rather than a bare number. */
+const totalRounds = computed(() => {
+  const s = settings.value
+  return s ? roundsOf(s.mode) : 0
+})
+
+/**
+ * Everything in the shared source that can be drafted: the loose tiles, plus any **revealed** plate,
+ * which enters as its own token.
+ *
+ * Face-down plates are absent on purpose. Their token is unknown, and an unknown cannot be matched
+ * against a colour or a symbol — so they are not draftable until the lot they sit under is picked clean
+ * and they turn over.
+ */
+const sourceItems = computed<DraftItem[]>(() => {
   void revision.value
-  return tableau.tiles()
+  const items: DraftItem[] = tableau.tiles()
     .filter(tile => tile.location.kind === 'source')
-    .map(tile => ({ id: tile.id, color: tile.color, value: tile.value }))
+    .map(tile => ({ id: tile.id, kind: 'tile' as const, color: tile.color, value: tile.value }))
+
+  for (let lot = 0; lot < tableau.sourceLots; lot++) {
+    const plate = tableau.plateInSourceLot(lot)
+    if (!plate || plate.faceDown) continue
+    const token = tableau.plateToken(plate.id)
+    if (token) {
+      items.push({ id: plate.id, kind: 'plate', color: token.color, value: token.value })
+    }
+  }
+  return items
 })
 
 const freeSlots = computed(() => {
@@ -179,38 +250,59 @@ const freeSlots = computed(() => {
   return tableau.freeDrawerSlots()
 })
 
+const freeBays = computed(() => {
+  void revision.value
+  return tableau.freePlateSlots()
+})
+
 const options = computed(() => turnOptions({
-  sourceTiles: sourceTiles.value.length,
+  sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
+  sourcePlates: sourceItems.value.filter(item => item.kind === 'plate').length,
   drawerItems: counts.value.drawer + counts.value.platesHeld,
   freeDrawerSlots: freeSlots.value.length,
+  freePlateSlots: freeBays.value.length,
 }))
 
 const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.selected : [])
 
 /** Null unless drafting, which is what tells the scene to stop showing draft states at all. */
 const draftStates = computed(() => phase.value.kind === 'taking'
-  ? draftStatesOf(sourceTiles.value, selectedIds.value)
+  ? draftStatesOf(sourceItems.value, selectedIds.value)
   : null)
 
-/** The selected tiles in click order, for the bar to display. */
-const selection = computed<TileSpec[]>(() => {
-  const byId = new Map(sourceTiles.value.map(tile => [tile.id, tile]))
+/** The selected items in click order, for the bar to display. */
+const selection = computed(() => {
+  const byId = new Map(sourceItems.value.map(item => [item.id, item]))
   return selectedIds.value.flatMap(id => {
-    const tile = byId.get(id)
-    return tile ? [{ color: tile.color, value: tile.value }] : []
+    const item = byId.get(id)
+    return item ? [{ color: item.color, value: item.value, plate: item.kind === 'plate' }] : []
   })
 })
 
 /**
+ * Does the selection fit? Tiles and plates are counted against their own homes.
+ *
+ * A sweep can drag a plate along with the tiles, so "the drawer has four free slots" is not the
+ * question — a draft of three tiles and a plate needs three tile slots *and* a bay.
+ */
+const fits = computed(() => draftFits(sourceItems.value, selectedIds.value, {
+  tiles: freeSlots.value.length,
+  plates: freeBays.value.length,
+}))
+
+/**
  * A legal sweep *and* somewhere to put it.
  *
- * The room check matters: a four-tile draft into three free slots is a valid draft that cannot be
- * carried out, and lighting the button would be promising something we would then have to refuse.
+ * Kept separate from {@link fits} so the bar can say *why* it is refusing: an incomplete sweep and a
+ * sweep that will not fit are different problems and deserve different words.
  */
-const canConfirm = computed(() => canConfirmDraft(sourceTiles.value, selectedIds.value)
-  && selectedIds.value.length <= freeSlots.value.length)
+const canConfirm = computed(() =>
+  canConfirmDraft(sourceItems.value, selectedIds.value) && fits.value)
 
-const draftAttr = computed(() => draftAttribute(sourceTiles.value, selectedIds.value))
+const draftAttr = computed(() => draftAttribute(sourceItems.value, selectedIds.value))
+
+/** Which sweeps are finished — what the bar names, and what makes Take legal. */
+const completed = computed(() => completedStrategies(sourceItems.value, selectedIds.value))
 
 /**
  * In singleplayer it is always your turn, so this is a status line. Multiplayer will put
@@ -234,9 +326,46 @@ function cancelAction(): void {
  *
  * Singleplayer, so the same player goes again and this is just a return to the action list. Advancing
  * to another player — and to the next round — waits on the round structure.
+ *
+ * Every completed action lands here, a pass included, which is what makes this the one place the turn
+ * count advances. Cancelling deliberately does not: an abandoned action was not a turn.
  */
 function endTurn(): void {
+  revealEmptiedLots()
+  count.value = nextTurn(count.value)
   phase.value = IDLE
+  beginTurn()
+}
+
+/**
+ * Turn over any plate whose lot has been picked clean.
+ *
+ * The token comes from `dealtTokens`, not from the model — a face-down plate genuinely has no token in
+ * the tableau, which is what stops anything reading one before it is turned over. This map is the local
+ * stand-in for the server that will hand out reveals in multiplayer.
+ */
+function revealEmptiedLots(): void {
+  let revealed = false
+  for (const plate of platesToReveal(tableau)) {
+    const dealt = dealtTokens.get(plate.id)
+    if (!dealt) continue
+    if (tableau.revealPlate(plate.id, { color: dealt.color, value: dealt.value }, dealt.petal)) {
+      dealtTokens.delete(plate.id)
+      revealed = true
+    }
+  }
+  if (revealed) revision.value++
+}
+
+/**
+ * The start of a turn: restock the source if its newest lot has been drafted from.
+ *
+ * `shouldRefill` owns the conditions — newest lot touched, round has a plate left, room to shift into.
+ * Once the round's plates are gone the source only shrinks, which is what makes a round finite.
+ */
+function beginTurn(): void {
+  if (!shouldRefill(tableau, { platesDealt: platesDealt.value, platesPerRound })) return
+  if (dealLot()) revision.value++
 }
 
 function onSelectTile(id: string): void {
@@ -244,17 +373,25 @@ function onSelectTile(id: string): void {
   if (current.kind !== 'taking') return
   phase.value = {
     kind: 'taking',
-    selected: toggleDraftSelection(sourceTiles.value, current.selected, id),
+    selected: toggleDraftSelection(sourceItems.value, current.selected, id),
   }
 }
 
 function confirmTake(): void {
   if (!canConfirm.value) return
-  const slots = freeSlots.value
-  selectedIds.value.forEach((id, i) => {
-    const slot = slots[i]
-    if (slot !== undefined) tableau.moveTile(id, { kind: 'drawer', slot })
-  })
+  const slots = [...freeSlots.value]
+  const bays = [...freeBays.value]
+
+  for (const id of selectedIds.value) {
+    // A selected id is either a loose tile or a revealed plate; the plate carries its token with it.
+    if (tableau.plate(id)) {
+      const bay = bays.shift()
+      if (bay !== undefined) tableau.movePlate(id, { kind: 'plateSlot', slot: bay })
+    } else {
+      const slot = slots.shift()
+      if (slot !== undefined) tableau.moveTile(id, { kind: 'drawer', slot })
+    }
+  }
   revision.value++
   endTurn()
 }
@@ -362,7 +499,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :cells="targetCells"
         :valid="targetValid"
       />
-      <SourceChrome />
+      <SourceChrome :lots="platesPerRound" />
       <DrawerChrome
         :target-slot="targetTileSlot"
         :target-plate-slot="targetPlateSlot"
@@ -373,6 +510,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :game-id="gameId"
         :draggable="phase.kind === 'putting'"
         :draft-states="draftStates"
+        :revision="revision"
         @select-tile="onSelectTile"
         @placed="onPlaced"
         @target="onTarget"
@@ -446,7 +584,9 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       :options="options"
       :selection="selection"
       :can-confirm="canConfirm"
+      :fits="fits"
       :attribute="draftAttr"
+      :completed="completed"
       :anchor-x="drawerLayout.left + drawerLayout.width / 2"
       :anchor-y="drawerLayout.top"
       :turn-label="turnLabel"
@@ -471,6 +611,17 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       >
         {{ modeLabel }} · {{ settings.platesPerRound }} plates/round
       </p>
+      <dl class="counters">
+        <dt>Round</dt>
+        <dd>
+          {{ count.round }}<span
+            v-if="totalRounds"
+            class="of"
+          > / {{ totalRounds }}</span>
+        </dd>
+        <dt>Turn</dt>
+        <dd>{{ count.turn }}</dd>
+      </dl>
     </header>
 
     <aside class="chrome-panel help">
@@ -534,6 +685,38 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #79808f;
   font-size: 11px;
   letter-spacing: 0.06em;
+}
+
+/*
+ * Live figures, so they get the label-over-value treatment the help panel's readouts use rather than
+ * being folded into the settings line beside them. That line is fixed for the whole game; these move.
+ */
+.counters {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  padding-left: 14px;
+  border-left: 1px solid #3a3222;
+}
+
+.counters dt {
+  color: #6b7382;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.counters dd {
+  margin: 0 6px 0 0;
+  color: #e8c878;
+  font-size: 12px;
+  /* Tabular, so the header does not shift as the turn ticks past 9. */
+  font-variant-numeric: tabular-nums;
+}
+
+.counters .of {
+  color: #6b7382;
 }
 
 .help {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * The shared source: a column of six lots down the left, under the title.
+ * The shared source: a column of lots down the left, under the title — one slot per plate the round
+ * deals, so the count comes from the `platesPerRound` setting.
  *
  * This is the pick-from area. Each lot holds one face-down plate with loose tiles heaped on it, and
  * on your turn you draft out of here into your drawer.
@@ -10,9 +11,9 @@
  * pixels** and converted to world units each frame, so the column stays put and stays the same size
  * while the board pans and zooms beneath it (scene/sourceLayout.ts).
  *
- * A column rather than a row because six plates side by side would be wider than the board and would
- * fight the drawer for the bottom of the screen. Vertical also matches what it is: a queue you work
- * down.
+ * A column rather than a row because the plates side by side would be wider than the board and would
+ * fight the drawer for the bottom of the screen. Vertical also matches what it is: a stack you work
+ * down, newest on top.
  */
 import { useLoop, useTresContext } from '@tresjs/core'
 import { Euler, Mesh, PlaneGeometry, type OrthographicCamera } from 'three'
@@ -23,9 +24,15 @@ import { registerGrabbable } from './grabbables'
 import { screenToBoard, unitsPerPixel } from './screenProjection'
 import { useSourceLayout } from './useSourceLayout'
 
+/**
+ * `lots` is fixed for a game's lifetime — it comes from the `platesPerRound` setting, which cannot change
+ * mid-game — so the bays are built once in `onMounted` rather than watched.
+ */
+const props = defineProps<{ lots: number }>()
+
 const { scene, camera, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
-const layout = useSourceLayout()
+const layout = useSourceLayout(() => props.lots)
 
 const FLAT = new Euler(-Math.PI / 2, 0, 0)
 

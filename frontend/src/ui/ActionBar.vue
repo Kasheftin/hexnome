@@ -18,7 +18,6 @@
  * the local player's turn, so it reads as a status line rather than a wait.
  */
 import { computed } from 'vue'
-import type { TileSpec } from '@/game/tableau'
 import type { TurnOptions, TurnPhase } from '@/game/turn'
 import { TILE_COLORS } from '@/scene/tileMaterials'
 import { SYMBOL_TEXTURE_URLS } from '@/scene/constants'
@@ -26,12 +25,16 @@ import { SYMBOL_TEXTURE_URLS } from '@/scene/constants'
 const props = defineProps<{
   phase: TurnPhase
   options: TurnOptions
-  /** Tiles picked so far, in click order. */
-  selection: readonly TileSpec[]
-  /** True when the selection is a complete, legal draft. */
+  /** Items picked so far, in click order. A plate shows its own token. */
+  selection: readonly { color: number, value: number, plate: boolean }[]
+  /** True when the selection is a complete, legal draft *and* it fits the drawer. */
   canConfirm: boolean
+  /** Whether the drawer has room for the selection. False is what "out of space" reports. */
+  fits: boolean
   /** Which attribute the draft has settled on, or null while both are still live. */
   attribute: 'color' | 'value' | null
+  /** Which strategies are fully swept. Either one being true is what makes the take legal. */
+  completed: { color: boolean, value: boolean }
   /** Centre of the drawer and the y its top edge sits at, both in screen pixels. */
   anchorX: number
   anchorY: number
@@ -44,26 +47,49 @@ defineEmits<{
   cancel: []
 }>()
 
-function colorOf(spec: TileSpec): string {
+function colorOf(spec: { color: number }): string {
   return TILE_COLORS[spec.color]?.hex ?? '#888'
 }
 
-function symbolOf(spec: TileSpec): string {
+function symbolOf(spec: { value: number }): string {
   return SYMBOL_TEXTURE_URLS[Math.min(SYMBOL_TEXTURE_URLS.length, Math.max(1, spec.value)) - 1] ?? ''
 }
 
 /**
- * What the draft is being described as.
+ * What the draft is being described as — and, when it cannot be confirmed, why not.
  *
- * Deliberately vague on the first pick — with one tile chosen, "all the reds" and "all the 4s" are
- * both still true, and naming one would put words in the player's mouth.
+ * Reads from the **completed strategies**, not from the pinned attribute. Those differ in the case that
+ * matters: a single tile unique in its colour has finished the colour sweep while the symbol reading is
+ * still live and unpinned, so there is a sweep to name even though nothing has been decided.
+ *
+ * The greyed-out cases matter as much. Saying "all red" beside a disabled Take would have the bar
+ * contradicting itself — the player would read the selection as done and the button as broken — so an
+ * unfinished sweep says so.
  */
 const draftSummary = computed(() => {
-  if (props.selection.length === 0) return 'pick a tile'
   const first = props.selection[0]
   if (!first) return 'pick a tile'
-  if (props.attribute === 'color') return `all ${TILE_COLORS[first.color]?.name ?? 'colour'}`
-  if (props.attribute === 'value') return `all ${first.value}s`
+
+  /*
+   * Out of space beats everything else worth saying.
+   *
+   * The sweep may be perfectly legal and still impossible — a colour sweep drags the plate along with
+   * the tiles, and the plate bays can be full. Naming the sweep here would leave the player staring at a
+   * finished-looking selection and a dead button with no explanation.
+   */
+  if (!props.fits) return 'out of space'
+
+  const colourName = TILE_COLORS[first.color]?.name ?? 'colour'
+  const { color, value } = props.completed
+
+  // Unique in both: either sweep is this one tile, so there is no criterion worth naming.
+  if (color && value) return 'nothing else matches'
+  if (color) return `all ${colourName}`
+  if (value) return `all ${first.value}s`
+
+  // Nothing swept yet. Name the criterion only once it has actually pinned.
+  if (props.attribute === 'color') return `more ${colourName} to take`
+  if (props.attribute === 'value') return `more ${first.value}s to take`
   return 'colour or symbol'
 })
 </script>
@@ -119,6 +145,7 @@ const draftSummary = computed(() => {
             v-for="(spec, i) in selection"
             :key="i"
             class="chip"
+            :class="{ 'chip-plate': spec.plate }"
             :style="{ background: colorOf(spec) }"
           >
             <img
@@ -270,6 +297,15 @@ const draftSummary = computed(() => {
   width: 13px;
   height: 13px;
   object-fit: contain;
+}
+
+/*
+ * A plate is drafted as its token, so its chip shows the same hexagon — ringed, because taking a plate
+ * costs a bay rather than a tile slot and the player needs to see that at a glance when space is tight.
+ */
+.chip-plate {
+  outline: 2px solid #b99b58;
+  outline-offset: 1px;
 }
 
 :is(.action):focus-visible {

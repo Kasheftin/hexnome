@@ -19,10 +19,17 @@ highlight sits still while the real one moves with the camera and the tile.
 The tint-a-grayscale-master principle still applies, just not to the tile body. It is the right
 approach for **symbols** and **frames**.
 
-## Asset 0 — Plate socket art (in hand)
+## Asset 0 — Plate socket art (in hand, **no longer used**)
 
 **File:** `frontend/public/textures/plate-full.png` — currently one tile, from
 `external assets/fullTile200x230.png`.
+
+> **Superseded.** Plates now draw their cells procedurally: a brown slab with an inset dark-brown hex
+> and a concentric outline per cell, from `PLATE_TONES` and `PLATE_CELL_*` in `scene/constants.ts`. That
+> was asked for so the face-up and face-down sides match exactly, which a painted texture on one side
+> and procedural geometry on the other cannot guarantee. The file is still in the repo and nothing else
+> claims those constants, so restoring the painted look means reinstating the socket mesh in
+> `scene/plateVisual.ts` — but the two faces would then need a matching painted reverse.
 
 A full-bleed pointy-top hexagon: brass ornate frame, dark mottled green face, fully transparent
 corners. It dresses a plate's six **petal sockets** — the places a tile actually goes.

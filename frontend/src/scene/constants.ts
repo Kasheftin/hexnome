@@ -133,13 +133,15 @@ export const PLATE_SLOT_FILL = 0.92
 
 /* ── Shared source (the pick-from column) ────────────────────────────────────── */
 
-/**
- * Lots in the shared source. Each is one face-down plate with loose tiles heaped on it.
+/*
+ * How many lots the source shows is **not a constant** — it is one per plate the round deals, so it
+ * comes from the `platesPerRound` setting. See game/source.ts for why those are the same number.
  *
- * A column down the left, under the title, rather than a row: six lots side by side would be wider
- * than the board and would fight the drawer for the bottom of the screen.
+ * It is a column down the left, under the title, rather than a row: six lots side by side would be
+ * wider than the board and would fight the drawer for the bottom of the screen. Vertical also matches
+ * what it is — a stack you work down, newest on top.
  */
-export const SOURCE_LOTS = 6
+
 /** Loose tiles heaped on each lot's face-down plate. */
 export const SOURCE_TILES_PER_LOT = 4
 
@@ -147,7 +149,7 @@ export const SOURCE_LEFT_PX = 14
 /** Clear of the title panel, which is 14px down and about 40px tall. */
 export const SOURCE_TOP_PX = 66
 export const SOURCE_PADDING_PX = 9
-/** Between lots. Small: they read as one stack, not six unrelated panels. */
+/** Between lots. Small: they read as one stack, not a set of unrelated panels. */
 export const SOURCE_LOT_GAP_PX = 5
 /** Clearance kept below the column — from the drawer if it is in the way, else the canvas edge. */
 export const SOURCE_BOTTOM_GAP_PX = 12
@@ -193,6 +195,36 @@ export const PLATE_WORLD_HEIGHT = 5
  * it — coplanar faces z-fight along their shared silhouette.
  */
 export const PLATE_BASE_Y = 0.03
+
+/**
+ * The plate palette, shared by **both faces**.
+ *
+ * A brown slab carrying inset dark-brown hexes with a concentric outline around each. The reverse side
+ * wears the same treatment on its single centre mark; the face-up side wears it on all seven cells. They
+ * read as one object seen from two sides, which only holds if the tones come from one place — hence this
+ * table rather than a literal in each module.
+ *
+ * The hole is deliberately darker than a socket. It can never be filled, and a plate that appears to
+ * offer seven usable spaces instead of six is misleading in a way no amount of prettiness makes up for.
+ */
+export const PLATE_TONES = {
+  slab: '#6d5636',
+  socket: '#54422b',
+  hole: '#2e2417',
+} as const
+
+/**
+ * The cell mark, in units of HEX_SIZE: an inset hex, a gap of bare slab, then a thin outline.
+ *
+ * These are the reverse side's own numbers, reused unchanged. That is not laziness — the reverse's mark
+ * already sits in one plate *cell*, so its proportions are cell proportions and transfer directly to all
+ * seven. Copying them is what makes the two faces match rather than merely resemble each other.
+ *
+ * The outline stops at 0.95 because neighbouring cells are only `√3` apart: at 1.0 the outlines of
+ * adjacent cells would touch.
+ */
+export const PLATE_CELL_MARK_R = 0.62
+export const PLATE_CELL_RING_R = [0.84, 0.95] as const
 
 /**
  * Thickness of the plate's slab body, and how far it is shrunk about its centre.
@@ -315,10 +347,6 @@ export const SYMBOL_TEXTURE_URLS = [
  * This used to texture every board cell. It now dresses the six petals instead, which is where
  * a tile actually goes — the board itself is only a honeycomb on dark slate.
  */
-export const PLATE_SOCKET_TEXTURE_URLS = [
-  '/textures/plate-full.png',
-]
-
 export const COLORS = {
   /**
    * The board: dark slate with a faint honeycomb, and nothing else.

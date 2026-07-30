@@ -3,10 +3,8 @@ import {
   DoubleSide,
   Group,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
-  SRGBColorSpace,
-  TextureLoader,
+  RingGeometry,
   type BufferGeometry,
 } from 'three'
 import { axialToWorld } from '@/game/hex'
@@ -16,44 +14,38 @@ import {
   PLATE_BASE_BEVEL,
   PLATE_BASE_MARGIN,
   PLATE_BASE_THICKNESS,
+  PLATE_CELL_MARK_R,
+  PLATE_CELL_RING_R,
   PLATE_SOCKET_Y,
-  PLATE_SOCKET_TEXTURE_URLS,
+  PLATE_TONES,
 } from './constants'
-import { createHexPlateGeometry } from './hexPlateGeometry'
 import { createPlateBaseGeometry } from './plateBaseGeometry'
 
 /**
- * A plate: a thin flower-shaped slab carrying six ornate petal sockets around a dead centre
- * hole.
+ * A plate, face up: a brown flower slab carrying seven inset dark-brown cells.
  *
- * **The plate is where the colour lives.** The board only says where a plate may go, which is
- * a minor job, so it is a bare honeycomb on dark slate; the petals are the places a tile
- * actually goes, so they get the ornate brass-and-green art. The earlier arrangement had it
- * the other way round — a richly textured board under flat grey sockets — which drew the eye
- * to the least interesting part of the screen.
+ * Each cell wears the same mark as the **reverse side** — an inset hex, a gap of bare slab, then a thin
+ * outline (scene/plateBackVisual.ts). Both faces draw from `PLATE_TONES` and the same radii, so the two
+ * read as one object seen from two sides rather than two objects that happen to resemble each other.
  *
- * The slab is what makes it read as **one physical piece**. Without it a plate is seven
- * unconnected hexes floating over the board. Being a real solid rather than a decal, its
- * bevelled edge catches the key light, which is what conveys thickness under a camera that
- * only ever sees the top. It is dark so the sockets sit on it rather than compete with it.
+ * The reverse's mark already sits in a single plate *cell*, so its proportions are cell proportions and
+ * transferred to all seven unchanged.
  *
- * The hole gets no socket art and a near-black face so it reads as an absence — it is never
- * fillable, and that has to be legible at a glance or a plate looks like it has seven usable
- * spaces instead of six.
+ * The slab is what makes it read as **one physical piece**. Without it a plate is seven unconnected
+ * hexes floating over the board. Being a real solid rather than a decal, its bevelled edge catches the
+ * key light, which is what conveys thickness under a camera that only ever sees the top.
  *
- * Built at board scale (`HEX_SIZE`), so one uniform scale on the group drops the same plate
- * into a drawer bay.
+ * The centre **hole is darker than the six sockets**. It can never be filled, and that has to be legible
+ * at a glance — a plate that appears to offer seven usable spaces instead of six misleads in a way no
+ * amount of prettiness makes up for. It keeps the outline so it stays in the family; only its fill drops.
+ *
+ * This replaced a painted socket texture (`plate-full.png`). The procedural version is what makes the two
+ * faces provably identical in treatment, and it is one fewer asset to load and colour-manage.
+ *
+ * Built at board scale (`HEX_SIZE`), so one uniform scale on the group drops the same plate into a
+ * drawer bay or a source lot.
  */
 
-const SOCKET_R = HEX_SIZE * 0.9
-
-/**
- * Sockets use the hexagon geometry with bounding-box UVs, not `CircleGeometry`: the art is a
- * full-bleed hexagon, and CircleGeometry's UVs map the circumscribed *square*, which squashes
- * it inward. See hexPlateGeometry.ts.
- */
-const socketGeometry: BufferGeometry = createHexPlateGeometry(SOCKET_R)
-const holeGeometry = new CircleGeometry(HEX_SIZE * 0.84, 6, Math.PI / 2)
 const baseGeometry: BufferGeometry = createPlateBaseGeometry({
   size: HEX_SIZE,
   thickness: PLATE_BASE_THICKNESS,
@@ -61,56 +53,64 @@ const baseGeometry: BufferGeometry = createPlateBaseGeometry({
   margin: PLATE_BASE_MARGIN,
 })
 
-/** Dark, so the ornate sockets read as inset into it rather than floating on it. */
-const baseMaterial = new MeshStandardMaterial({
-  color: '#20242a',
-  roughness: 0.6,
-  metalness: 0.3,
+/** Pointy-top, so the marks line up with the tiles that sit on them. */
+const markGeometry = new CircleGeometry(HEX_SIZE * PLATE_CELL_MARK_R, 6, Math.PI / 2)
+const ringGeometry = new RingGeometry(
+  HEX_SIZE * PLATE_CELL_RING_R[0],
+  HEX_SIZE * PLATE_CELL_RING_R[1],
+  6,
+  1,
+  Math.PI / 2,
+)
+
+const slabMaterial = new MeshStandardMaterial({
+  color: PLATE_TONES.slab,
+  /*
+   * Low metalness, as on the reverse. A metal is lit almost entirely by what it reflects and this
+   * scene's studio environment is deliberately dark, so a shinier slab is a *darker* slab here, not a
+   * brighter one — high metalness rendered the reverse near-black before this was pinned down.
+   */
+  roughness: 0.5,
+  metalness: 0.2,
 })
 
-/**
- * Unlit, like the board cells were: the art already has its lighting painted in, so lighting
- * it again doubles up and darkens it away from what was drawn.
- */
-const socketMaterial = new MeshBasicMaterial({ transparent: true, side: DoubleSide })
-const socketTextureUrl = PLATE_SOCKET_TEXTURE_URLS[0]
-if (socketTextureUrl) {
-  new TextureLoader().load(socketTextureUrl, texture => {
-    // The PNG holds sRGB values; without this three reads them as linear and it washes out.
-    texture.colorSpace = SRGBColorSpace
-    texture.anisotropy = 8
-    socketMaterial.map = texture
-    socketMaterial.needsUpdate = true
-  })
-}
+const socketMaterial = new MeshStandardMaterial({
+  color: PLATE_TONES.socket,
+  roughness: 0.55,
+  metalness: 0.2,
+  side: DoubleSide,
+})
 
 const holeMaterial = new MeshStandardMaterial({
-  color: '#05070a',
-  roughness: 0.95,
-  metalness: 0,
+  color: PLATE_TONES.hole,
+  roughness: 0.6,
+  metalness: 0.15,
   side: DoubleSide,
 })
 
 const FLAT_X = -Math.PI / 2
 
+/** The seven cell centres: the hole first, then the six petals in order. */
+const CELL_OFFSETS = [{ x: 0, z: 0 }, ...PETAL_DIRS.map(dir => axialToWorld(dir, HEX_SIZE))]
+
 export function createPlateVisual(): Group {
   const group = new Group()
 
   // The slab. Its local origin is its underside, so everything else stacks above it.
-  group.add(new Mesh(baseGeometry, baseMaterial))
+  group.add(new Mesh(baseGeometry, slabMaterial))
 
-  const hole = new Mesh(holeGeometry, holeMaterial)
-  hole.rotation.x = FLAT_X
-  hole.position.y = PLATE_SOCKET_Y
-  group.add(hole)
+  CELL_OFFSETS.forEach((offset, cell) => {
+    // Cell 0 is the hole: same outline, darker fill.
+    const mark = new Mesh(markGeometry, cell === 0 ? holeMaterial : socketMaterial)
+    mark.rotation.x = FLAT_X
+    mark.position.set(offset.x, PLATE_SOCKET_Y, offset.z)
+    group.add(mark)
 
-  for (const dir of PETAL_DIRS) {
-    const offset = axialToWorld(dir, HEX_SIZE)
-    // createHexPlateGeometry already lies flat in XZ, so no rotation here.
-    const socket = new Mesh(socketGeometry, socketMaterial)
-    socket.position.set(offset.x, PLATE_SOCKET_Y, offset.z)
-    group.add(socket)
-  }
+    const ring = new Mesh(ringGeometry, socketMaterial)
+    ring.rotation.x = FLAT_X
+    ring.position.set(offset.x, PLATE_SOCKET_Y, offset.z)
+    group.add(ring)
+  })
 
   return group
 }
@@ -118,10 +118,9 @@ export function createPlateVisual(): Group {
 /** Shared geometries and materials — call once, when no plates remain. */
 export function disposePlateVisualAssets(): void {
   baseGeometry.dispose()
-  socketGeometry.dispose()
-  holeGeometry.dispose()
-  baseMaterial.dispose()
-  socketMaterial.map?.dispose()
+  markGeometry.dispose()
+  ringGeometry.dispose()
+  slabMaterial.dispose()
   socketMaterial.dispose()
   holeMaterial.dispose()
 }

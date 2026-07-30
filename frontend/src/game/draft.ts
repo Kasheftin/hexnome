@@ -12,27 +12,48 @@
  * 1. Pick any tile to start. That tile's colour and its symbol are both still live as the criterion.
  * 2. Pick a second, and the criterion **pins**: two tiles that share only a colour can only be a
  *    colour draft, so every remaining symbol match goes inactive.
- * 3. **At most one of each distinct tile.** The bag holds three copies of every tile, so the source
+ * 3. **At most one of each distinct kind.** The bag holds three copies of every tile, so the source
  *    often shows duplicates. Selecting one red-2 makes any *other* red-2 inactive — it is already
  *    represented. The duplicate is left in the source rather than swept along.
  *
- * Worked example, source `red-4  red-2  red-2  blue-1`:
+ *    A revealed plate counts as its token here, so a red-1 plate and a red-1 tile are the same kind: take
+ *    one or the other, never both.
+ *
+ * Worked example, source `blue-1  blue-3  red-3  yellow-3`:
  *
  * ```
- * select red-4   -> blue-1 inactive (shares neither), both red-2 active (share red)
- * select red-2   -> criterion pins to colour; the other red-2 inactive (identical, already taken)
- * confirm        -> takes { red-4, red-2 }, leaving one red-2 behind
+ * select yellow-3          -> the only yellow, so the COLOUR sweep is already complete.
+ *                             Confirmable now, even though two more 3s are sitting there clickable.
+ * select yellow-3, red-3   -> they share only the symbol, so the VALUE strategy pins and colour is
+ *                             off the table. Not confirmable: blue-3 is a 3 and is not selected.
+ * ...plus blue-3           -> every 3 taken. Confirmable.
  * ```
  *
- * So "take all of the colour" means all *kinds* of that colour, not all copies. That is why
- * {@link canConfirmDraft} compares sets of distinct tiles rather than counting them.
+ * And with duplicates, source `red-4  red-2  red-2  blue-1`:
+ *
+ * ```
+ * select red-4    -> the only 4, so the value sweep is complete. Confirmable.
+ * select red-2    -> now pinned to colour; the second red-2 is a copy of a selected kind, so it is
+ *                    excluded and does not hold the colour sweep open. Confirmable, and it stays behind.
+ * ```
+ *
+ * So "all of the colour" means all *kinds* of that colour, not all copies — and a sweep can be complete
+ * while other tiles are still clickable under the strategy you did not take.
  */
 
 export type DraftTileState = 'active' | 'selected' | 'inactive'
 
-/** A tile in the source, as drafting sees it. */
-export interface DraftTile {
+/**
+ * One thing in the source that can be drafted.
+ *
+ * Usually a loose tile. It can also be a **revealed plate**, which enters the draft as its own token —
+ * a plate showing blue-4 is drafted by anyone sweeping blue or sweeping 4s, exactly as a blue-4 tile
+ * would be. A face-down plate is not an item at all: its token is unknown, and an unknown cannot be
+ * matched against a criterion.
+ */
+export interface DraftItem {
   readonly id: string
+  readonly kind: 'tile' | 'plate'
   readonly color: number
   readonly value: number
 }
@@ -49,20 +70,30 @@ export interface DraftCriteria {
   readonly value: boolean
 }
 
-/** Identity of a tile *kind*, ignoring which physical copy it is. */
-function kindOf(tile: DraftTile): string {
-  return `${tile.color}:${tile.value}`
+/**
+ * Identity of an item *kind* — colour and value only.
+ *
+ * **A plate counts as its token, full stop.** A revealed red-1 plate and a loose red-1 tile are the same
+ * kind, so you may take one or the other but never both: they repeat, and a draft takes one of each
+ * kind. Which one you take is a real choice — the plate brings a whole plate and costs a bay, the tile
+ * costs a tile slot — and when space is tight that choice can be what makes a sweep fit.
+ *
+ * Deliberately *not* keyed on tile-or-plate. Doing that would let a colour sweep take both, which is the
+ * repetition the one-per-kind rule exists to prevent.
+ */
+function kindOf(item: DraftItem): string {
+  return `${item.color}:${item.value}`
 }
 
-function selectedTiles(
-  available: readonly DraftTile[],
+function selectedItems(
+  available: readonly DraftItem[],
   selectedIds: readonly string[],
-): DraftTile[] {
+): DraftItem[] {
   const wanted = new Set(selectedIds)
-  return available.filter(tile => wanted.has(tile.id))
+  return available.filter(item => wanted.has(item.id))
 }
 
-export function draftCriteria(selected: readonly DraftTile[]): DraftCriteria {
+export function draftCriteria(selected: readonly DraftItem[]): DraftCriteria {
   const first = selected[0]
   if (!first) return { color: true, value: true }
   return {
@@ -80,10 +111,10 @@ export function draftCriteria(selected: readonly DraftTile[]): DraftCriteria {
  * unclickable for no visible reason.
  */
 export function draftStates(
-  available: readonly DraftTile[],
+  available: readonly DraftItem[],
   selectedIds: readonly string[],
 ): Map<string, DraftTileState> {
-  const selected = selectedTiles(available, selectedIds)
+  const selected = selectedItems(available, selectedIds)
   const chosen = new Set(selected.map(tile => tile.id))
   const takenKinds = new Set(selected.map(kindOf))
   const criteria = draftCriteria(selected)
@@ -110,7 +141,7 @@ export function draftStates(
 
 /** Every distinct kind in the source carrying `attribute` = `of`. */
 function kindsMatching(
-  available: readonly DraftTile[],
+  available: readonly DraftItem[],
   attribute: 'color' | 'value',
   of: number,
 ): Set<string> {
@@ -128,32 +159,59 @@ function sameSet(a: Set<string>, b: Set<string>): boolean {
 }
 
 /**
- * Is this selection a complete, legal draft?
+ * Which strategies this selection has **finished sweeping**.
  *
- * True when there is an attribute whose every distinct kind in the source is selected — exactly once.
- * A partial selection is not a legal take even though each click was legal: you commit to sweeping an
- * attribute, not to picking favourites.
+ * A strategy is finished when every distinct kind in the source carrying that attribute is selected.
+ * Both can be finished at once — a tile unique in colour *and* in symbol finishes both by itself.
  *
- * Note that a *single* tile can be complete. If only one distinct 4 is showing, selecting it is
- * already "all the 4s".
+ * The key point, and the thing that is easy to get wrong: a strategy being finished does not require the
+ * *other* strategy to be finished, or even to be ruled out. Pick `yellow-3` from
+ * `blue-1 blue-3 red-3 yellow-3` and the colour strategy is done — it is the only yellow — even though
+ * two more 3s are sitting there unselected and still clickable. Take is legal at that moment.
+ *
+ * A strategy that is no longer *live* can never be finished. Once two tiles share only a colour, the
+ * symbol strategy is off the table for the rest of the draft (see {@link draftCriteria}).
+ *
+ * Duplicates are compared as **kinds**, so a second copy of an already-selected tile never holds a
+ * strategy open — it does not exist as far as drafting is concerned.
  */
-export function canConfirmDraft(
-  available: readonly DraftTile[],
+export function completedStrategies(
+  available: readonly DraftItem[],
   selectedIds: readonly string[],
-): boolean {
-  const selected = selectedTiles(available, selectedIds)
-  if (selected.length === 0) return false
+): DraftCriteria {
+  const selected = selectedItems(available, selectedIds)
+  const first = selected[0]
+  if (!first) return { color: false, value: false }
 
   const kinds = new Set(selected.map(kindOf))
-  // Two copies of one kind can never be a legal draft, however they got selected.
-  if (kinds.size !== selected.length) return false
+  // Two copies of one kind can never be a legal draft, however they got selected. Unreachable through
+  // toggleDraftSelection, but this is the rule of record for callers that are not the UI.
+  if (kinds.size !== selected.length) return { color: false, value: false }
 
-  const criteria = draftCriteria(selected)
-  const first = selected[0]
-  if (!first) return false
+  const live = draftCriteria(selected)
+  return {
+    color: live.color && sameSet(kinds, kindsMatching(available, 'color', first.color)),
+    value: live.value && sameSet(kinds, kindsMatching(available, 'value', first.value)),
+  }
+}
 
-  return (criteria.color && sameSet(kinds, kindsMatching(available, 'color', first.color)))
-    || (criteria.value && sameSet(kinds, kindsMatching(available, 'value', first.value)))
+/**
+ * Is this selection a complete, legal draft?
+ *
+ * True as soon as **either** strategy has been swept. Deliberately *not* "nothing is left clickable":
+ * those differ whenever a tile is unique in one attribute but shares the other, and in that case the
+ * player has already committed to a sweep they can finish. Requiring an empty pool would force them to
+ * keep picking tiles they never meant to take.
+ *
+ * A partial sweep is still refused: each click is legal on its own, but confirming means you have taken
+ * everything one attribute offers.
+ */
+export function canConfirmDraft(
+  available: readonly DraftItem[],
+  selectedIds: readonly string[],
+): boolean {
+  const done = completedStrategies(available, selectedIds)
+  return done.color || done.value
 }
 
 /**
@@ -163,7 +221,7 @@ export function canConfirmDraft(
  * caller does not have to check first, and a stray click cannot corrupt the state.
  */
 export function toggleDraftSelection(
-  available: readonly DraftTile[],
+  available: readonly DraftItem[],
   selectedIds: readonly string[],
   id: string,
 ): string[] {
@@ -180,13 +238,55 @@ export function toggleDraftSelection(
  * claiming either would be guessing at intent the player has not expressed yet.
  */
 export function draftAttribute(
-  available: readonly DraftTile[],
+  available: readonly DraftItem[],
   selectedIds: readonly string[],
 ): 'color' | 'value' | null {
-  const selected = selectedTiles(available, selectedIds)
+  const selected = selectedItems(available, selectedIds)
   if (selected.length < 2) return null
   const criteria = draftCriteria(selected)
   if (criteria.color && !criteria.value) return 'color'
   if (criteria.value && !criteria.color) return 'value'
   return null
+}
+
+/**
+ * How much drawer room a selection needs, split by where each item goes.
+ *
+ * Tiles and plates land in different places — the tile grid and the plate bays — so one combined count
+ * would say a draft fits when it does not. A sweep that takes three tiles and a plate needs three tile
+ * slots *and* a free bay; having four spare tile slots is no help at all.
+ */
+export function draftSpace(
+  available: readonly DraftItem[],
+  selectedIds: readonly string[],
+): DraftSpace {
+  let tiles = 0
+  let plates = 0
+  for (const item of selectedItems(available, selectedIds)) {
+    if (item.kind === 'plate') plates++
+    else tiles++
+  }
+  return { tiles, plates }
+}
+
+export interface DraftSpace {
+  readonly tiles: number
+  readonly plates: number
+}
+
+/**
+ * Will the drawer hold this draft?
+ *
+ * Separate from {@link canConfirmDraft} on purpose: a sweep can be perfectly legal and still impossible,
+ * because a colour sweep drags a plate along with the tiles and the bays may be full. Those are different
+ * problems and the player deserves to be told which one they have — "out of space" rather than a button
+ * that has quietly stopped working.
+ */
+export function draftFits(
+  available: readonly DraftItem[],
+  selectedIds: readonly string[],
+  capacity: DraftSpace,
+): boolean {
+  const need = draftSpace(available, selectedIds)
+  return need.tiles <= capacity.tiles && need.plates <= capacity.plates
 }

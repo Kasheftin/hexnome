@@ -630,6 +630,12 @@ source tiles, which are deliberately undraggable. Clicking one is a different ge
 tile still *absorbs* the press instead of letting it fall through to whatever is behind, which would
 select a tile the player was not pointing at.
 
+**The turn count advances in exactly one place.** Every completed action funnels through `endTurn()`,
+a pass included, so that is where `nextTurn` is called. Cancelling deliberately does not advance it —
+an abandoned action was not a turn. Turns are counted *within* a round (`nextRound` resets them), which
+is settled in `game/turn.ts` so round advancement will not have to decide it again. The round itself is
+pinned at 1 until the round structure exists.
+
 **Only a board placement ends a `putting` turn.** Reordering the drawer is not spending your turn, so
 `TableauView` emits `placed` only when the destination is the board — for a tile, that means the plate
 it landed on is itself on the board.
@@ -655,6 +661,97 @@ the whole point of it.
 Two affordance details worth keeping: `take` requires a free drawer slot as well as a non-empty source,
 and confirm additionally requires enough free slots for the whole selection. Both exist so the bar never
 lights a button leading to a move that would then have to be refused.
+
+### The plate's two faces
+
+Both faces come from one palette and one set of radii — `PLATE_TONES` and `PLATE_CELL_*` in
+`scene/constants.ts`. A brown slab carrying an inset dark-brown hex, a gap of bare slab, then a thin
+outline: the reverse wears one of these in its centre, the face-up side wears seven, and the only
+difference between the two is how many marks there are.
+
+The radii transfer without adjustment because the reverse's mark already sits in a single plate *cell*,
+so its proportions are cell proportions. The outline stops at 0.95 of a cell because neighbouring cells
+are only `√3` apart and at 1.0 adjacent outlines would touch.
+
+Two things worth keeping straight:
+
+- **The centre hole is darker than the six sockets** (`PLATE_TONES.hole`). It can never be filled, and a
+  plate that appears to offer seven usable spaces instead of six misleads about the rules. It keeps the
+  outline so it stays in the family; only the fill drops.
+- **Low metalness on both.** A metal is lit almost entirely by what it reflects and this scene's studio
+  environment is deliberately dark, so a shinier slab is a *darker* slab here. The reverse rendered
+  near-black at metalness 0.55 before this was pinned down.
+
+This replaced the painted socket texture (`plate-full.png`, art-spec Asset 0). Procedural geometry is
+what makes the treatment provably identical on both sides rather than merely similar.
+
+### Revealing a plate, and drafting it
+
+`Plate.faceDown` means "this plate's token is not known **here**", and the model holds no token for one —
+that is what stops anything reading a value before it is turned over. So `revealPlate(id, spec, petal)`
+takes the token from outside, and flipping plus creating the token is one operation: letting a caller do
+half would allow a face-up plate with no token, or a face-down plate whose token can be read.
+
+Today the specs wait in `dealtTokens`, a plain map in `GameView` — the local stand-in for the server that
+will hand out reveals in multiplayer. Keeping it out of the tableau means moving it to the server later
+changes one file rather than the shape of the game state.
+
+`source.ts::platesToReveal` returns the plates that are ready rather than revealing them, for the same
+reason: it has no token to give.
+
+**Drafting works on items, not tiles.** `DraftItem` is a tile *or* a revealed plate, and the plate enters
+as its own token. Two consequences worth pinning:
+
+- Kind identity is `${color}:${value}` — **not** keyed on tile-or-plate. A revealed red-1 plate and a
+  loose red-1 tile are the same kind, so a sweep takes one or the other and never both. Keying on the
+  kind would let a colour sweep take both, which is exactly the repetition the rule exists to prevent.
+  Which one the player takes is a real choice, because they cost different capacity.
+- `draftSpace` counts tiles and plates **separately**, because they land in different places. One
+  combined count would report a draft as fitting when it does not: three tiles and a plate need three
+  tile slots *and* a bay, and four spare tile slots are no help.
+
+`fits` is deliberately separate from `canConfirmDraft` so the bar can say *why* it is refusing — an
+incomplete sweep and a sweep that will not fit are different problems. "Out of space" takes priority over
+naming the sweep, because a finished-looking selection beside a dead button with no explanation is the
+worst of the three states.
+
+**A plate's draft state is drawn on its token**, not on the slab: the token is what the player is matching
+colours and symbols against, so that is where the eye already is, and it reuses the tile decor. Clicking
+anywhere on a revealed plate — slab or token — selects the plate.
+
+**A flip rebuilds the plate's view.** The face is baked into the mesh at creation, so `reconcileViews`
+compares the view's `faceDown` against the model and replaces the view when they disagree.
+
+### Restocking, and objects that appear mid-game
+
+`game/source.ts` owns the restock rule; `game/bag.ts` is the cursor into the seeded decks. The split is
+deliberate: the *order* is a frozen contract derived from the game id, while the cursor is ordinary play
+state that resets with the board.
+
+`pushLot` shifts the stack down and pushes a new lot at slot 0. It walks **from the bottom up**, so each
+lot's destination is already vacated — the other direction tries to move lot 0 onto an occupied lot 1 and
+is refused. Both the opening deal and every restock go through it, so the first lot cannot drift from the
+rest.
+
+**`shouldRefill` checks the round's budget as well as capacity.** With plates undraftable the two
+coincide, so the capacity check is redundant today. It is there because the day plates become draftable, a
+lot could empty and free capacity the round has no plates left to fill — and relying on capacity alone
+would then quietly deal more than a round's worth.
+
+**`TableauView` reconciles its views with the model instead of building them once.** This is what the
+restock broke: `onMounted`-only construction meant the freshly dealt plate and tiles had no mesh, so the
+model was correct and the top slot rendered *empty*. That failure mode looks exactly like broken rules,
+which is why it is worth naming. Reconciliation is driven by a `revision` prop that the owner bumps on
+every mutation, so it fires when something could have changed and never allocates in the render loop. It
+also removes orphaned views — nothing deletes objects yet, but omitting that branch would mean the first
+thing that does silently leaks meshes.
+
+A view created mid-game is marked `fresh` and **snaps** into place on its first frame rather than easing
+from the canvas corner. Appearing in place is what "a new lot was dealt" should look like.
+
+The heap scatter is keyed on the lot's **plate**, not its slot, precisely because of the shift: keyed on
+the slot, every heap in the column would silently re-scatter each time a new lot arrived, which reads as a
+glitch rather than a shift.
 
 ### The shared source column
 
