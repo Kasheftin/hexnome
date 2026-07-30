@@ -576,7 +576,28 @@ owns layout; the renderer follows.
 
 ## Routing and auth
 
-Routes: `/` (menu), `/play` (Stage 1 target), and later `/lobby`, `/lobby/:id`, `/game/:id`.
+Routes: `/` (menu) and `/game?id=…`, with `/lobby` and `/lobby/:id` later.
+
+**A game is identified by a client-minted id**, and its settings are stored against that id in
+localStorage — which is what lets `/game?id=…` survive a refresh. Only the *settings* persist so far:
+a reload restores which game it is (singleplayer, classic, four plates a round) and restarts the board.
+
+Two details that turned out to matter:
+
+- **Everything read back is parsed, never trusted.** localStorage is user-editable and outlives any
+  version of this code, so a stored entry can be hand-mangled, truncated, or left over from an older
+  shape. `parseGameSettings` refuses an unknown `kind` or `mode` outright — those name what the game
+  *is*, and substituting a default would drop a player into a different game from the one they
+  started — while repairing an out-of-range `platesPerRound`, which is only a dial.
+- **The unknown-game guard belongs in the router, not the component.** `GameView` pulls in three.js,
+  around 870 kB, so checking inside it meant downloading and parsing the whole chunk before bouncing
+  back to the menu: measured at over 2 s. A `beforeEnter` on the route decides from one localStorage
+  read and fetches nothing — 57 ms. The component keeps its own check as a fallback for storage
+  cleared mid-session.
+
+Settings are deliberately **not** wired into game setup yet. Rounds and drafting do not exist, and
+`platesPerRound` is a round-supply figure rather than the drawer's bay count, so binding it to
+`PLATE_SLOTS` would conflate two different numbers.
 
 Auth hides behind an interface from day one:
 

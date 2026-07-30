@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * The main game area.
+ * The game.
  *
  * The board is deliberately quiet — a procedural honeycomb on dark slate, no more. It only
  * ever says *where a plate may go*, so it should not compete with the plates. The colour
@@ -13,12 +13,21 @@
  * The header and help panel are DOM over the canvas. The *drawer* is not: its slots hold
  * live 3D tiles, and DOM sits above the canvas, so an opaque DOM drawer would cover its
  * own contents (docs/tech-spec.md, "UI chrome").
+ *
+ * Reached as `/game?id=…`. The id names a game whose settings were stored when it started, so a
+ * refresh comes back as the same *kind* of game — singleplayer, classic, four plates a round —
+ * rather than as a guess. The board itself still restarts; only the settings persist so far.
+ *
+ * An id that is missing or unreadable means there is no game to show, so the menu is the honest
+ * destination. Settings are not yet wired into setup: rounds and drafting do not exist, and
+ * `platesPerRound` is a round-supply figure, not the drawer's bay count, so binding it to
+ * PLATE_SLOTS would be conflating two different numbers.
  */
 import { mdiArrowDownLeftBold, mdiArrowDownRightBold } from '@mdi/js'
 import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { hexRectangle } from '@/game/hex'
 import { createTableau } from '@/game/tableau'
 import type { Axial } from '@/game/hex'
@@ -38,6 +47,30 @@ import {
 } from '@/scene/constants'
 import { createDrawerLayout } from '@/scene/drawerLayout'
 import { TILE_COLORS } from '@/scene/tileMaterials'
+import { modeInfo, type GameSettings } from '@/game/gameSettings'
+import { useSavedGames } from '@/composables/useSavedGames'
+
+const route = useRoute()
+const router = useRouter()
+const savedGames = useSavedGames()
+
+const gameId = computed(() => {
+  const id = route.query.id
+  return typeof id === 'string' ? id : ''
+})
+
+/** Restored from storage on every load, including a refresh. */
+const settings = shallowRef<GameSettings | null>(savedGames.get(gameId.value))
+
+const modeLabel = computed(() => {
+  const s = settings.value
+  return s ? modeInfo(s.mode)?.label ?? s.mode : ''
+})
+
+onMounted(() => {
+  // No id, or one we cannot read: there is no game here, so send them somewhere that works.
+  if (!settings.value) void router.replace('/')
+})
 
 /**
  * A rectangular playfield of 1661 cells (~41 × 41). Panning is clamped so its edge is
@@ -283,6 +316,12 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       >
         ← menu
       </RouterLink>
+      <p
+        v-if="settings"
+        class="game-id"
+      >
+        {{ modeLabel }} · {{ settings.platesPerRound }} plates/round
+      </p>
     </header>
 
     <aside class="chrome-panel help">
@@ -337,6 +376,15 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   font-size: 11px;
   letter-spacing: 0.1em;
   text-decoration: none;
+}
+
+.game-id {
+  margin: 0;
+  padding-left: 14px;
+  border-left: 1px solid #3a3222;
+  color: #79808f;
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 
 .help {
