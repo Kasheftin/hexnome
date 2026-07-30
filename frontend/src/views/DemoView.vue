@@ -10,9 +10,10 @@
  * live 3D tiles, and DOM sits above the canvas, so an opaque DOM drawer would cover its
  * own contents (docs/tech-spec.md, "UI chrome").
  */
+import { mdiArrowDownLeftBold, mdiArrowDownRightBold } from '@mdi/js'
 import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
-import { computed, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import { hexRectangle } from '@/game/hex'
 import { createTableau } from '@/game/tableau'
@@ -32,6 +33,7 @@ import {
   DRAWER_ROWS,
   PLATE_SLOTS,
 } from '@/scene/constants'
+import { createDrawerLayout } from '@/scene/drawerLayout'
 import { TILE_COLORS } from '@/scene/tileMaterials'
 
 /**
@@ -68,11 +70,12 @@ function shuffled(n: number): number[] {
   for (let slot = 0; slot < PLATE_SLOTS; slot++) {
     const plate = tableau.addPlate({ kind: 'plateSlot', slot })
     if (!plate) continue
-    tableau.addTile(randomTile(), {
-      kind: 'onPlate',
-      plateId: plate.id,
-      petal: Math.floor(Math.random() * 6),
-    })
+    // `fixed`: the plate's own tile. Part of the plate, never separable from it.
+    tableau.addTile(
+      randomTile(),
+      { kind: 'onPlate', plateId: plate.id, petal: Math.floor(Math.random() * 6) },
+      { fixed: true },
+    )
   }
 }
 
@@ -89,7 +92,8 @@ const counts = computed(() => {
   const plates = tableau.plates()
   return {
     drawer: tiles.filter(t => t.location.kind === 'drawer').length,
-    placed: tiles.filter(t => t.location.kind === 'onPlate').length,
+    // Only the player's own placements; a plate's own tile is part of the plate.
+    placed: tiles.filter(t => t.location.kind === 'onPlate' && !t.fixed).length,
     platesOnBoard: plates.filter(p => p.location.kind === 'board').length,
     platesHeld: plates.filter(p => p.location.kind === 'plateSlot').length,
   }
@@ -105,6 +109,70 @@ function onDrawerTarget(tileSlot: number | null, plateSlot: number | null, valid
   targetPlateSlot.value = plateSlot
   targetValid.value = valid
 }
+
+/* ── rotate buttons ──────────────────────────────────────────────────────────────
+ *
+ * Real DOM <button>s over the canvas, not 3D meshes: they get focus, keyboard
+ * activation and hover states for free, and stay crisp at any zoom.
+ *
+ * The drawer's layout is a pure function of the canvas size, and <TresCanvas
+ * window-size> makes the canvas exactly the viewport — so the same function that
+ * positions the 3D bays positions these buttons, and they cannot drift apart.
+ */
+const viewport = shallowRef({ w: window.innerWidth, h: window.innerHeight })
+function onResize(): void {
+  viewport.value = { w: window.innerWidth, h: window.innerHeight }
+}
+onMounted(() => window.addEventListener('resize', onResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+
+const drawerLayout = computed(() => createDrawerLayout(viewport.value.w, viewport.value.h))
+
+/** Bay whose plate is hovered in the 3D scene. */
+const hoveredPlateSlot = shallowRef<number | null>(null)
+/** True while the pointer is over the buttons themselves. */
+const overButtons = shallowRef(false)
+/** Last bay to be hovered, so the buttons keep a position while the pointer is on them. */
+const activePlateSlot = shallowRef<number | null>(null)
+
+function onHoverPlateSlot(slot: number | null): void {
+  hoveredPlateSlot.value = slot
+  if (slot !== null) activePlateSlot.value = slot
+}
+
+/**
+ * Moving onto a button leaves the canvas, which ends the 3D hover — so the buttons would
+ * vanish the moment you reached for them. They stay while the pointer is on them.
+ */
+const rotateControls = computed(() => {
+  const slot = hoveredPlateSlot.value ?? (overButtons.value ? activePlateSlot.value : null)
+  if (slot === null) return null
+  const centre = drawerLayout.value.plateSlotCentre(slot)
+  const plate = tableau.plates().find(
+    p => p.location.kind === 'plateSlot' && p.location.slot === slot,
+  )
+  if (!plate) return null
+  return { slot, plateId: plate.id, x: centre.x, y: centre.y }
+})
+
+function rotate(steps: number): void {
+  const controls = rotateControls.value
+  if (!controls) return
+  if (tableau.rotatePlate(controls.plateId, steps)) revision.value++
+}
+
+/**
+ * Rotation glyphs. `@mdi/js` exports each icon as a bare SVG path string on a 24×24 grid,
+ * so they inline as `<path d>` with no icon component and no font — and being named ESM
+ * exports, only the two used get bundled.
+ *
+ * Down-left reads as sweeping counter-clockwise, down-right as clockwise, which matches the
+ * side each button sits on.
+ */
+const ROTATE_ICONS = {
+  counterClockwise: mdiArrowDownLeftBold,
+  clockwise: mdiArrowDownRightBold,
+} as const
 
 /** Key light from the upper left, matching the direction the tile art assumes. */
 const KEY_LIGHT_POSITION = new Vector3(-7, 12, 5)
@@ -139,6 +207,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :tableau="tableau"
         @target="onTarget"
         @drawer-target="onDrawerTarget"
+        @hover-plate-slot="onHoverPlateSlot"
         @changed="revision++"
       />
 
@@ -159,6 +228,49 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
     </TresCanvas>
 
+    <!--
+      Positioned over the plate bay that is hovered. The wrapper ignores pointer events so
+      it never steals a drag from the board; only the buttons themselves accept them.
+    -->
+    <div
+      v-if="rotateControls"
+      class="rotate-controls"
+      :style="{ left: `${rotateControls.x}px`, top: `${rotateControls.y}px` }"
+      @pointerenter="overButtons = true"
+      @pointerleave="overButtons = false"
+    >
+      <button
+        type="button"
+        class="rotate-button left"
+        title="Rotate counter-clockwise (Q while dragging)"
+        aria-label="Rotate plate counter-clockwise"
+        @click="rotate(-1)"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path :d="ROTATE_ICONS.counterClockwise" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="rotate-button right"
+        title="Rotate clockwise (E while dragging)"
+        aria-label="Rotate plate clockwise"
+        @click="rotate(1)"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path :d="ROTATE_ICONS.clockwise" />
+        </svg>
+      </button>
+    </div>
+
     <header class="chrome-panel top">
       <h1 class="chrome-title">
         hexnome
@@ -177,6 +289,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         <dd>needs all 7 cells free</dd>
         <dt>Drag a tile</dt>
         <dd>only into an empty petal</dd>
+        <dt>Rotate a plate</dt>
+        <dd>arrows in the bay · Q / E while dragging</dd>
         <dt>Drag empty board</dt>
         <dd>scroll · wheel zooms</dd>
       </dl>
@@ -260,5 +374,66 @@ dd {
 .readout strong {
   color: #cfd4de;
   font-weight: 500;
+}
+
+.rotate-controls {
+  position: absolute;
+  /* Centred on the bay, so the two buttons sit in its empty upper corners. */
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/*
+ * Tucked into the bay's empty upper corners, just outboard of the two upper petals.
+ *
+ * Deliberately still touching the plate rather than floating clear above the drawer: the
+ * buttons are shown by hovering the plate, so any gap between plate and button would let
+ * the hover lapse while the pointer crossed it, and they would vanish as you reached.
+ */
+.rotate-button {
+  position: absolute;
+  top: -57px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #4a3f28;
+  border-radius: 50%;
+  background: rgb(14 18 22 / 92%);
+  color: #e8c878;
+  cursor: pointer;
+  transition: border-color 120ms, background-color 120ms, transform 120ms;
+  pointer-events: auto;
+}
+
+.rotate-button svg {
+  width: 15px;
+  height: 15px;
+  /* The glyph inherits the button's colour, so hover restyles both at once. */
+  fill: currentcolor;
+}
+
+.rotate-button.left {
+  left: -71px;
+}
+
+.rotate-button.right {
+  left: 45px;
+}
+
+.rotate-button:hover {
+  border-color: #8fe6c0;
+  background: rgb(24 34 30 / 96%);
+  color: #8fe6c0;
+}
+
+.rotate-button:active {
+  transform: scale(0.9);
+}
+
+.rotate-button:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 2px;
 }
 </style>

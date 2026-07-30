@@ -20,6 +20,12 @@
  * A tile's local transform is therefore just its petal offset, and easing that local
  * position gives the settle animation without reintroducing any lag.
  *
+ * **Tiles stay upright while their plate spins.** Rigid attachment would otherwise turn a
+ * tile with its plate, and while a hexagon maps onto itself every 60° its *symbol* does
+ * not — the art visibly tilts. So each tile cancels its plate's rotation locally, giving a
+ * world rotation of zero. Rotation still does what it should: tiles glide around the ring
+ * to their new petals, they just never look knocked askew doing it.
+ *
  * Board tiles are anchored in **world** space, drawer contents in **screen** space, so the
  * drawer stays put while the board pans beneath it. Each entity keeps both anchors in
  * sync, so crossing between containers eases from where it already is instead of jumping.
@@ -51,6 +57,7 @@ import {
   PLATE_BASE_Y,
   PLATE_SLOT_FILL,
   PLATE_SLOT_PX,
+  PLATE_SPIN_EASE,
   PLATE_TILE_LIFT,
   PLATE_WORLD_WIDTH,
   SYMBOL_TEXTURE_URLS,
@@ -73,6 +80,8 @@ const emit = defineEmits<{
   target: [cells: Axial[], valid: boolean]
   /** Drawer slot being targeted: a tile slot, a plate slot, or neither. */
   drawerTarget: [tileSlot: number | null, plateSlot: number | null, valid: boolean]
+  /** A plate resting in a drawer bay is hovered — or null. Drives the rotate buttons. */
+  hoverPlateSlot: [slot: number | null]
   changed: []
 }>()
 
@@ -93,6 +102,8 @@ interface View {
   screenX: number
   screenY: number
   scale: number
+  /** Current rendered spin in radians, eased toward the plate's rotation. */
+  spin: number
   /**
    * Which anchoring regime the object was in last frame — 'held', 'drawer' or the plate
    * it rides. Used only to notice a change and restart the scale ease.
@@ -122,7 +133,35 @@ let disposed = false
 
 const held = shallowRef<{ kind: 'tile' | 'plate', id: string } | null>(null)
 const pointer = { x: 0, y: 0 }
+/**
+ * Where the held object's centre sits relative to the pointer, in screen pixels, fixed at
+ * the moment of the grab.
+ *
+ * Without it a piece snaps its centre to the cursor the instant you press, which reads as
+ * the piece jumping out from under your finger. Grab a tile near its edge and it should
+ * stay held near its edge.
+ */
+const grabOffset = { x: 0, y: 0 }
+
+/**
+ * The held object's centre. **This, not the raw pointer, is what resolves the drop
+ * target** — otherwise an off-centre grab would highlight a cell the piece is not actually
+ * over, and the piece would land somewhere it never looked like it would.
+ */
+function heldPoint(): { x: number, y: number } {
+  return { x: pointer.x + grabOffset.x, y: pointer.y + grabOffset.y }
+}
 let targetTile: TileLocation | null = null
+/**
+ * The board cell `targetTile` was resolved *from*, kept rather than recomputed.
+ *
+ * Deriving it back from the petal index is where this went wrong: a logical petal `p` sits
+ * in direction `p − rotation`, so `petalCell(hole, petal)` only finds the right cell on an
+ * unrotated plate. On a rotated one it highlighted the pre-rotation cell. Since target
+ * resolution already starts from the cell under the pointer, holding on to it removes the
+ * inverse mapping — and the chance of getting it wrong — entirely.
+ */
+let targetTileCell: Axial | null = null
 let targetPlate: PlateLocation | null = null
 let targetValid = false
 let lastEmitted = ''
@@ -204,6 +243,11 @@ function pointerToCanvas(e: PointerEvent): { x: number, y: number } | null {
 /**
  * What is under the pointer. Tiles win over plates automatically: a tile sits higher than
  * the plate beneath it, so under a top-down camera it is the nearer hit.
+ *
+ * A plate's **own** tile is skipped, and the walk continues up to the plate it is welded
+ * to — so pressing anywhere on a plate, its own tile included, drags the plate. That is
+ * what makes the pair feel like one object in the hand and not merely in the rulebook.
+ * Refusing the grab outright would have been enforcement; this is affordance.
  */
 function pick(canvasX: number, canvasY: number): { kind: 'tile' | 'plate', id: string } | null {
   const cam = activeCamera()
@@ -217,7 +261,11 @@ function pick(canvasX: number, canvasY: number): { kind: 'tile' | 'plate', id: s
     let node: Object3D | null = hit.object
     while (node) {
       const owner = owners.get(node)
-      if (owner) return owner
+      if (owner && (owner.kind !== 'tile' || props.tableau.canMoveTile(owner.id))) {
+        return owner
+      }
+      // An immovable tile is transparent to picking: keep climbing, and since it is
+      // parented to its plate the very next owner found is that plate.
       node = node.parent
     }
   }
@@ -226,10 +274,12 @@ function pick(canvasX: number, canvasY: number): { kind: 'tile' | 'plate', id: s
 
 /* ── target resolution ────────────────────────────────────────────────────────── */
 
-function cellUnderPointer(): Axial | null {
+/** The board cell under the held object's centre. */
+function cellUnderHeld(): Axial | null {
   const cam = activeCamera()
   if (!cam) return null
-  const p = screenToBoard(cam, sizes.width.value, sizes.height.value, pointer.x, pointer.y)
+  const at = heldPoint()
+  const p = screenToBoard(cam, sizes.width.value, sizes.height.value, at.x, at.y)
   const cell = worldToAxial(p, HEX_SIZE)
   return props.tableau.isBoardCell(cell) ? cell : null
 }
@@ -237,31 +287,35 @@ function cellUnderPointer(): Axial | null {
 function resolveTarget(): void {
   const current = held.value
   targetTile = null
+  targetTileCell = null
   targetPlate = null
   targetValid = false
   if (!current) return
 
   const l = layout.value
-  const overDrawer = l.contains(pointer.x, pointer.y)
+  const at = heldPoint()
+  const overDrawer = l.contains(at.x, at.y)
 
   if (current.kind === 'tile') {
     if (overDrawer) {
       // A tile may go in a tile slot. The plate slots and the frame take nothing.
-      const slot = l.slotAt(pointer.x, pointer.y)
+      const slot = l.slotAt(at.x, at.y)
       targetTile = slot === null ? null : { kind: 'drawer', slot }
     } else {
-      const cell = cellUnderPointer()
+      const cell = cellUnderHeld()
       // petalAt returns null for the hole and for any uncovered cell, which is exactly
       // the "tiles only go into plate petals" rule.
       targetTile = cell ? props.tableau.petalAt(cell) : null
+      targetTileCell = targetTile ? cell : null
     }
     targetValid = targetTile !== null && props.tableau.canPlaceTile(targetTile, current.id)
   } else {
     if (overDrawer) {
-      const slot = l.plateSlotAt(pointer.x, pointer.y)
+      const slot = l.plateSlotAt(at.x, at.y)
       targetPlate = slot === null ? null : { kind: 'plateSlot', slot }
     } else {
-      const cell = cellUnderPointer()
+      // A plate's origin is its hole, so its centre resolves straight to the hole cell.
+      const cell = cellUnderHeld()
       targetPlate = cell ? { kind: 'board', hole: cell } : null
     }
     targetValid = targetPlate !== null && props.tableau.canPlacePlate(targetPlate, current.id)
@@ -278,10 +332,8 @@ function emitTarget(): void {
   if (targetTile?.kind === 'drawer') {
     tileSlot = targetTile.slot
   } else if (targetTile?.kind === 'onPlate') {
-    const plate = props.tableau.plate(targetTile.plateId)
-    if (plate?.location.kind === 'board') {
-      cells = [petalCell(plate.location.hole, targetTile.petal)]
-    }
+    // The cell we resolved from — never re-derived from the petal index.
+    if (targetTileCell) cells = [targetTileCell]
   } else if (targetPlate?.kind === 'plateSlot') {
     plateSlot = targetPlate.slot
   } else if (targetPlate?.kind === 'board') {
@@ -309,7 +361,14 @@ function onPointerDown(e: PointerEvent): void {
   held.value = hit
   pointer.x = c.x
   pointer.y = c.y
+
+  // Keep the piece where it already is relative to the cursor.
+  const view = hit.kind === 'tile' ? tileViews.get(hit.id) : plateViews.get(hit.id)
+  grabOffset.x = view ? view.screenX - c.x : 0
+  grabOffset.y = view ? view.screenY - c.y : 0
+
   document.body.style.cursor = 'grabbing'
+  reportHoverPlateSlot(null)
   resolveTarget()
 
   window.addEventListener('pointermove', onWindowPointerMove)
@@ -338,7 +397,10 @@ function onWindowPointerUp(): void {
   }
 
   held.value = null
+  grabOffset.x = 0
+  grabOffset.y = 0
   targetTile = null
+  targetTileCell = null
   targetPlate = null
   targetValid = false
   lastEmitted = ''
@@ -346,11 +408,61 @@ function onWindowPointerUp(): void {
   emit('drawerTarget', null, null, false)
 }
 
+let lastHoverPlateSlot: number | null = null
+
+function reportHoverPlateSlot(slot: number | null): void {
+  if (slot === lastHoverPlateSlot) return
+  lastHoverPlateSlot = slot
+  emit('hoverPlateSlot', slot)
+}
+
+/**
+ * The bay under a screen point, if it holds a plate.
+ *
+ * The hover region for the rotate buttons is this **rectangle**, not the plate's own
+ * geometry. Raycasting the plate is far too strict: a flower has gaps between its petals,
+ * and the buttons sit in the bay's corners where there is no petal at all — so crossing
+ * either would report a miss, drop the hover, and make the buttons vanish unless you moved
+ * fast enough to outrun the gap. The bay contains the plate and both buttons, so with the
+ * rectangle there is no gap anywhere and no dependence on pointer speed.
+ */
+function plateBayAt(canvasX: number, canvasY: number): number | null {
+  const slot = layout.value.plateSlotAt(canvasX, canvasY)
+  if (slot === null) return null
+  const occupied = props.tableau.plates().some(
+    plate => plate.location.kind === 'plateSlot' && plate.location.slot === slot,
+  )
+  return occupied ? slot : null
+}
+
 function onCanvasPointerMove(e: PointerEvent): void {
   if (held.value) return
   const c = pointerToCanvas(e)
   if (!c) return
-  document.body.style.cursor = pick(c.x, c.y) ? 'grab' : ''
+  const hit = pick(c.x, c.y)
+  document.body.style.cursor = hit ? 'grab' : ''
+
+  // Rotate buttons appear only for a plate resting in a bay — never for one on the board.
+  reportHoverPlateSlot(plateBayAt(c.x, c.y))
+}
+
+function onCanvasPointerLeave(): void {
+  document.body.style.cursor = ''
+  reportHoverPlateSlot(null)
+}
+
+/**
+ * q / e turn the plate currently in hand. Only while dragging — a plate resting in a bay is
+ * turned with its buttons, and a plate on the board is not turnable at all.
+ */
+function onKeyDown(e: KeyboardEvent): void {
+  const current = held.value
+  if (!current || current.kind !== 'plate') return
+  const key = e.key.toLowerCase()
+  const steps = key === 'e' ? 1 : key === 'q' ? -1 : 0
+  if (steps === 0) return
+  e.preventDefault()
+  if (props.tableau.rotatePlate(current.id, steps)) emit('changed')
 }
 
 /* ── per-frame placement ──────────────────────────────────────────────────────── */
@@ -374,8 +486,9 @@ onBeforeRender(({ delta }) => {
 
     if (current?.kind === 'plate' && current.id === id) {
       setRegime(view, 'held')
-      view.screenX = pointer.x
-      view.screenY = pointer.y
+      const at = heldPoint()
+      view.screenX = at.x
+      view.screenY = at.y
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, HELD_TILE_Y, p.z)
       approachScale(view, 1, ease)
@@ -398,6 +511,13 @@ onBeforeRender(({ delta }) => {
       view.screenY = s.y
     }
 
+    // Ease toward the plate's rotation. `rotation` is a running integer, never wrapped, so
+    // this angle is continuous — a step from 5 to 0 turns 60° on, not 300° back.
+    const spinTarget = -plate.rotation * (Math.PI / 3)
+    view.spin += (spinTarget - view.spin) * Math.min(1, delta * PLATE_SPIN_EASE)
+    if (Math.abs(spinTarget - view.spin) < 0.0005) view.spin = spinTarget
+    view.object.rotation.y = view.spin
+
     view.object.position.copy(view.world)
     view.object.scale.setScalar(view.scale)
     view.object.updateMatrixWorld()
@@ -410,13 +530,16 @@ onBeforeRender(({ delta }) => {
     if (current?.kind === 'tile' && current.id === id) {
       setRegime(view, 'held')
       reparent(view.object, scene.value)
-      view.screenX = pointer.x
-      view.screenY = pointer.y
+      const at = heldPoint()
+      view.screenX = at.x
+      view.screenY = at.y
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, HELD_TILE_Y, p.z)
       approachScale(view, 1, ease)
       view.object.position.copy(view.world)
       view.object.scale.setScalar(view.scale)
+      // No parent spin to cancel once it is off the plate.
+      view.object.rotation.y = 0
     } else if (tile.location.kind === 'drawer') {
       setRegime(view, 'drawer')
       reparent(view.object, scene.value)
@@ -428,6 +551,7 @@ onBeforeRender(({ delta }) => {
       approachScale(view, drawerTileScale(upp), ease)
       view.object.position.copy(view.world)
       view.object.scale.setScalar(view.scale)
+      view.object.rotation.y = 0
     } else {
       // Rigid with the plate: parented to it, so it inherits the plate's position and
       // scale exactly and on the same frame. Only the local settle into the petal eases.
@@ -446,6 +570,8 @@ onBeforeRender(({ delta }) => {
       }
       approachScale(view, 1, ease)
       view.object.scale.setScalar(view.scale)
+      // Undo the plate's spin so the tile's symbol reads upright at every rotation.
+      view.object.rotation.y = -plateView.spin
       // Keep the world and screen anchors current, so being picked up starts from here.
       view.object.updateMatrixWorld()
       view.object.getWorldPosition(view.world)
@@ -478,9 +604,11 @@ function build(symbols: Texture[]): void {
       screenX: 0,
       screenY: 0,
       scale: 1,
+      spin: -plate.rotation * (Math.PI / 3),
       regime: '',
       settled: false,
     })
+    group.rotation.y = -plate.rotation * (Math.PI / 3)
     owners.set(group, { kind: 'plate', id: plate.id })
     scene.value.add(group)
     unregisters.push(registerGrabbable(group))
@@ -502,6 +630,7 @@ function build(symbols: Texture[]): void {
       screenX: 0,
       screenY: 0,
       scale: 1,
+      spin: 0,
       regime: '',
       settled: false,
     })
@@ -517,6 +646,8 @@ onMounted(() => {
   canvas = canvasEl()
   canvas?.addEventListener('pointerdown', onPointerDown)
   canvas?.addEventListener('pointermove', onCanvasPointerMove)
+  canvas?.addEventListener('pointerleave', onCanvasPointerLeave)
+  window.addEventListener('keydown', onKeyDown)
 
   const loader = new TextureLoader()
   Promise.all(
@@ -539,6 +670,8 @@ onBeforeUnmount(() => {
   disposed = true
   canvas?.removeEventListener('pointerdown', onPointerDown)
   canvas?.removeEventListener('pointermove', onCanvasPointerMove)
+  canvas?.removeEventListener('pointerleave', onCanvasPointerLeave)
+  window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('pointermove', onWindowPointerMove)
   document.body.style.cursor = ''
   for (const off of unregisters) off()

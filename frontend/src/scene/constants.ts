@@ -104,9 +104,6 @@ export const TILE_DRAG_HEIGHT = 1.1
  */
 export const TILE_ENV_INTENSITY = 1
 
-/** Height of the drop-target ring. Above the plates, below a dragged tile. */
-export const HIGHLIGHT_Y = 0.05
-
 /* ── Drawer ──────────────────────────────────────────────────────────────────── */
 
 export const DRAWER_COLS = 8
@@ -145,10 +142,52 @@ export const PLATE_SLOT_FILL = 0.92
 /** World width of a plate flower, in units of HEX_SIZE: hole plus two petals across. */
 export const PLATE_WORLD_WIDTH = 3 * Math.sqrt(3)
 
-/** Height of a plate's base. Above the board cells, below the tiles that sit in it. */
-export const PLATE_BASE_Y = 0.05
-/** How far a tile floats above its plate's base, at plate scale 1. */
-export const PLATE_TILE_LIFT = 0.19
+/**
+ * World height of a plate's underside. Just clear of the board cells at PLATE_Y, rather than
+ * level with them — coplanar faces z-fight along their shared silhouette.
+ */
+export const PLATE_BASE_Y = 0.03
+
+/**
+ * Thickness of the plate's slab body, and how far it is shrunk about its centre.
+ *
+ * A thin solid, not a decal: the flower-shaped slab is what makes a plate read as one
+ * physical piece rather than seven loose hexes. Its bevelled edge catches the key light,
+ * which is what sells the thickness under a top-down camera.
+ *
+ * PLATE_BASE_MARGIN is an inward **edge offset**, in world units — not a scale factor. The
+ * rim left around each petal socket is `0.0866 − margin`, uniform on every side. Scaling the
+ * outline instead moves inner and outer features by different amounts and leaves the sockets
+ * flush against the slab's edge; see scene/plateBaseGeometry.ts.
+ */
+export const PLATE_BASE_THICKNESS = 0.08
+export const PLATE_BASE_MARGIN = 0.03
+export const PLATE_BASE_BEVEL = 0.018
+
+/** Local heights within a plate, stacked on top of the slab. */
+export const PLATE_SOCKET_Y = PLATE_BASE_THICKNESS + 0.002
+export const PLATE_RIM_Y = PLATE_BASE_THICKNESS + 0.012
+
+/**
+ * Centre height of a tile sitting in a petal, in plate-local units.
+ *
+ * Set so the tile's underside falls just below the socket face, seating it in the socket
+ * rather than hovering over it.
+ */
+export const PLATE_TILE_LIFT = PLATE_SOCKET_Y + TILE_THICKNESS / 2 - 0.03
+
+/**
+ * Height of the drop-target ring.
+ *
+ * Above a plate's brass socket rims, not just above the board cells. The rims are opaque and
+ * write depth, so a marker below them is simply invisible on a plate — which is where tiles
+ * are dropped. Under a top-down orthographic camera height costs nothing in apparent
+ * position, so this can be as high as it needs to be.
+ */
+export const HIGHLIGHT_Y = PLATE_BASE_Y + PLATE_RIM_Y + 0.02
+
+/** How briskly a plate eases into a new rotation. Higher is snappier. */
+export const PLATE_SPIN_EASE = 13
 
 /**
  * Heights, which under a top-down orthographic camera are purely a draw order.

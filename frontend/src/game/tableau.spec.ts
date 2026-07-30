@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { axialKey, hexRectangle } from './hex'
-import { petalCell, plateCells } from './plate'
+import { normalizePetal, petalCell, plateCells } from './plate'
 import { createTableau, type PlateLocation, type TileLocation } from './tableau'
 
 function tableau() {
@@ -130,6 +130,155 @@ describe('a moved plate carries its tiles', () => {
     const t = tableau()
     const a = t.addPlate(onBoard(0, 0))!
     expect(t.movePlate(a.id, onBoard(0, 0))).toBe(true)
+  })
+})
+
+describe("a plate's own tile is not separable", () => {
+  function withOwnTile() {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    const own = t.addTile(RED, onPetal(p.id, 2), { fixed: true })!
+    return { t, p, own }
+  }
+
+  it('cannot be moved to another petal, or to the drawer', () => {
+    const { t, p, own } = withOwnTile()
+    expect(t.canMoveTile(own.id)).toBe(false)
+    expect(t.moveTile(own.id, onPetal(p.id, 4))).toBe(false)
+    expect(t.moveTile(own.id, inDrawer(0))).toBe(false)
+    expect(t.tile(own.id)!.location).toEqual(onPetal(p.id, 2))
+  })
+
+  it('still occupies its petal, so nothing can be dropped on it', () => {
+    const { t, p } = withOwnTile()
+    expect(t.canPlaceTile(onPetal(p.id, 2))).toBe(false)
+  })
+
+  it('is still a full tile, so scoring will see it', () => {
+    const { t, own } = withOwnTile()
+    expect(t.tiles().some(tile => tile.id === own.id)).toBe(true)
+    expect(t.tiles()).toHaveLength(1)
+  })
+
+  it('travels with its plate', () => {
+    const { t, p, own } = withOwnTile()
+    expect(t.movePlate(p.id, onBoard(3, -1))).toBe(true)
+    expect(axialKey(t.cellOfTile(own.id)!)).toBe(axialKey(petalCell({ q: 3, r: -1 }, 2)))
+  })
+
+  it('does not restrict the player\'s own tiles on the same plate', () => {
+    const { t, p } = withOwnTile()
+    const mine = t.addTile(BLUE, onPetal(p.id, 5))!
+    expect(t.canMoveTile(mine.id)).toBe(true)
+    expect(t.moveTile(mine.id, inDrawer(0))).toBe(true)
+  })
+
+  it('treats ordinary tiles as movable by default', () => {
+    const t = tableau()
+    const tile = t.addTile(RED, inDrawer(0))!
+    expect(tile.fixed).toBe(false)
+    expect(t.canMoveTile(tile.id)).toBe(true)
+  })
+})
+
+describe('rotating a plate', () => {
+  it('never changes which cells it covers — a flower is six-fold symmetric', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    const covered = () => plateCells({ q: 0, r: 0 })
+      .filter(c => t.coverageAt(c)?.plateId === p.id).length
+    expect(covered()).toBe(7)
+    for (let i = 0; i < 6; i++) {
+      t.rotatePlate(p.id, 1)
+      expect(covered()).toBe(7)
+    }
+  })
+
+  it('leaves placement legality untouched', () => {
+    const t = tableau()
+    const a = t.addPlate(onBoard(0, 0))!
+    t.rotatePlate(a.id, 3)
+    // Still blocks the same overlaps, still allows the same neighbour.
+    expect(t.canPlacePlate(onBoard(1, 0))).toBe(false)
+    expect(t.canPlacePlate(onBoard(1, 2))).toBe(true)
+  })
+
+  it('moves a tile to the next cell clockwise per step', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    const tile = t.addTile(RED, onPetal(p.id, 0))!
+    // Petal 0 points along direction 0 while unrotated.
+    expect(axialKey(t.cellOfTile(tile.id)!)).toBe(axialKey(petalCell({ q: 0, r: 0 }, 0)))
+    // One clockwise step: logical petal p points in direction p − rotation.
+    t.rotatePlate(p.id, 1)
+    expect(axialKey(t.cellOfTile(tile.id)!)).toBe(axialKey(petalCell({ q: 0, r: 0 }, 5)))
+    t.rotatePlate(p.id, 1)
+    expect(axialKey(t.cellOfTile(tile.id)!)).toBe(axialKey(petalCell({ q: 0, r: 0 }, 4)))
+  })
+
+  it('returns to where it started after six steps', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    const tile = t.addTile(RED, onPetal(p.id, 2))!
+    const before = axialKey(t.cellOfTile(tile.id)!)
+    for (let i = 0; i < 6; i++) t.rotatePlate(p.id, 1)
+    expect(axialKey(t.cellOfTile(tile.id)!)).toBe(before)
+  })
+
+  it('is symmetric: clockwise then counter-clockwise is a no-op', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    const tile = t.addTile(RED, onPetal(p.id, 4))!
+    const before = axialKey(t.cellOfTile(tile.id)!)
+    t.rotatePlate(p.id, 1)
+    t.rotatePlate(p.id, -1)
+    expect(axialKey(t.cellOfTile(tile.id)!)).toBe(before)
+    expect(t.plate(p.id)!.rotation).toBe(0)
+  })
+
+  it('keeps a running total rather than wrapping, so the angle stays continuous', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    for (let i = 0; i < 8; i++) t.rotatePlate(p.id, 1)
+    expect(t.plate(p.id)!.rotation).toBe(8)
+    t.rotatePlate(p.id, -20)
+    expect(t.plate(p.id)!.rotation).toBe(-12)
+  })
+
+  it('keeps cell and petal mappings mutually inverse at every rotation', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    // One tile, walked around the petals — the two mappings must round-trip through it.
+    const tile = t.addTile(BLUE, onPetal(p.id, 0))!
+    const hole = { q: 0, r: 0 }
+
+    for (let rot = 0; rot < 6; rot++) {
+      for (let petal = 0; petal < 6; petal++) {
+        expect(t.moveTile(tile.id, onPetal(p.id, petal))).toBe(true)
+        const cell = t.cellOfTile(tile.id)!
+        // cell -> petal must undo petal -> cell.
+        expect(t.petalAt(cell)).toEqual(onPetal(p.id, petal))
+        // …and that cell is the one the sign convention predicts.
+        expect(axialKey(cell)).toBe(axialKey(petalCell(hole, normalizePetal(petal - rot))))
+      }
+      t.rotatePlate(p.id, 1)
+    }
+  })
+
+  it('survives a move, keeping its rotation', () => {
+    const t = tableau()
+    const p = t.addPlate(inPlateSlot(0))!
+    t.rotatePlate(p.id, 2)
+    expect(t.movePlate(p.id, onBoard(0, 0))).toBe(true)
+    expect(t.plate(p.id)!.rotation).toBe(2)
+  })
+
+  it('rejects a zero or fractional step', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    expect(t.rotatePlate(p.id, 0)).toBe(false)
+    expect(t.rotatePlate(p.id, 0.5)).toBe(false)
+    expect(t.rotatePlate('nope', 1)).toBe(false)
   })
 })
 

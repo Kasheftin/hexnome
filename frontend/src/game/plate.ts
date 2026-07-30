@@ -39,3 +39,8 @@ export function petalIndexOf(hole: Axial, cell: Axial): number | null {
 export function isPetal(petal: number): boolean {
   return Number.isInteger(petal) && petal >= 0 && petal < PETAL_COUNT
 }
+
+/** Wrap any integer into 0…5, negatives included. */
+export function normalizePetal(n: number): number {
+  return ((n % PETAL_COUNT) + PETAL_COUNT) % PETAL_COUNT
+}

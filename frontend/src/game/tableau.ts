@@ -14,7 +14,7 @@
  * cannot disagree.
  */
 import { axialKey, type Axial } from './hex'
-import { PETAL_COUNT, isPetal, plateCells } from './plate'
+import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
 
 export type PlateLocation =
   | { readonly kind: 'board', readonly hole: Axial }
@@ -27,6 +27,18 @@ export type TileLocation =
 export interface Plate {
   readonly id: string
   readonly location: PlateLocation
+  /**
+   * Clockwise rotation in sixth-turn steps.
+   *
+   * A flower is six-fold symmetric, so rotating a plate never changes *which* seven cells
+   * it covers — only which petal points where. Rotation is therefore a permutation of the
+   * petals, and placement legality is entirely unaffected by it.
+   *
+   * Deliberately **not** wrapped into 0…5. Kept as a running integer so the rendered angle
+   * is continuous and can be eased; wrapping would make a step from 5 to 0 look like a
+   * 300° lurch backwards. Every logical use takes it modulo six.
+   */
+  readonly rotation: number
 }
 
 export interface TileSpec {
@@ -39,6 +51,17 @@ export interface TileSpec {
 export interface Tile extends TileSpec {
   readonly id: string
   readonly location: TileLocation
+  /**
+   * True for a plate's **own** tile — the one it arrives with. Plate and tile are one
+   * indivisible object, so this tile cannot be lifted off, moved to another petal, or
+   * returned to the drawer. It travels with the plate and nowhere else.
+   *
+   * It is still a full tile in every other respect, and deliberately so: it takes part in
+   * colour and value groups exactly like any other. Folding it into the `Plate` record
+   * would hide it from anything that enumerates tiles — scoring, most obviously — which is
+   * a bug waiting to be written. So it exists as a tile and is merely immovable.
+   */
+  readonly fixed: boolean
 }
 
 /** What a plate puts on a board cell. `petal` is null for the hole. */
@@ -75,9 +98,22 @@ export interface Tableau {
 
   canPlacePlate(location: PlateLocation, movingId?: string): boolean
   canPlaceTile(location: TileLocation, movingId?: string): boolean
+  /**
+   * May this tile be picked up at all? False for a plate's own tile.
+   *
+   * The single source of truth for that rule: `moveTile` refuses anything this rejects, and
+   * the UI consults it so it never offers a grab it cannot complete.
+   */
+  canMoveTile(id: string): boolean
 
-  addPlate(location: PlateLocation): Plate | undefined
-  addTile(spec: TileSpec, location: TileLocation): Tile | undefined
+  addPlate(location: PlateLocation, rotation?: number): Plate | undefined
+  /** Turn a plate by `steps` sixth-turns; positive is clockwise on screen. */
+  rotatePlate(id: string, steps: number): boolean
+  addTile(
+    spec: TileSpec,
+    location: TileLocation,
+    options?: { readonly fixed?: boolean },
+  ): Tile | undefined
 
   movePlate(id: string, location: PlateLocation): boolean
   moveTile(id: string, location: TileLocation): boolean
@@ -118,8 +154,12 @@ export function createTableau({
       if (plate.location.kind !== 'board') continue
       const cellsOfPlate = plateCells(plate.location.hole)
       cellsOfPlate.forEach((cell, index) => {
-        // plateCells puts the hole first, then petals 0..5.
-        next.set(axialKey(cell), { plateId: plate.id, petal: index === 0 ? null : index - 1 })
+        // plateCells puts the hole first, then the six directions in order. A cell lying in
+        // direction d holds logical petal (d + rotation): the plate turned under it.
+        next.set(axialKey(cell), {
+          plateId: plate.id,
+          petal: index === 0 ? null : normalizePetal(index - 1 + plate.rotation),
+        })
       })
     }
     coverage = next
@@ -179,25 +219,36 @@ export function createTableau({
       if (!tile || tile.location.kind !== 'onPlate') return undefined
       const plate = platesById.get(tile.location.plateId)
       if (!plate || plate.location.kind !== 'board') return undefined
-      const cellsOfPlate = plateCells(plate.location.hole)
-      return cellsOfPlate[tile.location.petal + 1]
+      // Inverse of the coverage mapping: logical petal p points in direction p − rotation.
+      const direction = normalizePetal(tile.location.petal - plate.rotation)
+      return petalCell(plate.location.hole, direction)
     },
 
     canPlacePlate,
     canPlaceTile,
 
-    addPlate(location) {
+    canMoveTile(id) {
+      const tile = tilesById.get(id)
+      return tile !== undefined && !tile.fixed
+    },
+
+    addPlate(location, rotation = 0) {
       if (!canPlacePlate(location)) return undefined
-      const plate: Plate = { id: `p${nextId++}`, location }
+      const plate: Plate = { id: `p${nextId++}`, location, rotation }
       platesById.set(plate.id, plate)
       occupants.set(plateLocationKey(location), plate.id)
       reindexCoverage()
       return plate
     },
 
-    addTile(spec, location) {
+    addTile(spec, location, options) {
       if (!canPlaceTile(location)) return undefined
-      const tile: Tile = { ...spec, id: `t${nextId++}`, location }
+      const tile: Tile = {
+        ...spec,
+        id: `t${nextId++}`,
+        location,
+        fixed: options?.fixed ?? false,
+      }
       tilesById.set(tile.id, tile)
       occupants.set(tileLocationKey(location), tile.id)
       return tile
@@ -207,7 +258,7 @@ export function createTableau({
       const plate = platesById.get(id)
       if (!plate || !canPlacePlate(location, id)) return false
       occupants.delete(plateLocationKey(plate.location))
-      const moved: Plate = { id, location }
+      const moved: Plate = { id, location, rotation: plate.rotation }
       platesById.set(id, moved)
       occupants.set(plateLocationKey(location), id)
       // Tiles on this plate need no update at all — they are addressed by petal.
@@ -215,9 +266,19 @@ export function createTableau({
       return true
     },
 
+    rotatePlate(id, steps) {
+      const plate = platesById.get(id)
+      if (!plate || !Number.isInteger(steps) || steps === 0) return false
+      platesById.set(id, { ...plate, rotation: plate.rotation + steps })
+      // The covered cells do not change, but which petal each one holds does.
+      reindexCoverage()
+      return true
+    },
+
     moveTile(id, location) {
       const tile = tilesById.get(id)
-      if (!tile || !canPlaceTile(location, id)) return false
+      // A plate's own tile is part of the plate and never moves on its own.
+      if (!tile || tile.fixed || !canPlaceTile(location, id)) return false
       occupants.delete(tileLocationKey(tile.location))
       const moved: Tile = { ...tile, location }
       tilesById.set(id, moved)

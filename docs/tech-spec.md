@@ -387,8 +387,81 @@ since the tile inherits it.
 Reparenting has one requirement: `add()` only reassigns the parent, leaving the local transform to be
 reinterpreted against the new one, so position and scale must be converted or the object jumps.
 
+A plate's body is a **thin flower-shaped slab** that the seven sockets sit on. Without it a plate is
+seven unconnected hexes floating over the board, with the board showing through the notches between
+petals. Being a real extruded solid rather than a decal, its bevelled edge catches the key light, which
+is what conveys thickness under a camera that only ever sees the top.
+
+Its outline is **computed, not hardcoded**: take the seven cells' hexagons, keep the edges belonging to
+exactly one of them, and chain those into a loop. That gives the union's boundary — an 18-sided polygon —
+and stays correct if the footprint ever changes. Two things worth checking rather than assuming, both
+verified: every boundary vertex has exactly two boundary edges, so the chain is one closed loop rather
+than several; and the extents are `√7 ≈ 2.646` at a petal's far corners against `2.0` at the notches.
+A petal presents a *flat side* outward, not a vertex, so the reach is **not** `√3 + 1`.
+
+The slab is then shrunk by an inward **edge offset**, mitered at the corners — *not* by scaling. This
+distinction is not cosmetic. Scaling about the centre displaces each edge in proportion to its distance
+from the centre, so inner features barely move while outer ones move a lot. A uniform 0.97 scale left
+each petal socket with a rim of **0.0087** where the geometry wants **0.087** — a tenfold difference, the
+sockets flush against the slab's edge with a wide margin remaining inboard, which is exactly what read as
+untidy. Offsetting every edge by a constant keeps each socket concentric with its lobe: measured rim
+spread across the six petals is **0**, and the rim is `0.0866 − margin` by construction.
+
 The hole is drawn with no rim and a near-black face so it reads as an absence. That has to be legible
 at a glance, or a plate looks like it has seven usable spaces instead of six.
+
+**The drop marker has to clear the plate, not just the board.** A plate's brass socket rims are opaque
+and write depth, so a marker sitting below them is simply invisible on a plate — which is precisely
+where tiles get dropped. `HIGHLIGHT_Y` is therefore derived from the plate's own stack rather than being
+a bare number. Height is free here: under a top-down orthographic camera it does not shift a thing's
+apparent position at all.
+
+One ordering trap in `scene/constants.ts`: these heights are now derived from one another, and a `const`
+referring to one declared further down the file throws a temporal-dead-zone `ReferenceError` at module
+load. Typecheck did not catch it; only running it did.
+
+**Rotation is a permutation, not a transform of the footprint.** A flower is six-fold symmetric, so
+turning a plate cannot change which seven cells it covers — placement legality is completely unaffected
+by rotation, and no code needs to re-check it. What changes is the mapping between cells and petals: a
+cell lying in direction `d` from the hole holds logical petal `d + rotation`, and conversely petal `p`
+points in direction `p − rotation`. Those two are inverses, and a test walks a tile through all six
+petals at all six rotations to hold them that way.
+
+The sign follows from the projection and is easy to get backwards: world `+Z` is screen *down*, so
+`φ = atan2(z, x)` increases **clockwise** on screen; a three.js rotation about `+Y` by `a` maps
+`φ → φ − a`; and petal index increases as `φ` decreases. Hence `group.rotation.y = −rotation · π/3`
+with `rotation` counted in clockwise steps.
+
+**Tiles stay upright while their plate spins.** Rigid parenting would otherwise turn each tile with
+its plate, and while a hexagon maps onto itself every 60° its *symbol* does not — the art visibly tilts.
+Each tile therefore cancels its plate's rotation locally, giving a world rotation of zero. Rotation
+still does what it should: tiles glide around the ring to their new petals, they just never look knocked
+askew doing it.
+
+**Never re-derive a cell from a petal index in the view.** Target resolution starts from the cell under
+the pointer, so it keeps that cell for the highlight. An earlier version recomputed it as
+`petalCell(hole, petal)` — treating a logical petal index as a *direction*, which they only are when
+rotation is zero. On a rotated plate it highlighted the pre-rotation cell, 177 px away from where the
+tile would actually land. The model was never wrong; the duplicated inverse in the view was. Holding on
+to the resolved cell removes the inverse mapping, and the chance of getting it wrong, entirely.
+
+`Plate.rotation` is a **running integer, never wrapped**. Every logical use takes it modulo six, but the
+rendered angle is derived from the raw value so it stays continuous and can be eased — wrapping would
+turn a step from 5 to 0 into a 300° lurch backwards. The tiles need no attention at all: they are
+parented to the plate, so they turn with it.
+
+Rotation is offered in the drawer (two DOM buttons on hover) and in hand (`q`/`e`), never for a plate
+already on the board. Those buttons are real `<button>` elements over the canvas — focusable, keyboard-
+activatable, crisp — positioned from the same `createDrawerLayout` that places the 3D bays, so the two
+cannot drift apart, and they are tucked into the bay's upper corners.
+
+**The hover region is the bay rectangle, not the plate's geometry.** Raycasting the plate is much too
+strict for this: a flower has gaps between its petals, and the buttons sit in corners where there is no
+petal at all, so crossing either reported a miss and dropped the hover — the buttons vanished unless you
+moved fast enough to outrun the gap. The bay contains the plate and both buttons, so the rectangle has
+no gap anywhere and no dependence on pointer speed. Swept on a grid: 156 of 156 points inside the bay
+hold the buttons, and a walk from the plate's centre to either button lapses on zero frames, while the
+tile grid and the board above the drawer correctly show nothing.
 
 ### Board cells
 
