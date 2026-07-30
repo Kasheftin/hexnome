@@ -344,6 +344,11 @@ Board plates are deliberately not registered — pressing a plate is how you gra
 The empty honeycomb behind the placed tiles is **one large plane with a procedural hex-grid fragment
 shader**, not thousands of outline meshes. A screen-space-derivative-based line width keeps the grid
 one pixel thick at every zoom level, which a texture cannot do without a mip stack that goes soft.
+
+It is also *all* the board is: a faint honeycomb on dark slate. The board only ever says where a plate
+may go, which is a minor job, so it stays quiet and the plates carry the colour. An earlier version put
+ornate brass-and-green art on all 1661 cells with flat grey plate sockets on top, which drew the eye to
+the least interesting part of the screen.
 Faint, low-contrast, no depth write — it is orientation furniture, and it must never compete with the
 tiles.
 

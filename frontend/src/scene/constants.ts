@@ -245,9 +245,15 @@ export const PLATE_Y = 0.02
 export const PLATE_TINT_JITTER = 0.05
 
 export const COLORS = {
-  /** Dark slate, from screen1.png — what shows beyond the plated board. */
-  boardBackground: '#15181d',
-  gridLine: '#2a2f38',
+  /**
+   * The board: dark slate with a faint honeycomb, and nothing else.
+   *
+   * It exists to show where a plate may go, which is a minor job, so it stays quiet and
+   * lets the plates carry the colour. The line is a little brighter than it was now that
+   * it is the only thing describing the board rather than an underlay beneath tile art.
+   */
+  boardBackground: '#12151a',
+  gridLine: '#333b47',
   canvasClear: '#0d0f13',
   cube: '#e8c878',
 } as const

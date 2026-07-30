@@ -2,7 +2,11 @@
 /**
  * The main game area.
  *
- * A rectangular plated board that scrolls, and a floating 16-slot drawer at the bottom.
+ * The board is deliberately quiet — a procedural honeycomb on dark slate, no more. It only
+ * ever says *where a plate may go*, so it should not compete with the plates. The colour
+ * lives on the plates instead, where the actual decisions happen.
+ *
+ * A rectangular board that scrolls, and a floating 16-slot drawer at the bottom.
  * Tiles move freely between the two — reorder inside the drawer, play out onto the board,
  * pull back into the drawer — under one rule: nothing may sit on top of anything, anywhere.
  *
@@ -22,7 +26,6 @@ import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
 import DrawerChrome from '@/scene/DrawerChrome.vue'
 import HexGridFloor from '@/scene/HexGridFloor.vue'
-import HexPlates from '@/scene/HexPlates.vue'
 import TileEnvironment from '@/scene/TileEnvironment.vue'
 import TableauView from '@/scene/TableauView.vue'
 import {
@@ -192,7 +195,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <BoardCamera />
       <TileEnvironment />
       <HexGridFloor />
-      <HexPlates :cells="cells" />
 
       <CellHighlight
         :cells="targetCells"
