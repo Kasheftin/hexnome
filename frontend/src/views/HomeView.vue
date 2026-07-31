@@ -13,7 +13,8 @@
  * Starting a game mints an id, stores its settings against it, and navigates to `/game?id=…` —
  * which is what lets a refresh come back as the same game (composables/useSavedGames.ts).
  */
-import { computed, ref } from 'vue'
+import { mdiCog } from '@mdi/js'
+import { computed, nextTick, ref, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   DEFAULT_PLATES_PER_ROUND,
@@ -40,6 +41,7 @@ import {
   PLACEMENT_RULES,
   type PlacementRule,
 } from '@/game/placement'
+import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { useSavedGames } from '@/composables/useSavedGames'
 
 type Step = 'title' | 'kind' | 'singleplayer'
@@ -56,15 +58,86 @@ const stemsPerInternalAnchor = ref<number>(DEFAULT_STEMS_PER_INTERNAL_ANCHOR)
 const stemsPerExternalAnchor = ref<number>(DEFAULT_STEMS_PER_EXTERNAL_ANCHOR)
 const strictEnclosureBonus = ref<number>(DEFAULT_STRICT_ENCLOSURE_BONUS)
 
-/**
- * The bonus is only a choice under the regular rule.
- *
- * Hidden rather than disabled under strict, because a disabled control invites the question "why can I
- * not have this?" when the honest answer is that strict placement already gives it to you every time.
- * The chosen value is kept while hidden, so switching to strict and back does not silently reset it.
- */
-const strictBonusApplies = computed(() => placementRule.value !== 'strict')
 const placementRule = ref<PlacementRule>(DEFAULT_PLACEMENT_RULE)
+
+/**
+ * A numeric dial: a row of choices behind the gear.
+ *
+ * **Declared once and read twice** — the flyout renders these, and the summary line on the menu reads
+ * the same list. Two hand-written lists would drift the first time a dial was added and the summary
+ * forgotten, and the summary is exactly the thing that has to stay honest: it is what a player sees
+ * instead of opening the panel.
+ */
+interface Dial {
+  readonly key: string
+  /** Spelt out in the flyout, where there is room for a sentence. */
+  readonly legend: string
+  /** Two or three words for the summary, where there is not. */
+  readonly short: string
+  readonly choices: readonly number[]
+  readonly model: Ref<number>
+  readonly hint?: string
+  /** False hides the dial entirely — see the strict bonus. */
+  readonly applies?: () => boolean
+}
+
+const DIALS: readonly Dial[] = [
+  {
+    key: 'platesPerRound',
+    legend: 'Plates per round',
+    short: 'plates/round',
+    choices: PLATES_PER_ROUND_CHOICES,
+    model: platesPerRound,
+  },
+  {
+    key: 'initialStems',
+    legend: 'Initial stems on game start',
+    short: 'starting stems',
+    choices: STEM_COUNT_CHOICES,
+    model: initialStems,
+  },
+  {
+    key: 'stemsPerInternalAnchor',
+    legend: 'Stems per enclosed internal anchor',
+    short: 'internal anchor',
+    choices: STEMS_PER_ANCHOR_CHOICES,
+    model: stemsPerInternalAnchor,
+  },
+  {
+    key: 'stemsPerExternalAnchor',
+    legend: 'Stems per enclosed external anchor',
+    short: 'external anchor',
+    choices: STEMS_PER_ANCHOR_CHOICES,
+    model: stemsPerExternalAnchor,
+  },
+  {
+    key: 'strictEnclosureBonus',
+    legend: 'Stem bonus for strict enclosure',
+    short: 'strict bonus',
+    choices: STRICT_BONUS_CHOICES,
+    model: strictEnclosureBonus,
+    hint: 'Extra stems when every neighbouring pair around an enclosed anchor matches. Strict placement '
+      + 'guarantees that already, so the bonus only exists under the regular rule.',
+    /*
+     * Hidden rather than disabled under strict placement, because a disabled control invites the
+     * question "why can I not have this?" when the honest answer is that strict placement already gives
+     * it to you every time. The chosen value is kept while hidden, so switching to strict and back does
+     * not silently reset it.
+     */
+    applies: () => placementRule.value !== 'strict',
+  },
+]
+
+const visibleDials = computed(() => DIALS.filter(dial => dial.applies?.() ?? true))
+
+const settingsOpen = ref(false)
+const gear = ref<HTMLButtonElement | null>(null)
+
+/** Focus goes back where it came from, so closing the panel does not strand a keyboard at the top. */
+function closeSettings(): void {
+  settingsOpen.value = false
+  void nextTick(() => gear.value?.focus())
+}
 
 /** The choices made so far, newest last. Empty on the title screen. */
 const trail = computed(() => {
@@ -202,74 +275,6 @@ const selectedMode = computed(() => modeInfo(mode.value))
         </fieldset>
 
         <fieldset class="group">
-          <legend>Plates per round</legend>
-          <div class="counts">
-            <button
-              v-for="count in PLATES_PER_ROUND_CHOICES"
-              :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: platesPerRound === count }"
-              :aria-pressed="platesPerRound === count"
-              @click="platesPerRound = count"
-            >
-              {{ count }}
-            </button>
-          </div>
-        </fieldset>
-
-        <fieldset class="group">
-          <legend>Initial stems on game start</legend>
-          <div class="counts">
-            <button
-              v-for="count in STEM_COUNT_CHOICES"
-              :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: initialStems === count }"
-              :aria-pressed="initialStems === count"
-              @click="initialStems = count"
-            >
-              {{ count }}
-            </button>
-          </div>
-        </fieldset>
-
-        <fieldset class="group">
-          <legend>Stems per enclosed internal anchor</legend>
-          <div class="counts">
-            <button
-              v-for="count in STEMS_PER_ANCHOR_CHOICES"
-              :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: stemsPerInternalAnchor === count }"
-              :aria-pressed="stemsPerInternalAnchor === count"
-              @click="stemsPerInternalAnchor = count"
-            >
-              {{ count }}
-            </button>
-          </div>
-        </fieldset>
-
-        <fieldset class="group">
-          <legend>Stems per enclosed external anchor</legend>
-          <div class="counts">
-            <button
-              v-for="count in STEMS_PER_ANCHOR_CHOICES"
-              :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: stemsPerExternalAnchor === count }"
-              :aria-pressed="stemsPerExternalAnchor === count"
-              @click="stemsPerExternalAnchor = count"
-            >
-              {{ count }}
-            </button>
-          </div>
-        </fieldset>
-
-        <fieldset class="group">
           <legend>Placement</legend>
           <button
             v-for="rule in PLACEMENT_RULES"
@@ -289,29 +294,40 @@ const selectedMode = computed(() => modeInfo(mode.value))
           </p>
         </fieldset>
 
-        <fieldset
-          v-if="strictBonusApplies"
-          class="group"
+        <!--
+          The rest of the dials, as a readout you can open.
+
+          It states the values rather than saying "Advanced settings", so the common case — glancing to
+          check what this game will be, then starting it — never needs the panel at all. The whole strip
+          is the button: the gear says what it does, but a thin icon is a poor target for a row that is
+          already the right shape to press.
+        -->
+        <button
+          ref="gear"
+          type="button"
+          class="settings"
+          :aria-expanded="settingsOpen"
+          aria-label="Game settings"
+          @click="settingsOpen = true"
         >
-          <legend>Stem bonus for strict enclosure</legend>
-          <div class="counts">
-            <button
-              v-for="count in STRICT_BONUS_CHOICES"
-              :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: strictEnclosureBonus === count }"
-              :aria-pressed="strictEnclosureBonus === count"
-              @click="strictEnclosureBonus = count"
+          <span class="settings-values">
+            <span
+              v-for="dial in visibleDials"
+              :key="dial.key"
+              class="pill"
             >
-              {{ count }}
-            </button>
-          </div>
-          <p class="description">
-            Extra stems when every neighbouring pair around an enclosed anchor matches. Strict placement
-            guarantees that already, so the bonus only exists under the regular rule.
-          </p>
-        </fieldset>
+              <span class="pill-label">{{ dial.short }}</span>
+              <span class="pill-value">{{ dial.model.value }}</span>
+            </span>
+          </span>
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path :d="mdiCog" />
+          </svg>
+        </button>
 
         <button
           type="button"
@@ -331,6 +347,41 @@ const selectedMode = computed(() => modeInfo(mode.value))
         Back
       </button>
     </section>
+
+    <SettingsFlyout
+      :open="settingsOpen"
+      title="Game settings"
+      @close="closeSettings"
+    >
+      <div class="dials">
+        <fieldset
+          v-for="dial in visibleDials"
+          :key="dial.key"
+          class="group"
+        >
+          <legend>{{ dial.legend }}</legend>
+          <div class="counts">
+            <button
+              v-for="count in dial.choices"
+              :key="count"
+              type="button"
+              class="count"
+              :class="{ chosen: dial.model.value === count }"
+              :aria-pressed="dial.model.value === count"
+              @click="dial.model.value = count"
+            >
+              {{ count }}
+            </button>
+          </div>
+          <p
+            v-if="dial.hint"
+            class="description"
+          >
+            {{ dial.hint }}
+          </p>
+        </fieldset>
+      </div>
+    </SettingsFlyout>
   </main>
 </template>
 
@@ -511,13 +562,21 @@ legend {
   line-height: 1.5;
 }
 
+/*
+ * A fixed four-column grid, not a flex row.
+ *
+ * Flex made every dial's buttons fill the width, so the two-choice strict bonus rendered as two slabs
+ * twice the size of the four-choice dials above it — the smallest decision on the panel drawn as the
+ * biggest control. On a grid a choice is the same size everywhere, a short row simply stops early, and
+ * a dial with more than four choices wraps onto a second line at that same size.
+ */
 .counts {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
 .count {
-  flex: 1;
   padding: 11px 0;
   border: 1px solid #33383f;
   border-radius: 3px;
@@ -531,6 +590,78 @@ legend {
 
 .count:hover:not(.chosen) {
   border-color: #7d6a41;
+  color: #e8c878;
+}
+
+/* Dials sit closer together than the menu's own groups, being a list of one kind of thing. */
+.dials .group + .group {
+  margin-top: 16px;
+}
+
+/* ── the settings readout ──────────────────────────────────────────────────── */
+
+/*
+ * Quieter than an `.option`: it is not one of the choices, it is a report on the ones already made.
+ * Dashed, so it reads as a summary that can be opened rather than a button that does something.
+ */
+.settings {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px dashed #33383f;
+  border-radius: 3px;
+  background: transparent;
+  color: #79808f;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms;
+}
+
+.settings:hover {
+  border-color: #7d6a41;
+  color: #e8c878;
+}
+
+.settings svg {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  fill: currentcolor;
+}
+
+.settings-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+/* Label then value, so the column of numbers stays scannable however the row wraps. */
+.pill {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.pill-label {
+  color: #6b7382;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.pill-value {
+  color: #cfd4de;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings:hover .pill-value {
   color: #e8c878;
 }
 
@@ -552,13 +683,13 @@ legend {
   color: #e8c878;
 }
 
-:is(.option, .count, .back):focus-visible {
+:is(.option, .count, .back, .settings):focus-visible {
   outline: 2px solid #8fe6c0;
   outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :is(.option, .count) {
+  :is(.option, .count, .settings) {
     transition: none;
   }
 }
