@@ -22,7 +22,7 @@ import {
   RingGeometry,
   type OrthographicCamera,
 } from 'three'
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import {
   DRAWER_CHROME_Y,
   DRAWER_SLOT_PX,
@@ -30,7 +30,12 @@ import {
   HIGHLIGHT_COLORS,
   PLATE_SLOT_PX,
 } from './constants'
-import { createChromePanelMaterial, setChromePanelSize, snapPanelRect } from './chromePanel'
+import {
+  createChromePanelMaterial,
+  setChromePanelSize,
+  setChromePanelTone,
+  snapPanelRect,
+} from './chromePanel'
 import { registerGrabbable } from './grabbables'
 import { screenToBoard, unitsPerPixel } from './screenProjection'
 import { useDrawerLayout } from './useDrawerLayout'
@@ -41,6 +46,8 @@ const props = defineProps<{
   /** Plate slot the held plate would drop into, or null. */
   targetPlateSlot: number | null
   targetValid: boolean
+  /** Is the drawer being acted on right now — dragging out of it, or picking payment from it? */
+  live: boolean
 }>()
 
 const { scene, camera, sizes } = useTresContext()
@@ -96,6 +103,17 @@ const bayHighlight = new Mesh(new PlaneGeometry(1, 1), new MeshBasicMaterial({
 }))
 bayHighlight.rotation.copy(FLAT)
 bayHighlight.renderOrder = 13
+
+/**
+ * The tray lights up while you are placing, and rests otherwise.
+ *
+ * Never dimmed, unlike the source: the drawer is your own hand, and it stays readable whether or not
+ * it is your turn. Only the bays and rings inside it are structural, so the tone rides on the tray
+ * alone.
+ */
+watch(() => props.live, live => {
+  setChromePanelTone(panelMaterial, live ? 'active' : 'resting')
+}, { immediate: true })
 
 let unregister: (() => void) | null = null
 

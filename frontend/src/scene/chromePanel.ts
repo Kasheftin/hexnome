@@ -24,7 +24,7 @@
  * inside and the smoothstep has long since saturated. Nothing is antialiased anywhere near them.
  */
 import { Color, DoubleSide, ShaderMaterial, Vector2 } from 'three'
-import { CHROME_PANEL } from './constants'
+import { CHROME_PANEL, CHROME_PANEL_TONES, type ChromePanelTone } from './constants'
 
 const vertexShader = /* glsl */ `
 varying vec2 vPanelUv;
@@ -175,4 +175,19 @@ export function snapPanelRect(centreX: number, centreY: number, widthPx: number,
 export function setChromePanelSize(material: ShaderMaterial, widthPx: number, heightPx: number): void {
   const size = material.uniforms.uSizePx?.value as Vector2 | undefined
   size?.set(widthPx, heightPx)
+}
+
+/**
+ * Dim a panel, rest it, or light it up — see {@link CHROME_PANEL_TONES}.
+ *
+ * A uniform swap rather than a material swap, so a panel changes state without rebuilding its
+ * program or losing the pixel size it was told last frame. Cheap enough to call from a watcher on
+ * every phase change; it does not need to be in the render loop, and should not be, since nothing
+ * about the tone depends on the camera.
+ */
+export function setChromePanelTone(material: ShaderMaterial, tone: ChromePanelTone): void {
+  const values = CHROME_PANEL_TONES[tone]
+  ;(material.uniforms.uBorder?.value as Color | undefined)?.set(values.border)
+  if (material.uniforms.uBorderOpacity) material.uniforms.uBorderOpacity.value = values.borderOpacity
+  if (material.uniforms.uFillOpacity) material.uniforms.uFillOpacity.value = values.fillOpacity
 }

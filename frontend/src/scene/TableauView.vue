@@ -103,13 +103,16 @@ const props = defineProps<{
   /** Seeds the loose-tile scatter, so a lot looks the same after a refresh. */
   gameId: string
   /**
-   * Whether dragging is allowed at all.
+   * Whether an item may leave the drawer for the board.
    *
-   * False outside the `putting` phase. A turn is one chosen action, so until the player has picked
-   * "Put" nothing on the table should respond to a drag — otherwise a stray press commits a move they
-   * never chose.
+   * True only in the `putting` phase. It does **not** gate dragging as a whole: rearranging your own
+   * drawer costs nothing and ends no turn, so it is allowed at any time, in any phase. What a turn
+   * controls is whether a drag may *end* somewhere that changes the game — and that is the board.
+   *
+   * It also gates dragging things that are already on the board, for the same reason: moving a placed
+   * tile is a move, and a move needs a chosen action behind it.
    */
-  draggable: boolean
+  placing: boolean
   /**
    * Drafting state per source tile, or null when not drafting.
    *
@@ -242,8 +245,14 @@ type Owner =
   | { readonly kind: 'plate', readonly id: string }
   | { readonly kind: 'stem', readonly id: string }
 
-/** Anything a drag can hold. Stems are excluded: they are inert. */
-type Draggable = Exclude<Owner, { kind: 'stem' }>
+/**
+ * Anything a drag can hold — all three kinds, stems included.
+ *
+ * A stem cannot be *placed*: there is no move that puts one on the board. But it takes up a drawer
+ * slot like anything else, and a drawer you can only half-sort would be worse than one you cannot sort
+ * at all. Where a stem may land is settled in `resolveTarget`, which never offers it a board cell.
+ */
+type Draggable = Owner
 
 /** Maps a picked object back to what it belongs to. */
 const owners = new Map<Object3D, Owner>()
@@ -562,11 +571,11 @@ function pick(canvasX: number, canvasY: number): Draggable | null {
       const owner = owners.get(node)
       if (owner) {
         /*
-         * A stem is never draggable, and it is **opaque**: the walk stops here rather than climbing
-         * past. The only thing a stem does is get spent when placing a tile (undesigned), so there is
-         * no move to offer — but a press on one must not fall through to whatever is behind it either.
+         * A stem always answers for itself: it lives in a drawer slot and nowhere else, so it is
+         * always draggable and always **opaque** — the walk stops here rather than climbing past to
+         * whatever is behind it.
          */
-        if (owner.kind === 'stem') return null
+        if (owner.kind === 'stem') return owner
         const draggable = owner.kind === 'tile'
           ? props.tableau.canDragTile(owner.id)
           : props.tableau.canDragPlate(owner.id)
@@ -590,6 +599,22 @@ function cellUnderHeld(): Axial | null {
   const p = screenToBoard(cam, sizes.width.value, sizes.height.value, at.x, at.y)
   const cell = worldToAxial(p, HEX_SIZE)
   return props.tableau.isBoardCell(cell) ? cell : null
+}
+
+/**
+ * Is this destination occupied by something the held item could trade places with?
+ *
+ * Only ever true inside the drawer: a full tile slot or a full bay is a legal drop because the two
+ * items exchange seats. Everywhere else an occupant is simply in the way.
+ */
+function canSwapWith(destination: TileLocation | PlateLocation): boolean {
+  if (destination.kind === 'drawer') {
+    return props.tableau.drawerSlotOccupant(destination.slot) !== undefined
+  }
+  if (destination.kind === 'plateSlot') {
+    return props.tableau.plateSlotOccupant(destination.slot) !== undefined
+  }
+  return false
 }
 
 function resolveTarget(): void {
@@ -619,19 +644,35 @@ function resolveTarget(): void {
     return
   }
 
-  if (current.kind === 'tile') {
+  /*
+   * Outside the drawer, with no placement chosen: no target at all.
+   *
+   * This is what confines a rearranging drag to the drawer. The player can still carry the piece over
+   * the board — stopping the drag dead at the drawer's edge would feel broken — but nothing out there
+   * lights up, and releasing returns it home. Same honesty as the source guard above: showing an
+   * invalid target would imply the move exists and is merely refused, when it is not on offer at all.
+   */
+  if (!overDrawer && !props.placing) {
+    emitTarget()
+    return
+  }
+
+  if (current.kind === 'tile' || current.kind === 'stem') {
     if (overDrawer) {
-      // A tile may go in a tile slot. The plate slots and the frame take nothing.
+      // A tile or stem may go in a tile slot. The plate slots and the frame take nothing.
       const slot = l.slotAt(at.x, at.y)
       targetTile = slot === null ? null : { kind: 'drawer', slot }
-    } else {
+    } else if (current.kind === 'tile') {
       const cell = cellUnderHeld()
       // petalAt returns null for the hole and for any uncovered cell, which is exactly
       // the "tiles only go into plate petals" rule.
       targetTile = cell ? props.tableau.petalAt(cell) : null
       targetTileCell = targetTile ? cell : null
     }
-    targetValid = targetTile !== null && props.tableau.canPlaceTile(targetTile, current.id)
+    // A stem outside the drawer is left with no target: there is no move that puts one on the board,
+    // so it is not refused there so much as never offered.
+    targetValid = targetTile !== null
+      && (props.tableau.canPlaceTile(targetTile, current.id) || canSwapWith(targetTile))
   } else {
     if (overDrawer) {
       const slot = l.plateSlotAt(at.x, at.y)
@@ -641,7 +682,8 @@ function resolveTarget(): void {
       const cell = cellUnderHeld()
       targetPlate = cell ? { kind: 'board', hole: cell } : null
     }
-    targetValid = targetPlate !== null && props.tableau.canPlacePlate(targetPlate, current.id)
+    targetValid = targetPlate !== null
+      && (props.tableau.canPlacePlate(targetPlate, current.id) || canSwapWith(targetPlate))
   }
 
   emitTarget()
@@ -674,6 +716,39 @@ function emitTarget(): void {
 
 /* ── pointer handlers ─────────────────────────────────────────────────────────── */
 
+/**
+ * A press that has not yet decided what it is.
+ *
+ * While paying, a press on a drawer item can mean two different things — pick this to spend, or drag it
+ * somewhere else — and the two cannot be told apart at `pointerdown`. So nothing is committed there:
+ * the press is recorded, and the pointer's own movement decides. Past {@link DRAG_SLOP_PX} it is a
+ * drag; released short of that, it was a click.
+ *
+ * Deferring also fixes something that would otherwise be visible in every phase. Lifting the piece on
+ * `pointerdown` made a plain click flick the tile up and back down again; now it only leaves the table
+ * once the pointer has actually travelled.
+ */
+interface PendingPress {
+  /** What a drag would move, or null if the thing pressed cannot be dragged (a stem). */
+  readonly hit: Draggable | null
+  /** What a click would select while paying, or null. */
+  readonly clickTarget: string | null
+  readonly startX: number
+  readonly startY: number
+  readonly offsetX: number
+  readonly offsetY: number
+}
+
+/**
+ * How far the pointer may wander before a press stops counting as a click.
+ *
+ * Small, because these are deliberate gestures on large targets — but not zero: a mouse routinely
+ * drifts a pixel or two between press and release, and a touch drifts further.
+ */
+const DRAG_SLOP_PX = 4
+
+let press: PendingPress | null = null
+
 function onPointerDown(e: PointerEvent): void {
   if (e.button !== 0) return
   const c = pointerToCanvas(e)
@@ -688,51 +763,125 @@ function onPointerDown(e: PointerEvent): void {
     }
   }
 
-  // Paying: a click on anything in the drawer picks it as payment. Nothing is dragged in this phase.
-  if (props.payStates) {
-    const payerId = pickDrawerItem(c.x, c.y)
-    if (payerId !== null) emit('selectPayment', payerId)
-    return
-  }
-
-  // Outside the `putting` phase nothing is draggable — see the `draggable` prop.
-  if (!props.draggable) return
-
   const hit = pick(c.x, c.y)
-  if (!hit) return
+  const draggable = hit !== null && canDrag(hit)
+  // Only paying gives a click a meaning of its own, so only paying pays for the second raycast.
+  const clickTarget = props.payStates ? pickDrawerItem(c.x, c.y) : null
+  if (!draggable && clickTarget === null) return
 
-  held.value = hit
-  pointer.x = c.x
-  pointer.y = c.y
-
-  // Keep the piece where it already is relative to the cursor.
-  const view = hit.kind === 'tile' ? tileViews.get(hit.id) : plateViews.get(hit.id)
-  grabOffset.x = view ? view.screenX - c.x : 0
-  grabOffset.y = view ? view.screenY - c.y : 0
-
-  document.body.style.cursor = 'grabbing'
-  reportHoverPlateSlot(null)
-  resolveTarget()
+  const view = hit === null ? undefined : viewOf(hit)
+  press = {
+    hit: draggable ? hit : null,
+    clickTarget,
+    startX: c.x,
+    startY: c.y,
+    // Captured now so the piece keeps its position relative to the cursor once the drag begins.
+    offsetX: view ? view.screenX - c.x : 0,
+    offsetY: view ? view.screenY - c.y : 0,
+  }
 
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp, { once: true })
 }
 
+function viewOf(hit: Draggable): View | undefined {
+  if (hit.kind === 'tile') return tileViews.get(hit.id)
+  if (hit.kind === 'plate') return plateViews.get(hit.id)
+  return stemViews.get(hit.id)
+}
+
+/**
+ * May this be dragged at all, given the phase?
+ *
+ * Rearranging the drawer is always allowed — it is not a move and not a turn. Everything else waits
+ * for the player to have chosen to place.
+ */
+function canDrag(hit: Draggable): boolean {
+  // A stem is in the drawer by definition — there is nowhere else it can be.
+  if (hit.kind === 'stem' || props.placing) return true
+  return hit.kind === 'tile'
+    ? props.tableau.tile(hit.id)?.location.kind === 'drawer'
+    : props.tableau.plate(hit.id)?.location.kind === 'plateSlot'
+}
+
+function beginDrag(at: PendingPress): void {
+  if (!at.hit) return
+  held.value = at.hit
+  grabOffset.x = at.offsetX
+  grabOffset.y = at.offsetY
+  document.body.style.cursor = 'grabbing'
+  reportHoverPlateSlot(null)
+  resolveTarget()
+}
+
 function onWindowPointerMove(e: PointerEvent): void {
-  if (!held.value) return
   const c = pointerToCanvas(e)
   if (!c) return
   pointer.x = c.x
   pointer.y = c.y
-  resolveTarget()
+
+  const pending = press
+  if (pending && !held.value) {
+    const travelled = Math.hypot(c.x - pending.startX, c.y - pending.startY)
+    if (travelled < DRAG_SLOP_PX) return
+    beginDrag(pending)
+    if (!held.value) return
+  }
+
+  if (held.value) resolveTarget()
+}
+
+/**
+ * Drop the held item where it is pointing, swapping with whatever is already there.
+ *
+ * A drawer slot that is taken is still a legal destination — the two items trade places. That is what
+ * makes a *full* drawer sortable, which is the case that matters: with plain moves the last free slot
+ * is the only thing that lets anything move at all, and a full drawer would freeze solid.
+ */
+function dropHeld(current: Draggable): boolean {
+  if (current.kind === 'stem') {
+    if (targetTile?.kind !== 'drawer') return false
+    if (props.tableau.moveStem(current.id, targetTile.slot)) return true
+    const sitting = props.tableau.drawerSlotOccupant(targetTile.slot)
+    return sitting !== undefined && props.tableau.swapDrawerItems(current.id, sitting)
+  }
+  if (current.kind === 'tile' && targetTile !== null) {
+    if (props.tableau.moveTile(current.id, targetTile)) return true
+    if (targetTile.kind !== 'drawer') return false
+    const sitting = props.tableau.drawerSlotOccupant(targetTile.slot)
+    return sitting !== undefined && props.tableau.swapDrawerItems(current.id, sitting)
+  }
+  if (current.kind === 'plate' && targetPlate !== null) {
+    if (props.tableau.movePlate(current.id, targetPlate)) return true
+    if (targetPlate.kind !== 'plateSlot') return false
+    const sitting = props.tableau.plateSlotOccupant(targetPlate.slot)
+    return sitting !== undefined && props.tableau.swapDrawerItems(current.id, sitting)
+  }
+  return false
 }
 
 function onWindowPointerUp(): void {
   window.removeEventListener('pointermove', onWindowPointerMove)
   document.body.style.cursor = ''
   const current = held.value
+  const pending = press
+  press = null
 
-  if (current && targetValid) {
+  // Never moved far enough to be a drag, so it was a click. Only paying gives that a meaning.
+  if (!current) {
+    if (pending?.clickTarget) emit('selectPayment', pending.clickTarget)
+    return
+  }
+
+  if (targetValid && current.kind === 'stem') {
+    /*
+     * A stem only ever changes slots, so it can never open a payment.
+     *
+     * Handled in its own branch rather than folded in below, so that "a stem does not reach the board"
+     * is something the compiler checks: `placed` is not even reachable from here.
+     */
+    if (dropHeld(current)) emit('changed')
+  } else if (targetValid && current.kind !== 'stem') {
     const ontoBoard = current.kind === 'tile'
       // A tile only ever goes into a petal, so "onto the board" means its plate is on the board.
       ? targetTile?.kind === 'onPlate'
@@ -742,10 +891,7 @@ function onWindowPointerUp(): void {
     const origin = current.kind === 'tile'
       ? props.tableau.tile(current.id)?.location
       : props.tableau.plate(current.id)?.location
-    const moved = current.kind === 'tile'
-      ? targetTile !== null && props.tableau.moveTile(current.id, targetTile)
-      : targetPlate !== null && props.tableau.movePlate(current.id, targetPlate)
-    if (moved) {
+    if (dropHeld(current)) {
       emit('changed')
       // Reaching the board opens the payment; rearranging the drawer does not.
       if (ontoBoard && origin) emit('placed', current, origin)
@@ -795,8 +941,10 @@ function onCanvasPointerMove(e: PointerEvent): void {
   if (held.value) return
   const c = pointerToCanvas(e)
   if (!c) return
+  // The grab cursor has to agree with what a press would actually do, so it asks the same question
+  // `pointerdown` does — a placed tile is grabbable only once the player has chosen to place.
   const hit = pick(c.x, c.y)
-  document.body.style.cursor = hit ? 'grab' : ''
+  document.body.style.cursor = hit && canDrag(hit) ? 'grab' : ''
 
   // Rotate buttons appear only for a plate resting in a bay — never for one on the board.
   reportHoverPlateSlot(plateBayAt(c.x, c.y))
@@ -901,12 +1049,26 @@ onBeforeRender(({ delta }) => {
     const view = stemViews.get(stem.id)
     if (!view) continue
     if (view.decor) showDraftState(view.decor, props.payStates?.get(stem.id) ?? 'active')
-    setRegime(view, 'drawer')
-    const c = l.slotCentre(stem.slot)
-    easeScreen(view, c.x, c.y, ease)
-    const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
-    view.world.set(p.x, DRAWER_TILE_Y, p.z)
-    approachScale(view, drawerTileScale(upp), ease)
+
+    if (current?.kind === 'stem' && current.id === stem.id) {
+      // Carried at full size and at the held height, exactly like a tile — it is being rearranged,
+      // and a coin that stayed pinned to its slot would not look picked up.
+      setRegime(view, 'held')
+      const at = heldPoint()
+      view.screenX = at.x
+      view.screenY = at.y
+      view.fresh = false
+      const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
+      view.world.set(p.x, HELD_TILE_Y, p.z)
+      approachScale(view, 1, ease)
+    } else {
+      setRegime(view, 'drawer')
+      const c = l.slotCentre(stem.slot)
+      easeScreen(view, c.x, c.y, ease)
+      const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
+      view.world.set(p.x, DRAWER_TILE_Y, p.z)
+      approachScale(view, drawerTileScale(upp), ease)
+    }
     view.object.position.copy(view.world)
     view.object.scale.setScalar(view.scale)
   }

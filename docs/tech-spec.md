@@ -675,6 +675,37 @@ pinned at 1 until the round structure exists.
 `TableauView` emits `placed` only when the destination is the board — for a tile, that means the plate
 it landed on is itself on the board.
 
+### Rearranging the drawer, which is not a move
+
+Sorting your own drawer costs nothing, ends no turn, and is allowed in **every phase** — including when
+it is not your turn. So the `placing` prop does not gate dragging; it gates *where a drag may end*. A
+drag that starts and finishes inside the drawer is always fine. Only the board needs a chosen action
+behind it, and dragging something that is already on the board needs one too, for the same reason.
+
+`resolveTarget` enforces it by offering **no target at all** outside the drawer when `placing` is false.
+The piece can still be carried out over the board — stopping a drag dead at the drawer's edge feels
+broken — but nothing out there lights up and releasing brings it home. Same honesty as the shared-source
+guard: an invalid-looking target would imply the move exists and is merely refused.
+
+**Dropping onto an occupied slot swaps.** `moveTile` refuses a taken destination, which is right for the
+board and wrong for a drawer: with plain moves the last free slot is the only thing that lets anything
+move, and a *full* drawer — exactly when sorting matters most — would freeze solid. So the view falls
+back to `tableau.swapDrawerItems`, which exchanges two items' seats. A seat is a tile slot (holding a
+tile **or** a stem, interchangeably) or a bay (holding a plate); a tile and a plate cannot trade,
+because those are different seats. Both seats are vacated before either is filled — writing one at a
+time collides with the key the other still holds, and would leave one item moved and one not.
+
+**Stems are draggable after all.** They cannot be *placed* — `resolveTarget` never offers one a board
+cell, and the drop path for a stem cannot even reach `placed`, which the compiler checks — but they
+occupy a slot like anything else, and a drawer where tiles sort and stems do not would be worse than one
+that does not sort at all.
+
+**A press is not a click until it is released.** While paying, pressing a drawer item is ambiguous: pick
+this to spend, or drag it elsewhere. Nothing commits on `pointerdown`. The press is recorded, and the
+pointer decides: past `DRAG_SLOP_PX` (4px) it becomes a drag, released short of that it was a click.
+Deferring fixed something visible in every phase too — lifting on `pointerdown` made a plain click flick
+the tile up and back down.
+
 ### Placing is two steps, because it has a price
 
 A placement moves the item to the board *first* and charges for it *second* (`putting` → `paying`).
@@ -944,6 +975,35 @@ does for a DOM element.
 The one unavoidable duplication: `CHROME_PANEL` in `scene/constants.ts` restates the border colour,
 radius and fill from `.chrome-panel` in `src/styles/main.css`, because GL cannot read CSS. They sit
 side by side on screen, so a shade of drift would be obvious — both carry a comment saying so.
+
+**The panel border is also where a container reports whether it is live.** A turn makes exactly one
+area interactive — the source while drafting, your drawer while placing or paying — and
+`setChromePanelTone` swaps three uniforms (`CHROME_PANEL_TONES`: `dim` / `resting` / `active`) to say
+which. The source is dimmed by default and lit only during `taking`, because nothing about a heap of
+tiles says "not yours to touch right now". The drawer is never dimmed — it is your own hand and stays
+readable — and only brightens while you are acting on it.
+
+`active` is a lighter brass rather than the mint of `HIGHLIGHT_COLORS`: mint is the colour of a valid
+drop target, and "this area is live" is a far weaker claim than "release here". It is a uniform swap
+driven by a `watch`, not by the render loop — nothing about the tone depends on the camera, so
+recomputing it per frame would be work for nothing.
+
+**Dimming the frame is not enough — the contents have to go with it.** Fading the source's border and
+fill left the lots as bright as anything on the board, and a heap of full-colour tiles reads as
+grabbable however faint its frame is. So the dim state also draws a **scrim**: one quad over the
+column's rectangle, at the same snapped rect as the panel, tinting frame, bays, plates and tiles
+together.
+
+A scrim rather than per-item overlays, because what is dimmed is the *area*, not any object in it.
+Per-item overlays would have to be built and torn down as the source restocks, kept out of the
+raycast, and reconciled with the per-tile draft markers — which use exactly that mechanism to say
+something narrower ("this tile, specifically"). The scrim does not care what is underneath it.
+
+Two details it depends on. Its **height** (`SOURCE_SCRIM_Y = 2.2`) sits above every source tile but
+below `HELD_TILE_Y`, so with depth testing left on, a piece carried across the column passes over the
+scrim instead of being dimmed by it — no render-order special case, just the height. And its
+`raycast` is stubbed out: hidden objects are still raycast in three, so without that the scrim would
+make the source undraftable the moment it existed.
 
 ## State
 

@@ -34,7 +34,7 @@ export const CAMERA_DISTANCE = 60
  * VIEW_HEIGHT_MAX is an upper bound only — the camera also caps zoom-out at whatever
  * keeps the board edge off screen, which at most aspect ratios is the tighter limit.
  */
-export const VIEW_HEIGHT_DEFAULT = 12
+export const VIEW_HEIGHT_DEFAULT = 24
 export const VIEW_HEIGHT_MIN = 4
 export const VIEW_HEIGHT_MAX = 70
 
@@ -376,6 +376,37 @@ export const SOURCE_TILE_LAYER_STEP = 0.012
  */
 export const SOURCE_TILE_SELECT_LIFT = 0.1
 
+/**
+ * The scrim that dims the whole source column while it is not draftable.
+ *
+ * Fading the panel alone was not enough: the lots stayed as bright as anything on the board, and a
+ * heap of full-colour tiles reads as grabbable however faint its frame is. This is one quad over the
+ * column's rectangle, so the frame, the bays, the plates and the tiles all recede together.
+ *
+ * **The height is doing real work, and it is bounded at both ends.** It must clear the top of a heap —
+ * `SOURCE_TILE_Y + (SOURCE_TILES_PER_LOT - 1) * SOURCE_TILE_LAYER_STEP`, which is 1.986 for four tiles
+ * — or the topmost tiles poke through and stay bright. And it must stay below {@link HELD_TILE_Y}, so
+ * that with depth testing left on a piece carried across the column passes *over* the scrim instead of
+ * being dimmed by it; that is what saves a render-order special case.
+ *
+ * At 2 the lower margin is 0.014, so deepening a lot past five tiles needs this raised with it.
+ */
+export const SOURCE_SCRIM_Y = 2
+export const SOURCE_SCRIM_COLOR = '#05070a'
+
+/**
+ * **How strongly the source is dimmed. This is the only knob that matters for that.**
+ *
+ * `CHROME_PANEL_TONES.dim.fillOpacity` looks like it should do the same job and effectively cannot:
+ * the panel fill is `#15171c` over a board that is already near-black, so swinging it from 0.1 to 0.99
+ * moves the panel background by about 7/255 — and the scrim then halves even that. Measured, not
+ * assumed. Reach for this instead.
+ *
+ * Roughly what the values look like, as a share of a tile's original brightness: `0.5` half, `0.38`
+ * clearly dimmed but the colours still read, `0.28` a light veil, `0.18` barely there.
+ */
+export const SOURCE_SCRIM_OPACITY = 0.28
+
 export const HIGHLIGHT_COLORS = {
   valid: '#8fe6c0',
   invalid: '#6a4b4b',
@@ -399,6 +430,35 @@ export const CHROME_PANEL = {
   fill: '#15171c',
   fillOpacity: 0.82,
 } as const
+
+/**
+ * How live a container looks: dimmed, resting, or lit.
+ *
+ * A turn only makes one area interactive at a time — the source while drafting, your drawer while
+ * placing — and the panel border is where that is said. It is the container's own outline, so it can
+ * report the container's state without competing with the per-item draft markers inside it, which are
+ * saying something narrower ("this tile, specifically").
+ *
+ * `dim` fades the border only. It does **not** thin the fill: a container is dimmed together with its
+ * contents, by a scrim laid over the whole area, and thinning the fill underneath that would only make
+ * the panel stop reading as a panel. The border is set higher than it looks here because the scrim
+ * knocks it back again on its way through.
+ *
+ * **To make the dim stronger or weaker, change {@link SOURCE_SCRIM_OPACITY}, not the `fillOpacity`
+ * below.** Fill opacity is nearly inert on a near-black fill over a near-black board — it is kept in
+ * the shape only because `resting` and `active` genuinely use it.
+ *
+ * `active` is a lighter brass at the same hue, not the mint of `HIGHLIGHT_COLORS`. Mint here would
+ * read as a drop target — it is the colour a valid destination uses — and "this area is live" is a
+ * much weaker claim than "release here".
+ */
+export const CHROME_PANEL_TONES = {
+  dim: { border: '#3a3222', borderOpacity: 0.75, fillOpacity: CHROME_PANEL.fillOpacity },
+  resting: { border: CHROME_PANEL.border, borderOpacity: CHROME_PANEL.borderOpacity, fillOpacity: CHROME_PANEL.fillOpacity },
+  active: { border: '#8f7c46', borderOpacity: 1, fillOpacity: 0.86 },
+} as const
+
+export type ChromePanelTone = keyof typeof CHROME_PANEL_TONES
 
 /**
  * The six value symbols, in value order 1–6. Cropped to content and downscaled from

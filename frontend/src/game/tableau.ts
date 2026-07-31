@@ -226,6 +226,27 @@ export interface Tableau {
   movePlate(id: string, location: PlateLocation): boolean
   moveTile(id: string, location: TileLocation): boolean
 
+  /** Whatever sits in a drawer tile slot — a tile or a stem — by id. */
+  drawerSlotOccupant(slot: number): string | undefined
+  /** Whichever plate sits in a bay, by id. */
+  plateSlotOccupant(slot: number): string | undefined
+
+  /**
+   * Exchange the drawer positions of two items.
+   *
+   * Rearranging your drawer is not a move in the game — it costs nothing and ends no turn — but a drawer
+   * with no free slot could not be rearranged at all if the only tool were `moveTile`, which refuses an
+   * occupied destination. Swapping is what makes a full drawer sortable.
+   *
+   * Either id may be a tile, a stem or a plate, but both must currently be **in the drawer** and in the
+   * same kind of seat: two tile slots, or two bays. A tile and a plate cannot trade places, because the
+   * seats are different sizes and a plate in a tile slot is not a position the game has.
+   *
+   * Both seats are vacated before either is filled. Writing one at a time would collide with the key the
+   * other still holds, and the second write would be refused — leaving one item moved and one not.
+   */
+  swapDrawerItems(a: string, b: string): boolean
+
   /**
    * Remove a tile, plate or stem from the game entirely.
    *
@@ -330,6 +351,57 @@ export function createTableau({
   function plateCanDrag(id: string): boolean {
     const plate = platesById.get(id)
     return plate !== undefined && plate.location.kind !== 'source'
+  }
+
+  /**
+   * Where an item sits in the drawer, if it is in the drawer at all.
+   *
+   * The unit of a swap is the **seat**, not the item: a tile slot takes a tile or a stem
+   * interchangeably, and a bay takes a plate. Resolving to a seat is what lets one swap handle all
+   * three kinds without the caller sorting them first, and what makes "a plate cannot trade places with
+   * a tile" a single comparison rather than a table of cases.
+   */
+  type DrawerSeat =
+    | { readonly kind: 'tileSlot', readonly slot: number }
+    | { readonly kind: 'bay', readonly slot: number }
+
+  function drawerSeat(id: string): DrawerSeat | null {
+    const stem = stemsById.get(id)
+    if (stem) return { kind: 'tileSlot', slot: stem.slot }
+
+    const tile = tilesById.get(id)
+    if (tile) {
+      // A plate's own tile is welded to it and has no seat of its own, wherever the plate is.
+      if (tile.fixed || tile.location.kind !== 'drawer') return null
+      return { kind: 'tileSlot', slot: tile.location.slot }
+    }
+
+    const plate = platesById.get(id)
+    if (plate?.location.kind === 'plateSlot') return { kind: 'bay', slot: plate.location.slot }
+    return null
+  }
+
+  /** Put a tile or stem in a drawer slot, assuming the slot has already been vacated. */
+  function seatInTileSlot(id: string, slot: number): void {
+    const key = tileLocationKey({ kind: 'drawer', slot })
+    const stem = stemsById.get(id)
+    if (stem) {
+      stemsById.set(id, { id, slot })
+      occupants.set(key, id)
+      return
+    }
+    const tile = tilesById.get(id)
+    if (!tile) return
+    tilesById.set(id, { ...tile, location: { kind: 'drawer', slot } })
+    occupants.set(key, id)
+  }
+
+  /** Put a plate in a bay, assuming the bay has already been vacated. */
+  function seatInBay(id: string, slot: number): void {
+    const plate = platesById.get(id)
+    if (!plate) return
+    platesById.set(id, { ...plate, location: { kind: 'plateSlot', slot } })
+    occupants.set(plateLocationKey({ kind: 'plateSlot', slot }), id)
   }
 
   function canPlacePlate(location: PlateLocation, movingId?: string): boolean {
@@ -489,6 +561,38 @@ export function createTableau({
       if (!plate || !Number.isInteger(steps) || steps === 0) return false
       platesById.set(id, { ...plate, rotation: plate.rotation + steps })
       // The covered cells do not change, but which petal each one holds does.
+      reindexCoverage()
+      return true
+    },
+
+    drawerSlotOccupant(slot) {
+      return occupants.get(tileLocationKey({ kind: 'drawer', slot }))
+    },
+
+    plateSlotOccupant(slot) {
+      return occupants.get(plateLocationKey({ kind: 'plateSlot', slot }))
+    },
+
+    swapDrawerItems(a, b) {
+      if (a === b) return false
+      const seatA = drawerSeat(a)
+      const seatB = drawerSeat(b)
+      if (!seatA || !seatB || seatA.kind !== seatB.kind) return false
+
+      if (seatA.kind === 'tileSlot' && seatB.kind === 'tileSlot') {
+        occupants.delete(tileLocationKey({ kind: 'drawer', slot: seatA.slot }))
+        occupants.delete(tileLocationKey({ kind: 'drawer', slot: seatB.slot }))
+        seatInTileSlot(a, seatB.slot)
+        seatInTileSlot(b, seatA.slot)
+        return true
+      }
+
+      occupants.delete(plateLocationKey({ kind: 'plateSlot', slot: seatA.slot }))
+      occupants.delete(plateLocationKey({ kind: 'plateSlot', slot: seatB.slot }))
+      seatInBay(a, seatB.slot)
+      seatInBay(b, seatA.slot)
+      // Neither plate is on the board, so coverage cannot actually change — reindexed anyway so that
+      // every path which moves a plate leaves the same invariant behind.
       reindexCoverage()
       return true
     },

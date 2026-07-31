@@ -669,16 +669,20 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :cells="targetCells"
         :valid="targetValid"
       />
-      <SourceChrome :lots="platesPerRound" />
+      <SourceChrome
+        :lots="platesPerRound"
+        :live="phase.kind === 'taking'"
+      />
       <DrawerChrome
         :target-slot="targetTileSlot"
         :target-plate-slot="targetPlateSlot"
         :target-valid="targetValid"
+        :live="phase.kind === 'putting' || phase.kind === 'paying'"
       />
       <TableauView
         :tableau="tableau"
         :game-id="gameId"
-        :draggable="phase.kind === 'putting'"
+        :placing="phase.kind === 'putting'"
         :draft-states="draftStates"
         :pay-states="payStates"
         :revision="revision"

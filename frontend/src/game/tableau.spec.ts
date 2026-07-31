@@ -497,3 +497,93 @@ describe('discarding', () => {
     expect(tableau().discard('nope')).toBe(false)
   })
 })
+
+describe('rearranging the drawer', () => {
+  it('reports what sits in a slot, and in a bay', () => {
+    const t = tableau()
+    const tile = t.addTile(RED, inDrawer(3))!
+    const stem = t.addStem(4)!
+    const plate = t.addPlate(inPlateSlot(1))!
+    expect(t.drawerSlotOccupant(3)).toBe(tile.id)
+    expect(t.drawerSlotOccupant(4)).toBe(stem.id)
+    expect(t.drawerSlotOccupant(5)).toBeUndefined()
+    expect(t.plateSlotOccupant(1)).toBe(plate.id)
+    expect(t.plateSlotOccupant(0)).toBeUndefined()
+  })
+
+  it('swaps two tiles', () => {
+    const t = tableau()
+    const a = t.addTile(RED, inDrawer(0))!
+    const b = t.addTile(BLUE, inDrawer(7))!
+    expect(t.swapDrawerItems(a.id, b.id)).toBe(true)
+    expect(t.tile(a.id)!.location).toEqual(inDrawer(7))
+    expect(t.tile(b.id)!.location).toEqual(inDrawer(0))
+    expect(t.drawerSlotOccupant(0)).toBe(b.id)
+    expect(t.drawerSlotOccupant(7)).toBe(a.id)
+  })
+
+  it('swaps a tile with a stem, since they share a kind of seat', () => {
+    const t = tableau()
+    const tile = t.addTile(RED, inDrawer(0))!
+    const stem = t.addStem(1)!
+    expect(t.swapDrawerItems(tile.id, stem.id)).toBe(true)
+    expect(t.tile(tile.id)!.location).toEqual(inDrawer(1))
+    expect(t.stems()[0]!.slot).toBe(0)
+    expect(t.drawerSlotOccupant(0)).toBe(stem.id)
+    expect(t.drawerSlotOccupant(1)).toBe(tile.id)
+  })
+
+  it('swaps two plates between bays', () => {
+    const t = tableau()
+    const a = t.addPlate(inPlateSlot(0))!
+    const b = t.addPlate(inPlateSlot(1))!
+    expect(t.swapDrawerItems(a.id, b.id)).toBe(true)
+    expect(t.plate(a.id)!.location).toEqual(inPlateSlot(1))
+    expect(t.plate(b.id)!.location).toEqual(inPlateSlot(0))
+  })
+
+  it('works in a completely full drawer, which is the whole point', () => {
+    const t = tableau()
+    const ids = Array.from({ length: 16 }, (_, slot) => t.addTile(RED, inDrawer(slot))!.id)
+    expect(t.freeDrawerSlots()).toEqual([])
+    expect(t.swapDrawerItems(ids[0]!, ids[15]!)).toBe(true)
+    expect(t.tile(ids[0]!)!.location).toEqual(inDrawer(15))
+    expect(t.tile(ids[15]!)!.location).toEqual(inDrawer(0))
+    // Nothing was dropped on the floor along the way.
+    expect(t.freeDrawerSlots()).toEqual([])
+  })
+
+  it('refuses a tile and a plate, whose seats are different', () => {
+    const t = tableau()
+    const tile = t.addTile(RED, inDrawer(0))!
+    const plate = t.addPlate(inPlateSlot(0))!
+    expect(t.swapDrawerItems(tile.id, plate.id)).toBe(false)
+    expect(t.tile(tile.id)!.location).toEqual(inDrawer(0))
+    expect(t.plate(plate.id)!.location).toEqual(inPlateSlot(0))
+  })
+
+  it('refuses anything not in the drawer', () => {
+    const t = tableau()
+    const inBay = t.addPlate(inPlateSlot(0))!
+    const onTable = t.addPlate(onBoard(0, 0))!
+    const held = t.addTile(RED, inDrawer(0))!
+    const placed = t.addTile(BLUE, onPetal(onTable.id, 1))!
+    expect(t.swapDrawerItems(inBay.id, onTable.id)).toBe(false)
+    expect(t.swapDrawerItems(held.id, placed.id)).toBe(false)
+  })
+
+  it('refuses a plate\'s own tile, which has no seat of its own', () => {
+    const t = tableau()
+    const plate = t.addPlate(inPlateSlot(0))!
+    const token = t.addTile(RED, onPetal(plate.id, 0), { fixed: true })!
+    const loose = t.addTile(BLUE, inDrawer(0))!
+    expect(t.swapDrawerItems(token.id, loose.id)).toBe(false)
+  })
+
+  it('refuses to swap something with itself, and unknown ids', () => {
+    const t = tableau()
+    const tile = t.addTile(RED, inDrawer(0))!
+    expect(t.swapDrawerItems(tile.id, tile.id)).toBe(false)
+    expect(t.swapDrawerItems(tile.id, 'nope')).toBe(false)
+  })
+})

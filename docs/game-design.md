@@ -371,6 +371,15 @@ board — see [Interaction philosophy](#interaction-philosophy). The mockup size
 **2 rows × 8 columns = 16 items**; whether that cap is a hard rule or only a layout constraint is
 open.
 
+**Rearranging it is not a move.** You may drag items between slots at any time — on your turn or not —
+and it costs nothing, spends no payment and ends no turn. Dropping onto an occupied slot **swaps** the
+two, which is what keeps a full drawer sortable. Tiles, stems and plates can all be moved this way;
+tiles and stems share the tile slots and can trade with each other, while plates trade between the two
+bays.
+
+Nothing may **leave** the drawer except as part of a placement, which is a real action and costs the
+turn.
+
 ## Scoring (Azul-style, at end of stage/game)
 
 Both **same-color** and **same-value** connected groups score. A single tile can contribute to

@@ -19,7 +19,18 @@
  */
 import { computed } from 'vue'
 import type { TurnOptions, TurnPhase } from '@/game/turn'
-import { SYMBOL_TEXTURE_URLS, TILE_COLORS } from '@/scene/constants'
+import {
+  HEX_SIZE,
+  STEM_SYMBOL_OFFSET_UP,
+  STEM_SYMBOL_SCALE,
+  STEM_TEXTURE_URL,
+  SYMBOL_FIT,
+  SYMBOL_TEXTURE_URLS,
+  TILE_COLORS,
+  TILE_SIZE,
+  symbolOffsetUpFor,
+  symbolScaleFor,
+} from '@/scene/constants'
 
 const props = defineProps<{
   phase: TurnPhase
@@ -59,6 +70,72 @@ function colorOf(spec: { color: number }): string {
 function symbolOf(spec: { value: number }): string {
   return SYMBOL_TEXTURE_URLS[Math.min(SYMBOL_TEXTURE_URLS.length, Math.max(1, spec.value)) - 1] ?? ''
 }
+
+/* ── chip geometry ─────────────────────────────────────────────────────────────
+ *
+ * A chip is a tile at 20px, so it is sized by the same rules the 3D tile is — the per-value
+ * `SYMBOL_SCALE` and `SYMBOL_OFFSET_UP` the art is tuned against. Hard-coding one size for all six
+ * meant the bar quietly disagreed with the board: a value-4 symbol is 1.52 there and was 1.0 here, so
+ * the same tile read differently depending on where you looked at it.
+ *
+ * The one thing that cannot be mirrored exactly is the fit. `createSymbolPlane` fits by the image's
+ * bounding-box **diagonal**; CSS `object-fit: contain` fits by its longer side. So the box below is the
+ * square whose diagonal matches the 3D fit radius, which is right for a square image and a hair
+ * generous for a tall one. At 20px that difference is sub-pixel; what matters is that both follow the
+ * same tuning.
+ */
+
+/** Matches `.chip` in the stylesheet. Pointy-top, so the height is the 2/√3 taller one. */
+const CHIP_WIDTH_PX = 20
+const CHIP_HEIGHT_PX = 23
+
+/** The chip is one tile wide, and a pointy-top hex's width is twice its apothem. */
+const CHIP_APOTHEM_PX = CHIP_WIDTH_PX / 2
+/** What one world unit of `HEX_SIZE` is worth in chip pixels, for the vertical nudge. */
+const PX_PER_HEX_SIZE = CHIP_HEIGHT_PX / (2 * (TILE_SIZE / HEX_SIZE))
+
+function boxFor(fitRadiusPx: number): string {
+  return `${((fitRadiusPx * 2) / Math.SQRT2).toFixed(2)}px`
+}
+
+function liftPx(px: number): string {
+  return px === 0 ? 'none' : `translateY(${(-px).toFixed(2)}px)`
+}
+
+/** A tile's nudge is in fractions of `HEX_SIZE`, so it converts through the chip's own scale. */
+function liftBy(offsetUp: number): string {
+  return liftPx(offsetUp * PX_PER_HEX_SIZE)
+}
+
+function symbolStyle(spec: { value: number }): Record<string, string> {
+  const box = boxFor(CHIP_APOTHEM_PX * SYMBOL_FIT * symbolScaleFor(spec.value))
+  return { width: box, height: box, transform: liftBy(symbolOffsetUpFor(spec.value)) }
+}
+
+/**
+ * The stem chip carries the real emblem, at the proportions it has on the coin.
+ *
+ * It used to be a flat gold gradient — legible, but it did not look like the thing it stood for, and
+ * the chip was a 20×23 *ellipse* because it kept the tile's box while rounding its corners.
+ *
+ * **Sized to the row, not to `STEM_RADIUS`.** On the table a coin is deliberately smaller than the tile
+ * it displaces, but a chip is a label in a line of labels: matching the tile chip's height is what puts
+ * them on one baseline and gives them equal weight. Scaling it down here only made the stem look like
+ * the lesser item, which is not what it is.
+ */
+const STEM_CHIP_PX = CHIP_HEIGHT_PX
+
+const stemChipStyle = {
+  width: `${STEM_CHIP_PX.toFixed(2)}px`,
+  height: `${STEM_CHIP_PX.toFixed(2)}px`,
+}
+
+const stemSymbolStyle = (() => {
+  const radius = STEM_CHIP_PX / 2
+  const box = boxFor(radius * STEM_SYMBOL_SCALE)
+  // The coin's nudge is in fractions of its own radius, so it converts against the chip, not the tile.
+  return { width: box, height: box, transform: liftPx(STEM_SYMBOL_OFFSET_UP * radius) }
+})()
 
 /**
  * What the draft is being described as — and, when it cannot be confirmed, why not.
@@ -168,6 +245,7 @@ const draftSummary = computed(() => {
           >
             <img
               :src="symbolOf(spec)"
+              :style="symbolStyle(spec)"
               alt=""
             >
           </span>
@@ -223,11 +301,11 @@ const draftSummary = computed(() => {
             :key="i"
             class="chip"
             :class="{ 'chip-plate': spec.plate, 'chip-stem': spec.stem }"
-            :style="spec.stem ? undefined : { background: colorOf(spec) }"
+            :style="spec.stem ? stemChipStyle : { background: colorOf(spec) }"
           >
             <img
-              v-if="!spec.stem"
-              :src="symbolOf(spec)"
+              :src="spec.stem ? STEM_TEXTURE_URL : symbolOf(spec)"
+              :style="spec.stem ? stemSymbolStyle : symbolStyle(spec)"
               alt=""
             >
           </span>
@@ -354,9 +432,8 @@ const draftSummary = computed(() => {
   clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 }
 
+/* Size and vertical nudge are per value and come from the script — see "chip geometry". */
 .chip img {
-  width: 13px;
-  height: 13px;
   object-fit: contain;
 }
 
@@ -370,8 +447,11 @@ const draftSummary = computed(() => {
 }
 
 /*
- * A stem has no colour and no symbol, so its chip is a plain gold disc — round, like the coin it
- * stands for, against the hexagons of everything else.
+ * A stem's chip is the coin: round among the hexagons, carrying the same emblem the 3D coin does.
+ *
+ * The metal stays a gradient rather than a flat fill, because the emblem art is masked to a circle and
+ * the rim showing around it is what makes the chip read as a coin rather than a sticker. Its diameter
+ * comes from `STEM_RADIUS`, so the coin keeps the same size relative to a tile as it does on the table.
  */
 .chip-stem {
   clip-path: none;
