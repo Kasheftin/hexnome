@@ -105,14 +105,24 @@ const props = defineProps<{
   /**
    * Whether an item may leave the drawer for the board.
    *
-   * True only in the `putting` phase. It does **not** gate dragging as a whole: rearranging your own
-   * drawer costs nothing and ends no turn, so it is allowed at any time, in any phase. What a turn
-   * controls is whether a drag may *end* somewhere that changes the game — and that is the board.
+   * True while placing, and **also while idle** when a placement is a legal action — that is what lets
+   * the drag itself choose the action. Board targets have to light up during the drag, long before it
+   * is known whether the item is going to the board or back to a drawer slot, so this cannot wait for
+   * the drop. Committing to the action does: the owner is told only once something has landed.
    *
-   * It also gates dragging things that are already on the board, for the same reason: moving a placed
-   * tile is a move, and a move needs a chosen action behind it.
+   * It does not gate dragging as a whole. Rearranging your own drawer costs nothing and ends no turn,
+   * so it is allowed at any time, in any phase.
    */
-  placing: boolean
+  mayPlace: boolean
+  /**
+   * Whether something **already on the board** may be picked up.
+   *
+   * Deliberately narrower than `mayPlace`. Moving a placed piece is a move on a board that has already
+   * been paid for, so it stays behind an explicitly chosen action — inferring it from a drag would make
+   * the whole tableau live during every idle moment, which is a much bigger claim than "you were
+   * obviously about to place this".
+   */
+  mayMovePlaced: boolean
   /**
    * Drafting state per source tile, or null when not drafting.
    *
@@ -652,7 +662,7 @@ function resolveTarget(): void {
    * lights up, and releasing returns it home. Same honesty as the source guard above: showing an
    * invalid target would imply the move exists and is merely refused, when it is not on offer at all.
    */
-  if (!overDrawer && !props.placing) {
+  if (!overDrawer && !props.mayPlace) {
     emitTarget()
     return
   }
@@ -798,10 +808,11 @@ function viewOf(hit: Draggable): View | undefined {
  */
 function canDrag(hit: Draggable): boolean {
   // A stem is in the drawer by definition — there is nowhere else it can be.
-  if (hit.kind === 'stem' || props.placing) return true
-  return hit.kind === 'tile'
+  if (hit.kind === 'stem') return true
+  const inDrawer = hit.kind === 'tile'
     ? props.tableau.tile(hit.id)?.location.kind === 'drawer'
     : props.tableau.plate(hit.id)?.location.kind === 'plateSlot'
+  return inDrawer || props.mayMovePlaced
 }
 
 function beginDrag(at: PendingPress): void {
@@ -942,7 +953,7 @@ function onCanvasPointerMove(e: PointerEvent): void {
   const c = pointerToCanvas(e)
   if (!c) return
   // The grab cursor has to agree with what a press would actually do, so it asks the same question
-  // `pointerdown` does — a placed tile is grabbable only once the player has chosen to place.
+  // `pointerdown` does — a placed tile is grabbable only once the player has chosen to move one.
   const hit = pick(c.x, c.y)
   document.body.style.cursor = hit && canDrag(hit) ? 'grab' : ''
 

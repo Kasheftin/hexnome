@@ -54,6 +54,7 @@ import { DEFAULT_PLACEMENT_RULE } from '@/game/placement'
 import {
   FIRST_TURN,
   IDLE,
+  INFER_ACTIONS_FROM_GESTURES,
   nextTurn,
   turnOptions,
   type TurnAction,
@@ -320,8 +321,23 @@ const options = computed(() => turnOptions({
 
 const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.selected : [])
 
-/** Null unless drafting, which is what tells the scene to stop showing draft states at all. */
-const draftStates = computed(() => phase.value.kind === 'taking'
+/**
+ * Non-null whenever the source may be **touched** — while drafting, and while idle with a draft still
+ * open to the player. Null otherwise, which is what tells the scene the source is inert.
+ *
+ * Covering the idle case here is what makes drafting self-starting: the scene reports the click either
+ * way, and `onSelectTile` turns the first one into the action.
+ */
+/**
+ * Is the turn in a state where a gesture may name its own action? Governed by
+ * {@link INFER_ACTIONS_FROM_GESTURES}, so turning that off restores choose-then-act everywhere at once.
+ */
+const inferring = computed(() => INFER_ACTIONS_FROM_GESTURES && phase.value.kind === 'idle')
+
+const canStartTake = computed(() => inferring.value && options.value.take)
+const canStartPut = computed(() => inferring.value && options.value.put)
+
+const draftStates = computed(() => phase.value.kind === 'taking' || canStartTake.value
   ? draftStatesOf(sourceItems.value, selectedIds.value)
   : null)
 
@@ -366,7 +382,7 @@ const completed = computed(() => completedStrategies(sourceItems.value, selected
 const turnLabel = computed(() => 'Your turn')
 
 function chooseAction(action: TurnAction): void {
-  if (action === 'take') phase.value = { kind: 'taking', selected: [] }
+  if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
   else if (action === 'put') phase.value = { kind: 'putting' }
   else endTurn()
 }
@@ -427,13 +443,31 @@ function beginTurn(): void {
   if (dealLot()) revision.value++
 }
 
+/**
+ * A source item was clicked.
+ *
+ * From `idle` this *is* the choice to draft — the player has said what they are doing by doing it, so
+ * the phase follows the gesture rather than the other way round. Nothing is committed: the click only
+ * selects, and Take is still a separate press.
+ */
 function onSelectTile(id: string): void {
   const current = phase.value
-  if (current.kind !== 'taking') return
-  phase.value = {
-    kind: 'taking',
-    selected: toggleDraftSelection(sourceItems.value, current.selected, id),
-  }
+  const taking = current.kind === 'taking'
+  if (!taking && !canStartTake.value) return
+
+  const inferred = taking ? current.inferred : true
+  const selected = toggleDraftSelection(sourceItems.value, taking ? current.selected : [], id)
+
+  /*
+   * Unclicking the last tile of an inferred draft ends it.
+   *
+   * The click was the only thing that said "I am drafting", so taking it back should leave nothing
+   * behind — otherwise the player is stranded in a mode they never asked for and has to find Cancel to
+   * escape a state they thought they had already undone. An explicitly chosen draft is left alone.
+   */
+  phase.value = selected.length === 0 && inferred
+    ? IDLE
+    : { kind: 'taking', selected, inferred }
 }
 
 function confirmTake(): void {
@@ -465,7 +499,16 @@ function onPlaced(
   item: { kind: 'tile' | 'plate', id: string },
   origin: TileLocation | PlateLocation,
 ): void {
-  if (phase.value.kind !== 'putting') return
+  /*
+   * Straight from `idle` too: dragging out of the drawer onto the board is the choice to place, and the
+   * scene only reports it once the item has actually landed there.
+   *
+   * Guarded on `inferring` rather than `canStartPut`, and the difference matters. By the time this
+   * runs the item has *already left the drawer*, so `options.put` may have just gone false — if that
+   * were the test, placing your last drawer item would be refused here and the tile would be stranded
+   * on the board with no payment to settle.
+   */
+  if (phase.value.kind !== 'putting' && !inferring.value) return
   phase.value = { kind: 'paying', item, origin, selected: [] }
 }
 
@@ -673,7 +716,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
       <SourceChrome
         :lots="platesPerRound"
-        :live="phase.kind === 'taking'"
+        :live="phase.kind === 'taking' || canStartTake"
       />
       <DrawerChrome
         :target-slot="targetTileSlot"
@@ -684,7 +727,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <TableauView
         :tableau="tableau"
         :game-id="gameId"
-        :placing="phase.kind === 'putting'"
+        :may-place="phase.kind === 'putting' || canStartPut"
+        :may-move-placed="phase.kind === 'putting'"
         :draft-states="draftStates"
         :pay-states="payStates"
         :revision="revision"

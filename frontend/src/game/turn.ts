@@ -17,11 +17,58 @@ import type { PlateLocation, TileLocation } from './tableau'
 
 export type TurnAction = 'take' | 'put' | 'pass'
 
+/**
+ * Whether an action may be **inferred from the gesture that starts it**, rather than chosen first.
+ *
+ * On: touching the shared source begins a draft, and dragging out of the drawer onto the board begins
+ * a placement. The source also stops looking disabled while a draft is available, since it is live.
+ *
+ * Off: the table is inert until Take or Put is pressed, which is how the game behaved before. Nothing
+ * else changes — both routes end at the same confirm step either way, so the flag only moves *when* the
+ * action is named, never what it costs.
+ *
+ * Here as a constant rather than a game setting on purpose. It is not a rules variant for players to
+ * pick between; it is one open question about how the game should feel, and it wants an answer rather
+ * than a switch. Flip it, have someone play both, delete the loser.
+ */
+export const INFER_ACTIONS_FROM_GESTURES = true
+
 export type TurnPhase =
-  /** Choosing an action. Nothing on the table responds. */
+  /**
+   * No action chosen yet — but the table is **not** inert.
+   *
+   * It used to be. The reasoning was that a turn is one committed action, so a stray press should not
+   * be able to spend it. That reasoning has since been undermined by the actions themselves: drafting
+   * only *selects* until Take is pressed, and placing lands the item provisionally and waits to be paid
+   * for. Neither gesture can commit anything on its own any more, so demanding the button first was
+   * asking the player to say what they were about to do immediately before doing it.
+   *
+   * So the two actions with a gesture of their own are **inferred** from that gesture: touching the
+   * source begins a draft, dragging out of the drawer onto the board begins a placement. Both still
+   * end at the same confirm step, and Cancel still returns here having spent nothing.
+   *
+   * `pass` has no gesture and cannot be inferred, which is why the bar keeps its buttons — they are
+   * also the only route for a player not using a pointer.
+   */
   | { readonly kind: 'idle' }
-  /** Drafting. The source is live; `selected` holds tile ids (see draft.ts). */
-  | { readonly kind: 'taking', readonly selected: readonly string[] }
+  /**
+   * Drafting. The source is live; `selected` holds tile ids (see draft.ts).
+   *
+   * `inferred` records **how the phase began**, and it exists for one reason: an inference should be
+   * as easy to take back as it was to make. A draft that started by clicking a tile is undone by
+   * unclicking it — emptying the selection returns to `idle`, because clicking was the only thing that
+   * ever said "I am drafting". A draft started by pressing the button stays put with nothing selected,
+   * since the player said it out loud and it is not the view's place to overrule them.
+   *
+   * Without the distinction one of the two has to be wrong: either an inferred draft is sticky, which
+   * traps the player in a mode they never chose, or an explicit one collapses, which makes the button
+   * look broken.
+   */
+  | {
+      readonly kind: 'taking'
+      readonly selected: readonly string[]
+      readonly inferred: boolean
+    }
   /** Placing. The drawer and board are live, and a drag is what moves the item. */
   | { readonly kind: 'putting' }
   /**
