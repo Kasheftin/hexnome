@@ -33,18 +33,29 @@ export interface SingleplayerModeInfo {
   readonly id: SingleplayerMode
   readonly label: string
   readonly rounds: number
-  /**
-   * Deliberately empty for now. The modes differ in how many pieces they supply and how score
-   * is counted, and none of that is settled — see docs/game-design.md. An invented blurb would
-   * read as decided.
-   */
+  /** One line on how the mode scores, for the menu. See docs/game-design.md, "Round scoring". */
   readonly description: string
 }
 
 export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
-  { id: 'classic', label: 'Classic', rounds: 4, description: '' },
-  { id: 'classicReversed', label: 'Classic reversed', rounds: 4, description: '' },
-  { id: 'random', label: 'Random', rounds: 6, description: '' },
+  {
+    id: 'classic',
+    label: 'Classic',
+    rounds: 4,
+    description: 'Scores small values first and the sixes last. Colours dealt by the game id.',
+  },
+  {
+    id: 'classicReversed',
+    label: 'Classic reversed',
+    rounds: 4,
+    description: 'The same four rounds, largest values first.',
+  },
+  {
+    id: 'random',
+    label: 'Random',
+    rounds: 6,
+    description: 'Six rounds, one value and one colour each, both shuffled.',
+  },
 ]
 
 export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6]

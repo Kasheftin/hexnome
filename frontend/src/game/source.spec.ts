@@ -7,6 +7,7 @@ import {
   pushLot,
   shiftLotsDown,
   shouldRefill,
+  sourceContents,
   topLotIsShort,
 } from './source'
 import { createTableau, type TileSpec } from './tableau'
@@ -207,5 +208,60 @@ describe('turning a plate over', () => {
     const plate = t.plateInSourceLot(0)!
     t.revealPlate(plate.id, { color: 1, value: 4 }, 0)
     expect(platesToReveal(t)).toHaveLength(0)
+  })
+})
+
+describe('what the source is holding', () => {
+  it('reports every lot\'s tiles and plates', () => {
+    const t = table()
+    pushLot(t, heap(1))
+    pushLot(t, heap(2))
+    const held = sourceContents(t)
+    expect(held.plates).toHaveLength(2)
+    expect(held.tiles).toHaveLength(2 * TILES_PER_LOT)
+  })
+
+  it('reports face-down and revealed plates alike', () => {
+    const t = table()
+    pushLot(t, heap(1))
+    const plate = t.plateInSourceLot(0)!
+    for (const tile of t.tilesInSourceLot(0)) t.discard(tile.id)
+    t.revealPlate(plate.id, { color: 1, value: 4 }, 0)
+    pushLot(t, heap(2))
+    expect(sourceContents(t).plates.map(p => p.faceDown)).toEqual([true, false])
+  })
+
+  /*
+   * The tiles a lot is heaped with are `kind: 'source'`, not `onPlate`, so discarding the plate leaves
+   * them behind. A sweep that forgot this would drop four tiles a lot out of the game.
+   */
+  it('lists heaped tiles separately, since the plate does not carry them off', () => {
+    const t = table()
+    pushLot(t, heap(1))
+    const plate = t.plateInSourceLot(0)!
+    expect(t.discard(plate.id)!.tiles).toEqual([])
+    expect(t.tilesInSourceLot(0)).toHaveLength(TILES_PER_LOT)
+  })
+
+  /*
+   * The reason clearing the source is a fix and not only a rule: restocking needs the bottom slot free,
+   * so a round that ended with anything left down there would stall the next one.
+   */
+  it('unblocks restocking once swept, which a leftover bottom lot prevents', () => {
+    const t = table()
+    for (let i = 0; i < PLATES_PER_ROUND; i++) pushLot(t, heap(i))
+    // Draft one tile out of the newest lot, so the *only* thing left blocking a restock is the bottom.
+    t.discard(t.tilesInSourceLot(0)[0]!.id)
+    const supply = { platesDealt: 0, platesPerRound: PLATES_PER_ROUND }
+    expect(topLotIsShort(t)).toBe(true)
+    expect(hasRoomToShift(t)).toBe(false)
+    expect(shouldRefill(t, supply)).toBe(false)
+
+    const held = sourceContents(t)
+    for (const tile of held.tiles) t.discard(tile.id)
+    for (const plate of held.plates) t.discard(plate.id)
+
+    expect(hasRoomToShift(t)).toBe(true)
+    expect(shouldRefill(t, supply)).toBe(true)
   })
 })

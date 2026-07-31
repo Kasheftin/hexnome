@@ -11,7 +11,7 @@ describe('which actions are open', () => {
   const base = {
     sourceTiles: 4,
     sourcePlates: 0,
-    drawerItems: 2,
+    placeableItems: 2,
     freeDrawerSlots: 14,
     freePlateSlots: 2,
   }
@@ -22,8 +22,8 @@ describe('which actions are open', () => {
 
   it('closes put when the drawer is empty', () => {
     // The opening position: nothing has been drafted yet, so the only real action is a draft.
-    expect(turnOptions({ ...base, drawerItems: 0 }).put).toBe(false)
-    expect(turnOptions({ ...base, drawerItems: 0 }).take).toBe(true)
+    expect(turnOptions({ ...base, placeableItems: 0 }).put).toBe(false)
+    expect(turnOptions({ ...base, placeableItems: 0 }).take).toBe(true)
   })
 
   it('closes take when the source is empty', () => {
@@ -50,7 +50,7 @@ describe('which actions are open', () => {
   })
 
   it('always leaves pass open', () => {
-    expect(turnOptions({ ...base, sourceTiles: 0, drawerItems: 0, freeDrawerSlots: 0 }).pass)
+    expect(turnOptions({ ...base, sourceTiles: 0, placeableItems: 0, freeDrawerSlots: 0 }).pass)
       .toBe(true)
   })
 })
@@ -58,9 +58,9 @@ describe('which actions are open', () => {
 describe('a turn with nothing to do', () => {
   it('is one where only pass remains', () => {
     const bare = { sourcePlates: 0, freePlateSlots: 2 }
-    expect(hasRealAction(turnOptions({ ...bare, sourceTiles: 0, drawerItems: 0, freeDrawerSlots: 5 })))
+    expect(hasRealAction(turnOptions({ ...bare, sourceTiles: 0, placeableItems: 0, freeDrawerSlots: 5 })))
       .toBe(false)
-    expect(hasRealAction(turnOptions({ ...bare, sourceTiles: 1, drawerItems: 0, freeDrawerSlots: 5 })))
+    expect(hasRealAction(turnOptions({ ...bare, sourceTiles: 1, placeableItems: 0, freeDrawerSlots: 5 })))
       .toBe(true)
   })
 })

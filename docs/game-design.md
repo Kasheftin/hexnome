@@ -379,6 +379,30 @@ or value, not its position.
 Draw order is not random. It is derived from the game's id, so the same game always deals the same
 36 plates and 108 tiles in the same order — see `docs/tech-spec.md`, "Seeded bags".
 
+### The discard pile, and reshuffling
+
+Nothing that leaves play is destroyed. There are **two piles**, one per bag, and three ways to reach
+them:
+
+- **A round ends.** The shared source is swept — every remaining lot, its face-down or revealed plate
+  and the loose tiles heaped on it. A round's leftovers are not next round's offering.
+- **Something is spent as payment.** The tiles and plates that paid for a placement go to the piles
+  rather than out of the game.
+- A plate always travels **whole**, its own tile included. It is one plate in the plate pile, and its
+  token does *not* also become a loose tile.
+
+**Stems are the exception.** They are minted by anchors rather than drawn from a bag, so a spent stem
+simply ceases to be — there is no bag owed it back.
+
+**A bag that runs dry is refilled from its pile**, reshuffled, and the draw finishes out of it — the
+deck-of-cards move, so a lot is never dealt short while material exists. In practice this is hard to
+reach: only the largest configuration exhausts a bag inside a game, and it happens silently when it
+does. If bag *and* pile are both empty the source simply stops growing.
+
+The reshuffle is **seeded from the game id and the pile itself**, not from chance, so a game is still
+entirely determined by its URL. That is why each batch is discarded in a fixed order rather than in
+whatever order the player clicked — see `docs/tech-spec.md`, "The reshuffle".
+
 ## Turn structure
 
 On your turn you choose **one** action:
@@ -397,8 +421,13 @@ On your turn you choose **one** action:
 3. **Pass**.
 
 Turns are numbered **within a round**, so the header reads "round 2, turn 5" for the fifth turn of that
-round. Every completed action advances the count, a pass included; abandoning a part-built action does
-not.
+round. Every completed action advances the count; abandoning a part-built action does not.
+
+**Pass is not a skipped turn — it takes you out of the round.** A player who passes is done until the
+round ends, and the round ends once *everyone* has passed. With one seat those are the same moment, so
+a single Pass finishes the round. It is a choice rather than a detection: it usually happens when
+nothing can be drafted and nothing placed, but a player may pass with moves still on the table, and
+nothing passes on their behalf.
 
 The **drawer starts empty**, so the first turn can only be a draft. That is a starting position
 rather than a rule to check — there is simply nothing to place yet.
@@ -431,6 +460,25 @@ Because nothing can share *both* the placed item's colour and its value without 
 **first non-stem payer settles which attribute is in play**. There is no gradual narrowing here as
 there is in drafting.
 
+### What you cannot afford, you cannot place
+
+An item whose price this drawer could never meet is **not a legal placement**. It is shown greyed out
+in the drawer, it offers no drop target on the board, and if nothing at all is affordable the **Place**
+action is closed rather than leading to a payment step that can only be cancelled.
+
+Deciding it needs no searching. Every non-stem payer shares exactly one attribute with the placed item,
+so the most a strategy can raise is "every *distinct* kind sharing that attribute", with stems making up
+the rest — two blue-2s are one payer, since the second would duplicate the first. Comparing the colour
+run and the value run and taking the better one answers it exactly.
+
+Greying out does not stop you **sorting** an unaffordable tile around the drawer; it is out of reach,
+not untouchable. And it can come back into reach: draft a tile that shares its colour and the price is
+suddenly payable.
+
+> Tiles you cannot pay for tend to sit in the drawer at the end of a round, and they **carry over** to
+> the next one rather than being cleared. See [Open questions](#open-questions) 6 for what else does or
+> does not reset.
+
 ### The two-step flow
 
 A placement is one turn but **two** steps, because the player should see what they are buying before
@@ -462,10 +510,62 @@ bays.
 Nothing may **leave** the drawer except as part of a placement, which is a real action and costs the
 turn.
 
-## Scoring (Azul-style, at end of stage/game)
+## Round scoring
 
-Both **same-color** and **same-value** connected groups score. A single tile can contribute to
-**both** a color group and a value group.
+At the end of each round you score for that round's **targets**. A target is either:
+
+- a **value** — every tile on the board with that value scores its own value each (a 6 is worth 6);
+- a **colour** — every tile of that colour scores 1 each, whatever its value.
+
+Counting is over the **whole board as it stands**, not only what was placed during the round, and a
+plate's own tile counts like any other. A tile is counted once per target it matches, so one that
+satisfies both a value and a colour target in the same round scores for both.
+
+Across a mode's rounds every value 1–6 and every colour appears **exactly once** — twelve targets,
+which is what makes the round shapes work out: 3 to a round over four rounds, or 2 over six.
+
+| Mode | Rounds | Plan |
+|---|---|---|
+| **Classic** | 4 | values `1,2` + 1 colour · `3` + 2 colours · `4,5` + 1 colour · `6` + 2 colours |
+| **Classic reversed** | 4 | the same four rounds, largest values first |
+| **Random** | 6 | one value and one colour per round |
+
+**Which colour belongs to which round is dealt from the game id**, in every mode; Random shuffles the
+values too. So Classic keeps a recognisable rhythm — small values first, the 6 last — while each game's
+colour plan differs, and the whole agenda is still reproducible from the URL. That last part is what
+makes a run repeatable: the same link is the same game to beat.
+
+Classic reversed opens with the colour-heavy round, since Classic closes with one. That is a
+consequence of the shape rather than an oddity.
+
+### The end of a round
+
+When the round ends its score is worked out and **shown**, target by target: each row lists the tiles
+that actually matched, times what they are worth, and the rows add to the round's total. A round that
+announced only a number would be asking to be trusted, and would teach nothing about which targets are
+worth chasing.
+
+Then the score is banked and the next round is announced — a **Round** card, then **Turn 1** — with the
+new supply dealt behind the card. After the last round the same panel becomes the end of the game and
+shows the final total.
+
+What carries over:
+
+- the **drawer**, in full. Tiles nobody could pay for are still yours next round, which is most of why
+  a drawer accumulates awkward tiles at all;
+- the **board**, of course, which is what later rounds score against;
+- the **banked scores**, which simply add.
+
+What resets: the round's **plate supply**, so the new round deals its own — and the **shared source**,
+which is swept into the discard piles. See [The discard pile](#the-discard-pile-and-reshuffling).
+
+> Not yet decided: whether the banked round scores and the final score below simply add.
+
+## Final scoring (Azul-style, at end of stage/game)
+
+Scored once, over the finished board, and unrelated to the round targets above. Both **same-color**
+and **same-value** connected groups score. A single tile can contribute to **both** a color group and
+a value group.
 
 These are the same groups placement is judged against — see
 [Groups, and the no-duplicates rule](#groups-and-the-no-duplicates-rule). A group can therefore never
@@ -581,13 +681,15 @@ none of these block current work. The rules module must leave room for them rath
 3. ~~**Rule enforcement** — is a no-duplicate violation an *illegal placement* or a *legal but
    non-scoring* one?~~ **Resolved — illegal.** It is a hard gate: the model refuses the move and the
    drop marker turns red. See [Groups, and the no-duplicates rule](#groups-and-the-no-duplicates-rule).
-4. **Shared source** — *composition is settled* (36 plates, 108 tiles), and so is its **shape**: six
-   lots, each a face-down plate under four loose tiles (see
-   [How the source presents itself](#how-the-source-presents-itself)). Still open: **when it
-   refills**, and whether all six lots are dealt at the start of a round or fill progressively.
-   Only one lot is dealt so far.
+4. ~~**Shared source** — when does it refill?~~ **Resolved.** Composition (36 plates, 108 tiles) and
+   shape (lots of a face-down plate under four loose tiles) were already settled; the timing now is
+   too. Lots fill **progressively**, one per turn once the top lot has been touched, up to the round's
+   quota — see [When the source restocks](#when-the-source-restocks) — and the column is swept at the
+   end of the round.
 5. **Drawer cap** — is 16 a rule or only the mockup's layout?
-6. **Stages** — how many, and what resets between them.
+6. **Stages** — how many. What *resets* is now settled: the **drawer carries over** with its
+   unaffordable tiles, the board and the banked scores carry over, and the **shared source is swept to
+   the discard piles**. Only the number of stages, and whether a stage is more than a round, is open.
 7. ~~**Jokers** — what they do and how they are spent.~~ **Resolved** — they are
    [stems](#stems-the-jokers), and they are spent as wild payment. See question 15 for how they are
    earned, which is still open.
@@ -601,7 +703,9 @@ none of these block current work. The rules module must leave room for them rath
     sublattice** (generated by `(1,2)` and `(3,-1)`, so the board tessellates and no cell is stranded).
     Today 18 holes are legal around a plate, of which only 6 interlock; the other 12 connect but leave
     gaps, and gaps are what strand cells.
-11. **Pass** — always available, or only when no other action is legal? Currently unconditional.
+11. ~~**Pass** — always available, or only when no other action is legal?~~ **Resolved — always.**
+    Passing ends your round rather than skipping a turn, and choosing to stop early is a real decision
+    the game should not make for you.
 14. ~~**Spending a stem** — what does a stem buy when placing a tile?~~ **Resolved** — a stem is a wild
     payer: it counts as one item toward the price, matches nothing, and is exempt from the equal-items
     rule. Any number may be used in one payment. See [Payment](#payment-azul-style).

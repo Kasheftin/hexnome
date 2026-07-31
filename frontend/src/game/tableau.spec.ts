@@ -462,7 +462,7 @@ describe('discarding', () => {
   it('removes a drawer tile and frees its slot', () => {
     const t = tableau()
     const tile = t.addTile(RED, inDrawer(2))!
-    expect(t.discard(tile.id)).toBe(true)
+    expect(t.discard(tile.id)).toEqual({ kind: 'tile', plate: null, tiles: [RED] })
     expect(t.tiles()).toHaveLength(0)
     expect(t.canPlaceTile(inDrawer(2))).toBe(true)
   })
@@ -470,7 +470,8 @@ describe('discarding', () => {
   it('removes a stem and frees its slot', () => {
     const t = tableau()
     const stem = t.addStem(2)!
-    expect(t.discard(stem.id)).toBe(true)
+    // Removed, but nothing recyclable — which is a different answer from "no such id".
+    expect(t.discard(stem.id)).toEqual({ kind: 'stem', plate: null, tiles: [] })
     expect(t.stems()).toHaveLength(0)
     expect(t.canPlaceTile(inDrawer(2))).toBe(true)
   })
@@ -480,10 +481,34 @@ describe('discarding', () => {
     const p = t.addPlate(inPlateSlot(0))!
     t.addTile(RED, onPetal(p.id, 0), { fixed: true })
     t.addTile(BLUE, onPetal(p.id, 1))
-    expect(t.discard(p.id)).toBe(true)
+    expect(t.discard(p.id)).toBeTruthy()
     expect(t.plates()).toHaveLength(0)
     expect(t.tiles()).toHaveLength(0)
     expect(t.freePlateSlots()).toEqual([0, 1])
+  })
+
+  it('reports a plate as its own token, carrying its petal', () => {
+    const t = tableau()
+    const p = t.addPlate(inPlateSlot(0))!
+    t.addTile(RED, onPetal(p.id, 3), { fixed: true })
+    expect(t.discard(p.id)).toEqual({ kind: 'plate', plate: { ...RED, petal: 3 }, tiles: [] })
+  })
+
+  it('keeps the plate\'s own token out of the loose tiles', () => {
+    const t = tableau()
+    const p = t.addPlate(inPlateSlot(0))!
+    t.addTile(RED, onPetal(p.id, 0), { fixed: true })
+    t.addTile(BLUE, onPetal(p.id, 1))
+    const receipt = t.discard(p.id)!
+    // Counting the token in both buckets is how a recycled plate would duplicate a tile into the deck.
+    expect(receipt.plate).toEqual({ ...RED, petal: 0 })
+    expect(receipt.tiles).toEqual([BLUE])
+  })
+
+  it('reports a face-down plate as having no token, since the model never held one', () => {
+    const t = tableau()
+    const p = t.addPlate(inPlateSlot(0), { faceDown: true })!
+    expect(t.discard(p.id)).toEqual({ kind: 'plate', plate: null, tiles: [] })
   })
 
   it('frees the board cells a discarded plate covered', () => {
@@ -494,7 +519,7 @@ describe('discarding', () => {
   })
 
   it('reports an unknown id rather than pretending', () => {
-    expect(tableau().discard('nope')).toBe(false)
+    expect(tableau().discard('nope')).toBeNull()
   })
 })
 
@@ -1108,5 +1133,27 @@ describe('a plate placement reserves room too', () => {
     // The anchor is enclosed before and after, so the move closes nothing new.
     const { t, plate } = enclosedPlate(3, 0)
     expect(t.canPlacePlate(onBoard(0, 0), plate.id)).toBe(true)
+  })
+})
+
+describe('tiles on the board', () => {
+  it('are the ones on a placed plate, and only those', () => {
+    const t = tableau()
+    const onTable = t.addPlate(onBoard(0, 0))!
+    const held = t.addPlate(inPlateSlot(0))!
+    const placed = t.addTile(RED, onPetal(onTable.id, 0))!
+    const token = t.addTile(BLUE, onPetal(onTable.id, 1), { fixed: true })!
+    t.addTile(RED, onPetal(held.id, 0), { fixed: true })
+    t.addTile(BLUE, inDrawer(0))
+
+    const ids = t.tilesOnBoard().map(tile => tile.id).sort()
+    // The bay plate's token and the drawer tile are not on the board; the placed plate's own is.
+    expect(ids).toEqual([placed.id, token.id].sort())
+  })
+
+  it('is empty on an empty board', () => {
+    const t = tableau()
+    t.addTile(RED, inDrawer(0))
+    expect(t.tilesOnBoard()).toEqual([])
   })
 })

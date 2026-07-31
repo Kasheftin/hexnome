@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * The turn card: "TURN 4", big, in the middle of the screen, between one turn and the next.
+ * The announcement card: "TURN 4" or "ROUND 2", big, in the middle of the screen, between one and the
+ * next.
  *
  * A turn used to end invisibly. Confirming a draft moved the tiles, bumped the counter in the header
  * and reset the bar all on the same frame, which read as one continuous fidget rather than as *my turn
@@ -16,9 +17,15 @@
  * dialog, and it must not eat a click that lands as it fades.
  */
 const props = defineProps<{
-  /** The turn to announce, or null when play is live and nothing should show. */
-  turn: number | null
-  /** False once the card should start leaving. Separate from `turn` so the exit can be watched. */
+  /**
+   * What to announce, or null when play is live and nothing should show.
+   *
+   * A round and a turn are the same card with a different word — the beat is what carries the meaning,
+   * and giving a new round its own kind of card would say it is a different sort of event when it is
+   * the same one at a larger scale.
+   */
+  announcing: { readonly label: string, readonly n: number } | null
+  /** False once the card should start leaving. Separate from `announcing` so the exit can be watched. */
   visible: boolean
 }>()
 
@@ -45,14 +52,14 @@ const emit = defineEmits<{ shown: [] }>()
     @after-enter="emit('shown')"
   >
     <div
-      v-if="props.turn !== null && props.visible"
+      v-if="props.announcing !== null && props.visible"
       class="announce"
       role="status"
       aria-live="polite"
     >
       <p class="card">
-        <span class="label">Turn</span>
-        <span class="number">{{ props.turn }}</span>
+        <span class="label">{{ props.announcing.label }}</span>
+        <span class="number">{{ props.announcing.n }}</span>
       </p>
     </div>
   </Transition>

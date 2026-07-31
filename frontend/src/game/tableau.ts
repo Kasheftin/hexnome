@@ -87,6 +87,27 @@ export interface TileSpec {
   readonly value: number
 }
 
+/**
+ * A plate's identity as data: the tile it carries, and where on its rim that tile sits.
+ *
+ * Lives here rather than in `deck.ts` — where it is known as `DealtPlate` — because it travels in both
+ * directions. The deck deals plates *out*, and `discard` reports them *back*. `deck.ts` already imports
+ * `TileSpec` from this module, so declaring the shape there and importing it here would close a cycle.
+ */
+export interface PlateSpec extends TileSpec {
+  /** Which of the six rim petals the plate's own tile occupies. */
+  readonly petal: number
+}
+
+/** What `discard` destroyed, in a form that can be put back into a deck. */
+export interface DiscardReceipt {
+  readonly kind: 'tile' | 'plate' | 'stem'
+  /** The plate itself, or null — either because this was not a plate, or because it was face-down. */
+  readonly plate: PlateSpec | null
+  /** Loose tiles that went with it. Never includes a plate's own token; that is part of `plate`. */
+  readonly tiles: readonly TileSpec[]
+}
+
 export interface Tile extends TileSpec {
   readonly id: string
   readonly location: TileLocation
@@ -173,6 +194,14 @@ export interface Tableau {
   readonly sourceTilesPerLot: number
 
   tiles(): readonly Tile[]
+  /**
+   * Only the tiles actually on the board — those on a plate that is itself placed.
+   *
+   * `tiles()` returns the drawer and the shared source too, so anything counting "what is on the
+   * board" has to filter, and a caller that forgets scores the player's hand. A plate's own `fixed`
+   * tile is **included**: it counts for scoring like any other (docs/game-design.md).
+   */
+  tilesOnBoard(): readonly Tile[]
   plates(): readonly Plate[]
   plate(id: string): Plate | undefined
   tile(id: string): Tile | undefined
@@ -298,18 +327,27 @@ export interface Tableau {
   swapDrawerItems(a: string, b: string): boolean
 
   /**
-   * Remove a tile, plate or stem from the game entirely.
+   * Remove a tile, plate or stem from the game entirely, and report what that destroyed.
    *
-   * Spending something to pay for a placement is not moving it anywhere — there is no discard pile, and
-   * inventing a location for one would put a place in the model that the rules do not have.
+   * There is still no discard pile *here*. The pile is the caller's (`game/recycling.ts`), and keeping
+   * it outside means the model does not gain a location the rules do not have. What changed is that the
+   * destruction is now **witnessed**: whatever leaves has to be able to come back, and only this method
+   * knows the full extent of what it took.
    *
    * Takes an id of any kind so a caller settling a mixed payment does not have to sort tiles from plates
    * from stems first. Discarding a plate takes its tiles with it, since a tile addressed by petal cannot
    * outlive the plate it is addressed against.
    *
-   * Returns false if nothing by that id exists.
+   * The receipt distinguishes three things a boolean could not:
+   *
+   * - **`null`** — no such id. Distinct from a stem, which is removed but yields nothing recyclable.
+   * - **`plate: null` on a plate** — the plate was face-down. The model never holds a face-down plate's
+   *   token, so the caller has to resolve it from wherever it kept the deal. Reporting the plate as
+   *   simply absent would silently lose it.
+   * - **`tiles` excludes the plate's own token**, which is reported as part of `plate` instead. A token
+   *   counted in both places would duplicate a tile into the deck on every recycled plate.
    */
-  discard(id: string): boolean
+  discard(id: string): DiscardReceipt | null
 
   /**
    * The tile-location a board cell corresponds to — an empty-or-not petal of whichever
@@ -903,6 +941,13 @@ export function createTableau({
     sourceTilesPerLot,
 
     tiles: () => [...tilesById.values()],
+
+    tilesOnBoard() {
+      return [...tilesById.values()].filter(tile =>
+        tile.location.kind === 'onPlate'
+        && platesById.get(tile.location.plateId)?.location.kind === 'board')
+    },
+
     plates: () => [...platesById.values()],
     plate: id => platesById.get(id),
     tile: id => tilesById.get(id),
@@ -1096,31 +1141,41 @@ export function createTableau({
       if (stem) {
         occupants.delete(tileLocationKey({ kind: 'drawer', slot: stem.slot }))
         stemsById.delete(id)
-        return true
+        // Removed, but nothing to recycle: a stem is minted by an anchor, not drawn from a bag.
+        return { kind: 'stem', plate: null, tiles: [] }
       }
 
       const tile = tilesById.get(id)
       if (tile) {
         occupants.delete(tileLocationKey(tile.location))
         tilesById.delete(id)
-        return true
+        return { kind: 'tile', plate: null, tiles: [{ color: tile.color, value: tile.value }] }
       }
 
       const plate = platesById.get(id)
       if (plate) {
+        let token: PlateSpec | null = null
+        const loose: TileSpec[] = []
         // Its tiles are addressed as (plate, petal), so they cannot outlive it.
         for (const carried of [...tilesById.values()]) {
-          if (carried.location.kind === 'onPlate' && carried.location.plateId === id) {
-            occupants.delete(tileLocationKey(carried.location))
-            tilesById.delete(carried.id)
-          }
+          if (carried.location.kind !== 'onPlate' || carried.location.plateId !== id) continue
+          /*
+           * The plate's own token becomes part of the plate, everything else travels loose. Reporting
+           * the token in both buckets is the one way this method can duplicate a tile into the deck,
+           * so the split is explicit rather than a filter someone could later widen.
+           */
+          if (carried.fixed) token = { color: carried.color, value: carried.value, petal: carried.location.petal }
+          else loose.push({ color: carried.color, value: carried.value })
+          occupants.delete(tileLocationKey(carried.location))
+          tilesById.delete(carried.id)
         }
         occupants.delete(plateLocationKey(plate.location))
         platesById.delete(id)
         reindexCoverage()
-        return true
+        // A null token means face-down: the model never held one, so the caller must supply it.
+        return { kind: 'plate', plate: token, tiles: loose }
       }
-      return false
+      return null
     },
 
     petalAt(cell) {

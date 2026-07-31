@@ -116,7 +116,7 @@ export interface TurnOptions {
 export function turnOptions({
   sourceTiles,
   sourcePlates,
-  drawerItems,
+  placeableItems,
   freeDrawerSlots,
   freePlateSlots,
 }: {
@@ -124,13 +124,19 @@ export function turnOptions({
   sourceTiles: number
   /** Revealed plates showing in the source. Face-down ones cannot be drafted. */
   sourcePlates: number
-  drawerItems: number
+  /**
+   * Drawer items that could actually be *placed* — not everything in the drawer.
+   *
+   * An item you cannot pay for is not a move you can make, so offering Put with only those in hand
+   * would light a button that leads nowhere. Stems never count: they cannot reach the board at all.
+   */
+  placeableItems: number
   freeDrawerSlots: number
   freePlateSlots: number
 }): TurnOptions {
   return {
     take: (sourceTiles > 0 && freeDrawerSlots > 0) || (sourcePlates > 0 && freePlateSlots > 0),
-    put: drawerItems > 0,
+    put: placeableItems > 0,
     pass: true,
   }
 }

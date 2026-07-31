@@ -148,6 +148,34 @@ Worth knowing before that split: `Tableau` already keys the source separately (`
 `TileLocation.source`) and `game/source.ts` only ever touches source locations, so the seam is roughly
 where it needs to be already.
 
+### The agenda is a second promise attached to the URL
+
+`game/agenda.ts` deals what each round scores for from the game id, the same way `deck.ts` deals the
+bags — so it falls inside the same frozen contract, and `agenda.spec.ts` carries its own golden pins.
+In that file, not `deck.spec.ts`: separate modules, separate pins. They do share the two known ids,
+which is how an accidental cross-module seed collision would show up.
+
+Two streams, `${gameId}:agenda:colors` and `${gameId}:agenda:values`, for the reason `random.ts` gives
+in its own comment. On one stream `random` draws values first and `classic` draws none, so the same id
+would deal them different colours purely through draw order.
+
+**Coverage falls out of the arithmetic rather than being checked for.** The colour deck is a permutation
+of all six and a mode's plan claims exactly six slots, so "every colour exactly once" is a consequence
+of consuming the deck. What is guarded is the *plan*: a dealer that found five slots would silently
+drop a colour from every game for ever, so it throws instead.
+
+**`classicReversed` reverses the result, never the plan.** Reversing the plan first is also
+deterministic, also passes coverage, and is not classic reversed — its round 1 takes the first colour
+off the deck instead of the one classic gave round 4. Exactly one test catches that, and it is the one
+that compares the two agendas directly.
+
+Rounds carry no round number; **position is the round**. That is what makes the reversal a plain array
+reverse with nothing to resequence, and a forgotten resequence is a bug no coverage test would catch.
+
+The agenda is derived and never stored. Both inputs survive a reload already — the id in the URL, the
+mode in the saved settings — and persisting it would let an agenda written by an older build outlive
+the code that produced it, which is the failure `parseGameSettings` exists to prevent.
+
 ### Seeded bags
 
 `game/random.ts` holds the primitives — `cyrb128` → `sfc32` → descending Fisher-Yates — and
@@ -196,6 +224,57 @@ The colour count lives in `game/deck.ts`, while the palette lives in `scene/tile
 deck deals indices `0…5` without consulting the palette. `tileMaterials.ts` carries a type-level
 assertion tying the two together, because `createTileMaterial` falls back to the first colour on an
 out-of-range index — drift would silently render the wrong colour rather than fail.
+
+### The reshuffle, and the third frozen contract
+
+`game/recycling.ts` wraps a bag in a discard pile: `createRecyclingBag(items, { seed })` draws from a
+cursor and, when the cursor runs short mid-draw, reshuffles the pile into a fresh bag and finishes the
+draw out of it. `bag.ts` is untouched and is held internally, so cursor arithmetic and the short-draw
+contract exist once.
+
+**This is the third promise attached to a game id**, after the deck and the agenda — and a wider one
+than either. Those two are pure functions of the id, so "the deck for game X" is a fixed thing a golden
+test can pin. A reshuffle depends on the id *and on how the game was played*, so there is no
+per-id answer to pin. `recycling.spec.ts` pins the **mechanism** instead: the encoding, the ordering,
+the seed format, the generation counter, and that an identical pile reshuffles identically.
+
+The seed is
+
+```
+`${gameId}:reshuffle:${kind}:${generation}:${digits}`
+```
+
+where `kind` is `plates` or `tiles`, `generation` counts reshuffles so far, and `digits` is every pile
+item's `tileCode` concatenated in pile order.
+
+Four details, each of which changes every reshuffle in every existing game if got wrong:
+
+- **`tileCode` is `(color + 1) * 10 + value`.** Colour is 0-based in code, and the `+ 1` is what keeps
+  every code two digits — `01` would lose its leading zero once concatenated, so two different piles
+  could seed the same shuffle. The trick holds only while there are at most nine colours.
+- **The same function is the sort key and the seed digits**, so the two cannot drift apart.
+- **The pile is ordered, batch by batch.** `shuffleInPlace` is Fisher-Yates over *a specific array*, so
+  the pile's order reaches the result twice: through the seed string, and through the array being
+  permuted. Left alone, that order would come from `Map` iteration and from the order the player
+  clicked payment chips. Each batch is therefore sorted on the way in — and **a batch is a whole
+  event**: one payment, or one round-end sweep. Discarding item by item would make every batch a
+  single item and the sort a no-op.
+- **The generation only advances on a real reshuffle.** A no-op increment when the pile is empty would
+  silently reseed the next genuine one.
+
+The pile holds **bare specs, never records with ids or rotation**. Sorting has ties, and ties are only
+safe while the tied items are indistinguishable; give a pile item an id and tie order becomes
+observable, breaking determinism in a way no test would obviously catch.
+
+Two things route into the piles, both in `GameView`: `applyPayment` accumulates a whole payment and
+hands over one batch per bag, and the round-end sweep does the same for the source. `tableau.discard`
+returns a **receipt** of what it destroyed rather than a boolean, so the caller never has to re-derive
+what a plate takes with it — two sources of truth about that is how a duplicate reaches a pile. The
+receipt keeps a plate's own token out of its loose tiles, and reports `plate: null` for a face-down
+plate the model never held a token for.
+
+`conservation.spec.ts` guards the whole protocol with one invariant: 36 plates and 108 tiles, across
+bag, pile and board, at every point in a scripted game.
 
 ## Rendering
 
@@ -820,6 +899,44 @@ learned the same lesson.
 Two planes are built per anchor and toggled by `visible`, rather than one plane whose texture is
 swapped. Lighting up then costs nothing at the moment it happens — no upload, no recompile, no frame
 showing the old art while the new map decodes — and it is exactly reversible.
+
+### Affordability is decided by counting, not by searching
+
+`canAffordPlacement` in `game/payment.ts` answers "could this be paid for at all" without exploring
+combinations. Every non-stem payer shares exactly one attribute with the target — sharing both would
+make it equal to the target, which is barred — so a strategy's ceiling is the number of *distinct kinds*
+sharing that attribute, and stems top up the rest. Two strategies, two counts, take the better.
+
+It lives with the payment rules rather than with the placement rules in `tableau.ts`, which is where the
+other "you may not start what you cannot finish" check sits. Payment has always been orchestrated by
+`GameView` — the `paying` phase, `canApply`, the purse — with only the rules in `payment.ts`; the model
+does not know what a payment is. Moving affordability into `canPlaceTile` would have meant teaching it,
+and would have changed the answer for every existing test that places a tile out of an empty drawer.
+
+The consequence is that the greying-out and the refusal both come from the view: `GameView` computes the
+unaffordable set and `TableauView` both dims those items and declines to offer them a board target. The
+two must agree — a dimmed tile that still lit up a valid target would be inviting a placement whose
+payment step is a dead end — so they read the same set rather than each deciding for themselves.
+
+Dimming is shown whenever a placement is *conceivable*, not only when one is affordable. Gating it on
+affordability leaves the worst case — nothing placeable — with an undimmed drawer beside a dead Put
+button and no visible reason for it.
+
+### Rounds end, and the cards queue
+
+`nextRound` finally has a caller. A round ends when Pass is pressed — with one seat that is everyone —
+and `GameView` holds the state between rounds in `roundOver`, a tally rather than a turn phase. It is
+not a `TurnPhase` because it is not something the player is doing *within* a turn; it suppresses the
+action bar and the whole table the same way an announcement does.
+
+The card machinery grew a **queue**, because a new round shows two cards in sequence — Round, then
+Turn 1 — and the second must not start until the first has left. `finishAnnouncement` shifts the next
+off the queue instead of clearing, which is the whole change; everything else pushes a single card. The
+restock rides on the *turn* card, the one being watched when the new lot needs to appear.
+
+`tallyRound` returns the matching tiles and not just a total, which is what lets the panel show its
+working. `scoreTargets` is then defined as its total, so the live readout and the end-of-round panel
+cannot compute different numbers.
 
 ### Placing is two steps, because it has a price
 

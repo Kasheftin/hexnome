@@ -138,6 +138,14 @@ const props = defineProps<{
    */
   draftStates: ReadonlyMap<string, DraftTileState> | null
   /**
+   * Drawer items that cannot be paid for, or null when nothing should be marked.
+   *
+   * A set rather than a state map, because there is only one thing to say about these — that they are
+   * out of reach. They are still draggable *within* the drawer: being unable to afford a tile is no
+   * reason to stop sorting your hand.
+   */
+  unaffordable: ReadonlySet<string> | null
+  /**
    * Payment state per **drawer** item — tiles, plates in bays, and stems — or null when not paying.
    *
    * Separate from `draftStates` because they cover disjoint places: drafting marks the shared source,
@@ -621,6 +629,19 @@ function cellUnderHeld(): Axial | null {
 }
 
 /**
+ * How an item should be marked: dimmed, selected, or plain.
+ *
+ * Three phases mark the same objects — drafting marks the source, paying marks the drawer, placing
+ * dims what cannot be afforded — and they never overlap, so one lookup in a fixed order is the whole
+ * rule. In one place because the same expression was previously written out at three call sites.
+ */
+function decorStateOf(id: string): DraftTileState {
+  return props.draftStates?.get(id)
+    ?? props.payStates?.get(id)
+    ?? (props.unaffordable?.has(id) ? 'inactive' : 'active')
+}
+
+/**
  * Is this destination occupied by something the held item could trade places with?
  *
  * Only ever true inside the drawer: a full tile slot or a full bay is a legal drop because the two
@@ -672,6 +693,18 @@ function resolveTarget(): void {
    * invalid target would imply the move exists and is merely refused, when it is not on offer at all.
    */
   if (!overDrawer && !props.mayPlace) {
+    emitTarget()
+    return
+  }
+
+  /*
+   * Nor can something be carried to the board that could never be paid for.
+   *
+   * The drawer dims these, and the two have to agree: a dimmed tile that still lit up a valid target
+   * would be inviting a placement whose payment step is a dead end. It can still be moved around the
+   * drawer, which is why this refuses the destination rather than the drag.
+   */
+  if (!overDrawer && props.unaffordable?.has(current.id)) {
     emitTarget()
     return
   }
@@ -1015,7 +1048,7 @@ onBeforeRender(({ delta }) => {
 
     // A plate is drafted — and spent — as a whole object, so the marker covers the whole plate.
     if (view.decor) {
-      showDraftState(view.decor, props.draftStates?.get(id) ?? props.payStates?.get(id) ?? 'active')
+      showDraftState(view.decor, decorStateOf(id))
     }
 
     if (current?.kind === 'plate' && current.id === id) {
@@ -1082,7 +1115,7 @@ onBeforeRender(({ delta }) => {
   for (const stem of props.tableau.stems()) {
     const view = stemViews.get(stem.id)
     if (!view) continue
-    if (view.decor) showDraftState(view.decor, props.payStates?.get(stem.id) ?? 'active')
+    if (view.decor) showDraftState(view.decor, decorStateOf(stem.id))
 
     if (current?.kind === 'stem' && current.id === stem.id) {
       // Carried at full size and at the held height, exactly like a tile — it is being rearranged,
@@ -1121,7 +1154,7 @@ onBeforeRender(({ delta }) => {
     if (view.decor) {
       // A tile is marked either as a draft candidate in the source or as a payer in the drawer —
       // never both, since those are different places and different phases.
-      showDraftState(view.decor, props.draftStates?.get(id) ?? props.payStates?.get(id) ?? 'active')
+      showDraftState(view.decor, decorStateOf(id))
     }
 
     if (current?.kind === 'tile' && current.id === id) {

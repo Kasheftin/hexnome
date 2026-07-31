@@ -28,7 +28,13 @@ import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { createBag } from '@/game/bag'
+import {
+  createAgenda,
+  roundAgenda,
+  scoreTargets,
+  tallyRound,
+  type RoundTally,
+} from '@/game/agenda'
 import { createDeck, dealStartingPlates, type DealtPlate } from '@/game/deck'
 import {
   canConfirmDraft,
@@ -41,6 +47,7 @@ import {
 } from '@/game/draft'
 import { hexRectangle } from '@/game/hex'
 import {
+  canAffordPlacement,
   canConfirmPayment,
   paymentCost,
   paymentStates as paymentStatesOf,
@@ -48,13 +55,23 @@ import {
   type Payer,
   type PaymentTarget,
 } from '@/game/payment'
-import { platesToReveal, pushLot, shouldRefill } from '@/game/source'
-import { createTableau, type Anchor, type PlateLocation, type TileLocation } from '@/game/tableau'
+import { createRecyclingBag } from '@/game/recycling'
+import { hasRoomToShift, platesToReveal, pushLot, shouldRefill, sourceContents } from '@/game/source'
+import {
+  createTableau,
+  type Anchor,
+  type DiscardReceipt,
+  type PlateLocation,
+  type PlateSpec,
+  type TileLocation,
+  type TileSpec,
+} from '@/game/tableau'
 import { DEFAULT_PLACEMENT_RULE } from '@/game/placement'
 import {
   FIRST_TURN,
   IDLE,
   INFER_ACTIONS_FROM_GESTURES,
+  nextRound,
   nextTurn,
   turnOptions,
   type TurnAction,
@@ -70,6 +87,8 @@ import SourceChrome from '@/scene/SourceChrome.vue'
 import TileEnvironment from '@/scene/TileEnvironment.vue'
 import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
+import RoundResults from '@/ui/RoundResults.vue'
+import TileChip from '@/ui/TileChip.vue'
 import TurnAnnounce from '@/ui/TurnAnnounce.vue'
 import {
   BOARD_HALF_COLS,
@@ -83,6 +102,7 @@ import {
 import { createDrawerLayout } from '@/scene/drawerLayout'
 import {
   DEFAULT_PLATES_PER_ROUND,
+  DEFAULT_SINGLEPLAYER_MODE,
   DEFAULT_STEM_COUNT,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
@@ -123,7 +143,7 @@ onMounted(() => {
    * the tableau, not a deal.
    */
   beginTurn()
-  announceTurn(count.value.turn)
+  announceRound(count.value.round)
 })
 
 /**
@@ -144,6 +164,14 @@ const BOARD_CENTRE = { q: 0, r: 0 } as const
  * (game/source.ts).
  */
 const platesPerRound = settings.value?.platesPerRound ?? DEFAULT_PLATES_PER_ROUND
+
+/**
+ * What each round scores for, dealt from the game id.
+ *
+ * Derived once and never stored: both inputs already survive a reload, and a saved agenda could
+ * outlive the code that produced it (game/agenda.ts).
+ */
+const agenda = createAgenda(gameId.value, settings.value?.mode ?? DEFAULT_SINGLEPLAYER_MODE)
 
 /** Stems paid for enclosing a plate. Fixed for the game, so the tableau can hold it too. */
 const stemsPerInternalAnchor =
@@ -196,8 +224,19 @@ const deck = createDeck(gameId.value)
 const PLAYERS = 1
 const opening = dealStartingPlates(deck.plates, PLAYERS)
 
-const plateBag = createBag(opening.remaining)
-const tileBag = createBag(deck.tiles)
+/*
+ * Recycling bags: what is spent or swept comes back, reshuffled, if a bag ever runs dry.
+ *
+ * The seeds are the stable half of the reshuffle contract — `game/recycling.ts` appends the generation
+ * and the pile's own digits. Two independent tags, because the two bags reshuffle on their own schedules
+ * and a shared one would couple them.
+ *
+ * Note the plate arithmetic: `opening.remaining` is 35, not 36, because the starting plate never entered
+ * the bag. Spend it and it enters the *pile*, so it can later be dealt out of a bag it was never in.
+ * That is intended — a plate is a plate — and it means conservation is over 36, not 35.
+ */
+const plateBag = createRecyclingBag(opening.remaining, { seed: `${gameId.value}:reshuffle:plates` })
+const tileBag = createRecyclingBag(deck.tiles, { seed: `${gameId.value}:reshuffle:tiles` })
 
 /** Plates dealt into the source this round. The round is over as a supply once this reaches its quota. */
 const platesDealt = shallowRef(0)
@@ -217,11 +256,16 @@ const dealtTokens = new Map<string, DealtPlate>()
  * The opening deal and every later restock both come through here, so the first lot cannot drift from
  * the rest. Draws the plate first and checks it: with no plate there is no lot, and dealing the tiles
  * anyway would leave a heap floating over an empty slot.
+ *
+ * **Room is checked before anything is drawn.** `pushLot` shifts the stack down and fails if the bottom
+ * slot was occupied — and a draw made before that failure is a plate and four tiles gone from the game
+ * for good. `hasRoomToShift` is exactly its precondition, so asking first is the whole fix.
  */
 function dealLot(): boolean {
-  const dealt = plateBag.take(1)[0]
+  if (!hasRoomToShift(tableau)) return false
+  const dealt = plateBag.draw(1)[0]
   if (!dealt) return false
-  if (!pushLot(tableau, tileBag.take(tableau.sourceTilesPerLot))) return false
+  if (!pushLot(tableau, tileBag.draw(tableau.sourceTilesPerLot))) return false
 
   // pushLot puts the new plate at the top of the stack; remember what it is carrying until it flips.
   const plate = tableau.plateInSourceLot(0)
@@ -270,6 +314,17 @@ const targetTileSlot = shallowRef<number | null>(null)
 const targetPlateSlot = shallowRef<number | null>(null)
 /** Bumped on every committed move, so the DOM readouts recompute. */
 const revision = shallowRef(0)
+
+/**
+ * What the current round has earned so far — what would be banked if it ended now.
+ *
+ * Counts the whole board, `fixed` tiles included, which is why it reads `tilesOnBoard()` rather than
+ * the `counts.placed` figure beside it: that one deliberately counts only the player's own placements.
+ */
+const roundPoints = computed(() => {
+  void revision.value
+  return scoreTargets(roundAgenda(agenda, count.value.round) ?? [], tableau.tilesOnBoard())
+})
 
 const counts = computed(() => {
   void revision.value
@@ -349,7 +404,7 @@ const freeBays = computed(() => {
 const options = computed(() => turnOptions({
   sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
   sourcePlates: sourceItems.value.filter(item => item.kind === 'plate').length,
-  drawerItems: counts.value.drawer + counts.value.platesHeld,
+  placeableItems: placeable.value.size,
   freeDrawerSlots: freeSlots.value.length,
   freePlateSlots: freeBays.value.length,
 }))
@@ -368,7 +423,11 @@ const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.s
  * {@link INFER_ACTIONS_FROM_GESTURES}, so turning that off restores choose-then-act everywhere at once.
  */
 const inferring = computed(() =>
-  INFER_ACTIONS_FROM_GESTURES && phase.value.kind === 'idle' && announcing.value === null)
+  INFER_ACTIONS_FROM_GESTURES
+  && phase.value.kind === 'idle'
+  && announcing.value === null
+  && roundOver.value === null
+  && !gameOver.value)
 
 const canStartTake = computed(() => inferring.value && options.value.take)
 const canStartPut = computed(() => inferring.value && options.value.put)
@@ -420,8 +479,104 @@ const turnLabel = computed(() => 'Your turn')
 function chooseAction(action: TurnAction): void {
   if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
   else if (action === 'put') phase.value = { kind: 'putting' }
-  else endTurn()
+  else endRoundByPassing()
 }
+
+/**
+ * Passing takes you out of the round — it is not a skipped turn.
+ *
+ * A player who passes is done until the round ends; the round ends once **everyone** has. With one
+ * seat that is the same moment, so a single Pass finishes the round outright. When there are more
+ * seats this becomes a set of who has passed and a check that it holds everyone, but the rule is
+ * already the one written here rather than a singleplayer shortcut.
+ *
+ * It is a choice, not a detection. It usually happens when nothing can be drafted and nothing placed,
+ * but a player may pass with moves left, so nothing passes on their behalf.
+ */
+function endRoundByPassing(): void {
+  phase.value = IDLE
+  roundOver.value = tallyRound(
+    roundAgenda(agenda, count.value.round) ?? [],
+    tableau.tilesOnBoard(),
+  )
+}
+
+/* ── the end of a round ───────────────────────────────────────────────────────── */
+
+/** The round's result while it is being shown, or null during play. */
+const roundOver = shallowRef<RoundTally | null>(null)
+
+/** What each finished round scored, in order. The game's total is their sum. */
+const banked = shallowRef<readonly number[]>([])
+
+const totalScore = computed(() => banked.value.reduce((sum, points) => sum + points, 0))
+
+const isFinalRound = computed(() => count.value.round >= (totalRounds.value || 1))
+
+/**
+ * Sweep the shared source into the piles: a round's leftovers do not carry over.
+ *
+ * Also a fix, not only a rule. Restocking needs `hasRoomToShift` — the *bottom* lot free — so a round
+ * that ended with anything still in the bottom lot (the usual way a round ends: nothing left is
+ * affordable) would leave the next round unable to push a lot at all.
+ *
+ * Loose tiles are discarded separately from the plate they are heaped on. A source tile is
+ * `kind: 'source'`, not `onPlate`, so discarding the plate does *not* take it.
+ */
+function clearSource(): void {
+  const { tiles: loose, plates: standing } = sourceContents(tableau)
+  const tiles: TileSpec[] = []
+  const plates: PlateSpec[] = []
+
+  for (const tile of loose) {
+    const receipt = tableau.discard(tile.id)
+    if (receipt) tiles.push(...receipt.tiles)
+  }
+  for (const plate of standing) {
+    const receipt = tableau.discard(plate.id)
+    if (!receipt) continue
+    tiles.push(...receipt.tiles)
+    const recovered = recoverPlate(plate.id, receipt)
+    if (recovered) plates.push(recovered)
+  }
+
+  // One batch each, however many lots it came from.
+  recycle(tiles, plates)
+}
+
+/**
+ * Bank the round and move on.
+ *
+ * The drawer is deliberately **not** cleared: tiles nobody could pay for are still yours next round,
+ * which is most of why a drawer accumulates awkward tiles at all. The source *is* cleared, and behind
+ * the round card, so the player never sees the old lots blink out — `platesDealt` then resets and the
+ * new round deals its own supply into an empty column.
+ */
+function startNextRound(): void {
+  const result = roundOver.value
+  if (!result) return
+  banked.value = [...banked.value, result.total]
+
+  if (isFinalRound.value) {
+    // The panel stays up and becomes the end of the game — see RoundResults' `over`.
+    gameOver.value = true
+    return
+  }
+
+  roundOver.value = null
+  count.value = nextRound(count.value)
+  announceRound(count.value.round, () => {
+    // Behind the card, and in this order: empty the column before the new round's quota is opened.
+    clearSource()
+    platesDealt.value = 0
+    // Explicit, rather than leaning on `beginTurn` happening to deal: the sweep alone changed the scene.
+    revision.value++
+    beginTurn()
+  })
+}
+
+/** True once the last round has been banked. The game is over; nothing further is playable. */
+const gameOver = shallowRef(false)
 
 /** Back to the action list, with any part-built selection discarded. */
 function cancelAction(): void {
@@ -473,10 +628,25 @@ const CARD_LEAVE_MS = 440
  */
 const CARD_SAFETY_MS = 4000
 
-/** The turn the card is announcing, or null while play is live. */
-const announcing = shallowRef<number | null>(null)
+interface Announcement {
+  readonly label: string
+  readonly n: number
+  /** Run once this card is fully up. See `cardWork`. */
+  readonly work?: () => void
+}
+
+/** What the card is announcing, or null while play is live. */
+const announcing = shallowRef<Announcement | null>(null)
 /** Flipped false to start the exit; `announcing` clears when the exit reports itself finished. */
 const cardVisible = shallowRef(false)
+
+/**
+ * Cards still to show, in order.
+ *
+ * A round opens with two — "ROUND 2" then "TURN 1" — and they have to be sequential rather than
+ * simultaneous, so this is a queue rather than a single slot. Everything else pushes one.
+ */
+let cardQueue: Announcement[] = []
 
 let cardTimers: ReturnType<typeof setTimeout>[] = []
 
@@ -485,10 +655,16 @@ function clearCardTimers(): void {
   cardTimers = []
 }
 
+/** This card is done. Show the next if there is one, otherwise hand the table back to the player. */
 function finishAnnouncement(): void {
   clearCardTimers()
   cardWork = null
   cardVisible.value = false
+  const next = cardQueue.shift()
+  if (next) {
+    showCard(next)
+    return
+  }
   announcing.value = null
 }
 
@@ -504,13 +680,36 @@ function finishAnnouncement(): void {
  */
 let cardWork: (() => void) | null = null
 
-/** Announce a turn, optionally restocking behind the card once it is up. */
-function announceTurn(turn: number, work?: () => void): void {
+function showCard(card: Announcement): void {
   clearCardTimers()
-  cardWork = work ?? null
-  announcing.value = turn
+  cardWork = card.work ?? null
+  announcing.value = card
   cardVisible.value = true
   cardTimers.push(setTimeout(finishAnnouncement, CARD_SAFETY_MS))
+}
+
+/** Announce these in order, replacing anything queued. */
+function announce(cards: readonly Announcement[]): void {
+  const [first, ...rest] = cards
+  if (!first) return
+  cardQueue = rest
+  showCard(first)
+}
+
+/** A turn card, optionally restocking behind it once it is up. */
+function announceTurn(turn: number, work?: () => void): void {
+  announce([{ label: 'Turn', n: turn, work }])
+}
+
+/**
+ * A round card, then the first turn of it.
+ *
+ * Two beats rather than one: a new round is a bigger event than a new turn, and saying so takes the
+ * time to say it. The restock rides on the *turn* card, which is the one the player is watching when
+ * the new lot needs to appear.
+ */
+function announceRound(round: number, work?: () => void): void {
+  announce([{ label: 'Round', n: round }, { label: 'Turn', n: 1, work }])
 }
 
 /**
@@ -668,6 +867,46 @@ const purse = computed<Payer[]>(() => {
   return out
 })
 
+/**
+ * Drawer items that could actually be placed — those whose price this drawer can meet.
+ *
+ * A stem is never in here: it cannot go on the board at all, so "can you afford it" does not arise.
+ * The purse for each candidate excludes the candidate itself, since placing it takes it out of the
+ * drawer before anything is paid.
+ */
+const placeable = computed(() => {
+  void revision.value
+  const all = purse.value
+  const ids = new Set<string>()
+  for (const item of all) {
+    if (item.kind === 'stem' || item.color === undefined || item.value === undefined) continue
+    const rest = all.filter(other => other.id !== item.id)
+    if (canAffordPlacement({ color: item.color, value: item.value }, rest)) ids.add(item.id)
+  }
+  return ids
+})
+
+/**
+ * Drawer items to show as unavailable, or null when nothing should be marked.
+ *
+ * Shown while placing, and while idle with anything placeable in hand — deliberately *not* gated on
+ * something being affordable. When nothing is, everything dims and the disabled Put button has a
+ * visible reason; gating on affordability would leave that case with an undimmed drawer and a dead
+ * button, which is the state hardest to explain.
+ *
+ * Null the rest of the time. Outside a turn the drawer is just your hand, and dimming half of it
+ * would be answering a question nobody asked.
+ */
+const unaffordable = computed(() => {
+  const holdsCandidate = purse.value.some(item => item.kind !== 'stem')
+  if (!(phase.value.kind === 'putting' || (inferring.value && holdsCandidate))) return null
+  const dim = new Set<string>()
+  for (const item of purse.value) {
+    if (item.kind !== 'stem' && !placeable.value.has(item.id)) dim.add(item.id)
+  }
+  return dim
+})
+
 const paySelected = computed(() => phase.value.kind === 'paying' ? phase.value.selected : [])
 
 /** Null unless paying, which is what tells the scene to stop marking the drawer. */
@@ -762,10 +1001,49 @@ function awardEnclosedAnchors(): void {
   }
 }
 
+/**
+ * Complete a plate the tableau has just destroyed.
+ *
+ * A face-up plate reports its own token; a face-down one cannot, because the model never held it, so it
+ * comes from the deal we remembered. Either way the remembered entry is spent and goes.
+ */
+function recoverPlate(id: string, receipt: DiscardReceipt): PlateSpec | null {
+  const plate = receipt.plate ?? dealtTokens.get(id) ?? null
+  dealtTokens.delete(id)
+  return plate
+}
+
+/**
+ * Put a whole event's worth of spent items into the piles.
+ *
+ * **One call per bag per event, never one per item.** The pile sorts each batch as it arrives, which is
+ * what keeps a reshuffle independent of the order the player happened to click; batches of one would
+ * make that sort a no-op and let click order back into the seed (game/recycling.ts).
+ */
+function recycle(tiles: readonly TileSpec[], plates: readonly PlateSpec[]): void {
+  tileBag.discard(tiles)
+  plateBag.discard(plates)
+}
+
 function applyPayment(): void {
   const current = phase.value
   if (current.kind !== 'paying' || !canApply.value) return
-  for (const id of current.selected) tableau.discard(id)
+
+  // Accumulated across the whole payment, then handed over as one batch each — see `recycle`.
+  const tiles: TileSpec[] = []
+  const plates: PlateSpec[] = []
+  for (const id of current.selected) {
+    const receipt = tableau.discard(id)
+    if (!receipt) continue
+    tiles.push(...receipt.tiles)
+    // Stems are the deliberate exception: an anchor minted them, so no bag is owed them back.
+    if (receipt.kind === 'plate') {
+      const plate = recoverPlate(id, receipt)
+      if (plate) plates.push(plate)
+    }
+  }
+  recycle(tiles, plates)
+
   // After the payment: spending can free slots, and the reward should be able to use them.
   awardEnclosedAnchors()
   revision.value++
@@ -906,6 +1184,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :tableau="tableau"
         :game-id="gameId"
         :may-place="phase.kind === 'putting' || canStartPut"
+        :unaffordable="unaffordable"
         :may-move-placed="phase.kind === 'putting'"
         :draft-states="draftStates"
         :pay-states="payStates"
@@ -981,7 +1260,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
     <Transition name="bar">
       <ActionBar
-        v-if="announcing === null"
+        v-if="announcing === null && !roundOver && !gameOver"
         :phase="phase"
         :options="options"
         :selection="selection"
@@ -1002,8 +1281,18 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
     </Transition>
 
+    <RoundResults
+      v-if="roundOver"
+      :round="count.round"
+      :tally="roundOver"
+      :final="isFinalRound"
+      :over="gameOver"
+      :total="totalScore"
+      @next="startNextRound"
+    />
+
     <TurnAnnounce
-      :turn="announcing"
+      :announcing="announcing"
       :visible="cardVisible"
       @shown="onCardShown"
     />
@@ -1037,6 +1326,34 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       </dl>
     </header>
 
+    <section class="chrome-panel agenda">
+      <h2 class="chrome-title">
+        Scoring
+      </h2>
+      <ol>
+        <li
+          v-for="(round, index) in agenda"
+          :key="index"
+          :class="{ now: index + 1 === count.round }"
+        >
+          <span class="round-no">R{{ index + 1 }}</span>
+          <span class="targets">
+            <span
+              v-for="(target, at) in round"
+              :key="at"
+              class="target"
+            >
+              <TileChip
+                :color="target.kind === 'color' ? target.color : undefined"
+                :value="target.kind === 'value' ? target.value : undefined"
+              />
+              <span class="per">{{ target.points }}</span>
+            </span>
+          </span>
+        </li>
+      </ol>
+    </section>
+
     <aside class="chrome-panel help">
       <dl>
         <dt>Drag a plate out</dt>
@@ -1055,6 +1372,14 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <p class="readout">
         <span>tiles on plates</span>
         <strong>{{ counts.placed }}</strong>
+      </p>
+      <p class="readout">
+        <span>points this round</span>
+        <strong>{{ roundPoints }}</strong>
+      </p>
+      <p class="readout">
+        <span>score</span>
+        <strong>{{ totalScore }}</strong>
       </p>
       <p class="readout">
         <span>plates</span>
@@ -1156,6 +1481,70 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   min-width: 240px;
   padding: 12px 14px;
   font-size: 11px;
+}
+
+/*
+ * The plan for the whole game, not just the round in progress: the targets are worth playing toward
+ * several rounds early, and a panel showing only the current one would hide that.
+ *
+ * **On the right, under the help card, and not under the title** — which is where it belongs by
+ * subject but not by geometry. The shared source is a column down the left edge starting just below
+ * the header, so a panel there sits on top of the one part of the screen you draft from. Measured:
+ * the header ends at y=49 and the source column runs from y≈68 to the drawer.
+ *
+ * `top` clears the help card, whose height depends on its own content. Measured, not guessed —
+ * eyeballing offsets off a screenshot has been wrong here before.
+ */
+.agenda {
+  position: absolute;
+  top: 270px;
+  right: 14px;
+  min-width: 247px;
+  padding: 10px 12px;
+  font-size: 11px;
+}
+
+.agenda ol {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agenda li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 3px 0;
+  color: #6b7382;
+}
+
+/* The round in progress, in the same brass the header's live figures use. */
+.agenda li.now {
+  color: #e8c878;
+}
+
+.round-no {
+  width: 20px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+.targets {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.target {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+/* Points per matching tile. Dim, because the chip beside it is what is being read. */
+.per {
+  color: #6b7382;
+  font-variant-numeric: tabular-nums;
 }
 
 dl {

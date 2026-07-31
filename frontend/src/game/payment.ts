@@ -172,3 +172,40 @@ export function togglePayment(
   if (state === 'active') return [...selectedIds, id]
   return [...selectedIds]
 }
+
+/**
+ * Could this be paid for at all, out of this purse?
+ *
+ * Asked *before* a placement rather than during one. Nothing stops a player carrying a tile onto the
+ * board they can never settle up for — Cancel gets them out — but walking into that dead end and
+ * discovering it at the payment step is a worse way to learn the price than being told up front.
+ *
+ * **No search is needed.** Every non-stem payer must share exactly one attribute with the target (see
+ * the note above), so the best a strategy can do is "every distinct kind that shares that attribute",
+ * and stems top up whatever is missing. Counting the two strategies and taking the better one answers
+ * it exactly — there is no combination this misses.
+ *
+ * Distinct *kinds*, not items: two blue-2s in the drawer are one usable payer, because the second
+ * would be a duplicate of the first.
+ */
+export function canAffordPlacement(target: PaymentTarget, purse: readonly Payer[]): boolean {
+  const cost = paymentCost(target)
+  if (cost <= 0) return true
+
+  const stems = purse.filter(isWild).length
+  if (stems >= cost) return true
+
+  const usable = (attribute: 'color' | 'value'): number => {
+    const kinds = new Set<string>()
+    for (const payer of purse) {
+      if (isWild(payer)) continue
+      const shares = attribute === 'color' ? payer.color === target.color : payer.value === target.value
+      // Sharing both would make it equal to the target, which is barred outright.
+      if (!shares || kindOf(payer) === kindOf(target)) continue
+      kinds.add(kindOf(payer))
+    }
+    return kinds.size
+  }
+
+  return stems + usable('color') >= cost || stems + usable('value') >= cost
+}

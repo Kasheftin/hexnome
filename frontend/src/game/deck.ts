@@ -29,7 +29,7 @@
  */
 import { PETAL_COUNT } from './plate'
 import { createRandom, shuffleInPlace } from './random'
-import type { TileSpec } from './tableau'
+import type { PlateSpec, TileSpec } from './tableau'
 
 /** Colours in the palette, and the number of distinct symbols/values. Both six — see game-design.md. */
 export const TILE_COLOR_COUNT = 6
@@ -44,10 +44,12 @@ export const STANDARD_TILE_COPIES = 3
  * The petal is cosmetic — a plate rotates freely in the drawer, and drafting matches on the tile's
  * colour or value, not its position. It is seeded anyway so that "same id, same deal" holds all the
  * way down to what the player actually sees.
+ *
+ * The shape itself is `PlateSpec`, declared in `tableau.ts`, because plates now travel both ways: dealt
+ * out from here, and reported back by `discard` on their way to the pile. This alias is kept because
+ * *dealt* is the meaningful word at this end.
  */
-export interface DealtPlate extends TileSpec {
-  readonly petal: number
-}
+export type DealtPlate = PlateSpec
 
 export interface Deck {
   /** All 36 plates, in the order they leave the bag. */

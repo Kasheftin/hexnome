@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canAffordPlacement,
   canConfirmPayment,
   paymentAttribute,
   paymentCost,
@@ -126,5 +127,55 @@ describe('stems', () => {
   it('are exempt from the equal-items rule, having nothing to be equal by', () => {
     const purse = [stem('s1'), stem('s2')]
     expect(canConfirmPayment(BLUE_3, purse, ['s1', 's2'])).toBe(true)
+  })
+})
+
+describe('whether a placement can be paid for at all', () => {
+  const affordable = canAffordPlacement
+
+  it('is free for a value-1 item, whatever the purse', () => {
+    expect(affordable({ color: BLUE, value: 1 }, [])).toBe(true)
+  })
+
+  it('is true when stems alone cover it', () => {
+    expect(affordable(BLUE_3, [stem('s1'), stem('s2')])).toBe(true)
+  })
+
+  it('is false when the purse is empty', () => {
+    expect(affordable(BLUE_3, [])).toBe(false)
+  })
+
+  it('counts a colour run and a value run separately, taking the better', () => {
+    // Two blues would pay; the single red-3 would not.
+    const purse = [tile('b1', BLUE, 1), tile('b2', BLUE, 2), tile('r', RED, 3)]
+    expect(affordable(BLUE_3, purse)).toBe(true)
+    expect(affordable({ color: BLUE, value: 5 }, [tile('r', RED, 5)])).toBe(false)
+  })
+
+  it('counts distinct kinds, not items — a duplicate cannot pay twice', () => {
+    // Three blue-2s are one usable payer, so a blue-3 costing two is still out of reach.
+    const purse = [tile('a', BLUE, 2), tile('b', BLUE, 2), tile('c', BLUE, 2)]
+    expect(affordable(BLUE_3, purse)).toBe(false)
+    // One of them plus a stem does it.
+    expect(affordable(BLUE_3, [...purse, stem('s')])).toBe(true)
+  })
+
+  it('ignores a payer equal to the target', () => {
+    const purse = [tile('twin', BLUE, 3), tile('other', BLUE, 3)]
+    expect(affordable(BLUE_3, purse)).toBe(false)
+  })
+
+  it('mixes stems with a run', () => {
+    // A value-5 costs four: one blue partner plus three stems.
+    const purse = [tile('b', BLUE, 1), stem('s1'), stem('s2'), stem('s3')]
+    expect(affordable({ color: BLUE, value: 5 }, purse)).toBe(true)
+    expect(affordable({ color: BLUE, value: 6 }, purse)).toBe(false)
+  })
+
+  it('agrees with what can actually be confirmed', () => {
+    // A purse it says can pay must contain some selection `canConfirmPayment` accepts.
+    const purse = [tile('b1', BLUE, 1), tile('b2', BLUE, 2), stem('s')]
+    expect(affordable(BLUE_3, purse)).toBe(true)
+    expect(canConfirmPayment(BLUE_3, purse, ['b1', 'b2'])).toBe(true)
   })
 })

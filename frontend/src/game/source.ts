@@ -26,7 +26,7 @@
  * leaves a free slot the round has no plate left to fill; relying on capacity alone would quietly deal
  * more than a round's worth.
  */
-import type { Plate, Tableau, TileSpec } from './tableau'
+import type { Plate, Tableau, Tile, TileSpec } from './tableau'
 
 /**
  * Face-down plates whose lot has been picked clean.
@@ -46,6 +46,31 @@ export function platesToReveal(tableau: Tableau): Plate[] {
     if (plate?.faceDown && tableau.tilesInSourceLot(lot).length === 0) ready.push(plate)
   }
   return ready
+}
+
+/**
+ * Everything still sitting in the source, for the sweep at the end of a round.
+ *
+ * **Reports rather than removes**, following `platesToReveal` for the same two reasons. A face-down
+ * plate's token is not in the model, so only the caller can complete it; and keeping `tableau.discard`
+ * as the single path by which anything leaves the game means "was this counted twice?" has one place to
+ * look rather than two.
+ *
+ * The loose tiles have to be listed separately, and that is easy to miss: a source tile is
+ * `kind: 'source'`, not `onPlate`, so it is *not* carried off by discarding the plate it is heaped on.
+ */
+export function sourceContents(tableau: Tableau): {
+  readonly tiles: readonly Tile[]
+  readonly plates: readonly Plate[]
+} {
+  const tiles: Tile[] = []
+  const plates: Plate[] = []
+  for (let lot = 0; lot < tableau.sourceLots; lot++) {
+    tiles.push(...tableau.tilesInSourceLot(lot))
+    const plate = tableau.plateInSourceLot(lot)
+    if (plate) plates.push(plate)
+  }
+  return { tiles, plates }
 }
 
 /** Has the newest lot been drafted from? */
