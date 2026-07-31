@@ -212,6 +212,7 @@ a tile may only go into an empty petal of a placed plate. Without it there is no
 - They are **spent as wild payment** when placing: a stem counts as one item toward the price, matches
   neither colour nor value because it has neither, and any number may go into one payment. See
   [Payment](#payment-azul-style).
+- They are **earned by enclosing an anchor** — see [Anchors](#anchors-and-earning-stems).
 - Each player is dealt **`initialStems`** of them at the start of the game — a setting, 1–4, default 3.
   Once per game, before the first turn.
 - Where else stems come from is undecided; they are described as bonuses.
@@ -476,10 +477,71 @@ contain a duplicate by the time it is scored: the placement that would have crea
 - **Value group** — connected tiles of the **same value**, size ≥ 3 → scores the **sum of their
   values** (= value × size). The exact formula is open.
 
-## Jokers
+## Anchors, and earning stems
 
-**Joker tokens** are earned by **filling all 6 petals around a plate's hole**. What they do and how
-they are spent is open.
+An **anchor** is a cell that can be *enclosed* by the tiles around it. Enclosing one pays out
+[stems](#stems-the-jokers) — the only source of them after the opening allowance.
+
+### Internal anchors
+
+A plate's **centre hole** is its internal anchor. The hole is never fillable and has exactly six petals
+around it, so it is enclosed when **all six petals hold a tile**.
+
+It is drawn in the hole of every revealed plate: a dark emblem while the plate is incomplete, a lit one
+once it is enclosed. Enclosure is a fact about the board rather than a flag, so the emblem lights up
+the moment a provisional placement completes the plate and goes dark again if that placement is
+cancelled — but the **stems are only paid when the placement is**, and only once per plate ever.
+
+The award is `stemsPerInternalAnchor`, a setting (1–4, default **3**).
+
+**A strict enclosure is worth more.** Walk the six petals as a ring, checking each neighbouring pair:
+if *every* pair shares a colour or a value — including the pair that wraps from the last back to the
+first — the enclosure pays `strictEnclosureBonus` on top (0 or 1, default **1**). With the defaults,
+an ordinary enclosure is worth 3 stems and a strict one 4.
+
+That bonus **does not exist under the strict placement rule**, and the setting is hidden there. Strict
+placement already guarantees a connected ring: of any adjacent pair, whichever tile went down second
+had to agree with every neighbour it found, including the first. The bonus would be the base rate
+under another name.
+
+**A placement that would earn stems it cannot hold is illegal** — counting the bonus, so a ring that is
+about to close strictly reserves room for all four. Stems live in drawer slots, and a
+reward with nowhere to go would either vanish or overflow, so the move is refused before it happens
+rather than half-honoured afterwards. The slot the placed tile vacates counts as free — it is emptied
+by the very move being judged.
+
+### External anchors
+
+A **bare cell that no plate covers, with all six of its neighbours covered**, is an external anchor.
+
+These exist because plates need only *connect*, not interlock — a plate placed off the flower
+sublattice can wrap a gap. On a perfectly tessellated board there are none at all, which is worth
+knowing: settling open question 10 the other way would remove this half of the mechanic entirely.
+
+They are found when a plate is placed, by checking the twelve cells ringing its flower. Nothing further
+out can matter: a cell needs six covered neighbours, so only cells touching the new plate can have just
+become one.
+
+The award is `stemsPerExternalAnchor` (1–4, default **2**), and it takes the strict bonus on the same
+terms as an internal one.
+
+An external anchor is drawn on a dark hex of its own, since there is no plate beneath it, and its
+emblem is **tinted** apart from the internal one's warm brass — they pay different amounts, so they
+have to be distinguishable at a glance.
+
+### One rule for both
+
+Beyond where they come from, the two kinds behave identically:
+
+- **Enclosed** when all six cells around the anchor hold a tile.
+- **Pays** the rate for its kind, plus the strict bonus if the ring of six is connected pair-to-pair.
+- **Pays once**, ever.
+
+Which means the check runs the same way whatever the move: place something, look at every anchor it
+could have closed, and pay for each that closed. **One move can close several at once** — a tile sits
+beside up to six anchors, and a plate can create an external anchor *and* fill its last neighbour in
+the same action. The legality check counts them all together, so a move whose combined payout would
+overflow the drawer is refused rather than half-honoured.
 
 ## Stages & end of game
 
@@ -532,7 +594,9 @@ none of these block current work. The rules module must leave room for them rath
 8. **Bonuses and goals** — the mockup shows per-goal bonuses ("complete all goals before the
    opponent"), but the goal system itself is not designed yet.
 9. **Puzzles mode** — fixed *sequence* or fixed *pool*?
-10. **Plate placement freedom** — half resolved. Plates **must touch** an existing plate; see
+10. **Plate placement freedom** — half resolved, and now load-bearing: external anchors only exist
+    *because* plates may sit off-lattice and wrap a gap, so snapping them to the sublattice would
+    delete that half of the stem economy. Plates **must touch** an existing plate; see
     [The connection rule](#the-connection-rule). Still open: whether they must also **snap to the flower
     sublattice** (generated by `(1,2)` and `(3,-1)`, so the board tessellates and no cell is stranded).
     Today 18 holes are legal around a plate, of which only 6 interlock; the other 12 connect but leave
@@ -541,8 +605,8 @@ none of these block current work. The rules module must leave room for them rath
 14. ~~**Spending a stem** — what does a stem buy when placing a tile?~~ **Resolved** — a stem is a wild
     payer: it counts as one item toward the price, matches nothing, and is exempt from the equal-items
     rule. Any number may be used in one payment. See [Payment](#payment-azul-style).
-15. **Earning stems** — beyond the opening allowance, how are they awarded? Still the only open part
-    of the stem design.
+15. ~~**Earning stems** — beyond the opening allowance, how are they awarded?~~ **Resolved** —
+    enclosing an anchor of either kind; see [Anchors](#anchors-and-earning-stems).
 16. **What "strict" means with mixed neighbours** — under the strict placement rule, each neighbour is
     currently judged on its own, so one may agree by colour and another by value. Should a *single*
     attribute have to satisfy all of them instead, as it does for drafting and payment? Only affects

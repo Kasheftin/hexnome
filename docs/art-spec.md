@@ -66,6 +66,28 @@ inside the circle reads as the coin's rim shadow.
 Provisional art. Size and position on the coin are tunable without touching it, via `STEM_SYMBOL_SCALE`
 and `STEM_SYMBOL_OFFSET_UP` in `scene/constants.ts`.
 
+## Anchor emblems
+
+**Files:** `frontend/public/textures/anchor-off.png` and `anchor-on.png`, 305×448 — from
+`external assets/AnchorOff.png` and `AnchorOn.png`.
+
+A pointy-top hexagonal crest with a gem at its centre: dark when the anchor is unclaimed, glowing green
+once the plate is enclosed. Two textures rather than one tinted texture, because the difference is not
+a colour — the gem gains an inner glow that lights the metal around it.
+
+The lit version arrived already keyed; the dark one came on an opaque olive background. Rather than key
+it separately — which risks the two ending up subtly different shapes — **the lit version's alpha was
+used as the dark one's mask.** Their brass bounding boxes are pixel-identical in the source
+(104, 124)–(920, 1344), so that is exact rather than approximate.
+
+**Both are cropped with the same box**, centred on the emblem rather than on the image (it sits above
+centre) with a 22px margin. This is the part that matters: a different crop per state would make the
+emblem jump at the moment it lights up, which is precisely the moment the player is looking at it.
+
+The crest is a *tall* hexagon — the points above and below make it 1.5× as tall as it is wide, against
+a regular hexagon's 1.15 — so fitted by bounding-box diagonal it sits narrower than the hole it
+occupies. `ANCHOR_SCALE` in `scene/constants.ts` pushes the points over the rim.
+
 ## Asset 0 — Plate socket art (in hand, **not used**)
 
 **File:** `frontend/public/textures/plate-full.png` — currently one tile, from

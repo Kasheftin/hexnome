@@ -756,6 +756,71 @@ pointer decides: past `DRAG_SLOP_PX` (4px) it becomes a drag, released short of 
 Deferring fixed something visible in every phase too — lifting on `pointerdown` made a plain click flick
 the tile up and back down.
 
+### Anchors are cells, and both kinds ask the same questions
+
+An anchor is modelled as a **cell**, not as a property of a plate. A plate hole and a wrapped gap are
+the same shape of thing — something with six neighbours — so enclosure, the strict ring and the reward
+are each written once, and only the *rate* varies by kind. The first version counted a plate's petals
+instead and could not have described an external anchor at all.
+
+Everything runs against a `BoardView`: which plate covers a cell, and what tile sits on it. The live
+board is one such view and a hypothetical is another, which is what lets `rewardOfMove` ask "what would
+this pay?" with exactly the code that asks "what does this pay?".
+
+**Finding external anchors is bounded by the plates, not the board.** A candidate must touch coverage —
+six covered neighbours is impossible otherwise — so the search walks the cells the plates occupy and
+looks one step out, rather than scanning 1661 cells.
+
+**A move can close several anchors at once,** so `rewardOfMove` compares whole boards: every anchor
+enclosed afterwards and not before, summed. A tile sits beside up to six anchors; a plate can create an
+external anchor and fill its final neighbour in one action. Reserving room for one and letting the rest
+overflow is the bug this shape rules out.
+
+One consequence to know: an anchor that did not exist before the move counts as newly closed, which is
+precisely what makes the plate case pay.
+
+### Anchors are derived, awards are not
+
+`plateIsEnclosed` counts a plate's filled petals and nothing more — no flag, no bookkeeping, the same
+reasoning that keeps board coverage derived from the plates. The payoff is that enclosure is
+**reversible for free**: a provisional placement lights the emblem, and cancelling puts it out again,
+with no state to unwind.
+
+The *award* cannot be derived the same way, or an anchor could be emptied and refilled to mint stems
+indefinitely. So `GameView` keeps a set of anchors that have already paid, and pays on **payment**
+rather than on the placement landing — until the price is settled the placement is only provisional,
+and cancelling has to leave the player with nothing gained.
+
+The strict bonus is settled in one place, `effectiveStrictBonus`, rather than at each site that reads
+it. The menu hides the control under strict placement, but a settings blob can also arrive hand-edited,
+stored before the rule existed, or written by an older build — so the parser normalises it too, and
+`GameView` reads through the same function. An invariant between two settings is worth having exactly
+one owner.
+
+**A reward that will not fit makes the placement illegal.** `canPlaceTile` refuses a move that would
+enclose a plate when the drawer has too few free slots for the stems, which is why `createTableau`
+takes `stemsPerInternalAnchor` at all — the model needs the rate to answer that one question. The slot
+the tile is *vacating* counts as free, since the very move being judged empties it; without that, the
+last placement out of a full drawer would be refused even when the reward fits exactly.
+
+An **external** anchor cannot ride on a plate — it is a hole in the plates by definition — so
+`ExternalAnchors.vue` draws it into the world directly, on a dark hex of its own, and rebuilds its set
+whenever the model changes. The internal one is built once with its plate and lives as long as it does.
+
+The two are told apart by a **tint** multiplied over the same art rather than by a second illustration:
+they pay different amounts so the difference has to be visible, but they are the same kind of thing, so
+two drawings would overstate it and double what has to be kept in step.
+
+The tint is passed to `attachAnchorVisual` rather than applied by the caller afterwards, and that is not
+a style preference. Anchor textures load lazily, so the meshes do not exist when the caller builds one —
+tinting from outside landed on nothing, and nothing re-applied it once the load returned. Anything that
+has to survive a late texture load belongs *inside* the builder, next to `lit`, which had already
+learned the same lesson.
+
+Two planes are built per anchor and toggled by `visible`, rather than one plane whose texture is
+swapped. Lighting up then costs nothing at the moment it happens — no upload, no recompile, no frame
+showing the old art while the new map decodes — and it is exactly reversible.
+
 ### Placing is two steps, because it has a price
 
 A placement moves the item to the board *first* and charges for it *second* (`putting` → `paying`).

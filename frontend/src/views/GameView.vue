@@ -49,7 +49,7 @@ import {
   type PaymentTarget,
 } from '@/game/payment'
 import { platesToReveal, pushLot, shouldRefill } from '@/game/source'
-import { createTableau, type PlateLocation, type TileLocation } from '@/game/tableau'
+import { createTableau, type Anchor, type PlateLocation, type TileLocation } from '@/game/tableau'
 import { DEFAULT_PLACEMENT_RULE } from '@/game/placement'
 import {
   FIRST_TURN,
@@ -64,6 +64,7 @@ import type { Axial } from '@/game/hex'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
 import DrawerChrome from '@/scene/DrawerChrome.vue'
+import ExternalAnchors from '@/scene/ExternalAnchors.vue'
 import HexGridFloor from '@/scene/HexGridFloor.vue'
 import SourceChrome from '@/scene/SourceChrome.vue'
 import TileEnvironment from '@/scene/TileEnvironment.vue'
@@ -83,6 +84,10 @@ import { createDrawerLayout } from '@/scene/drawerLayout'
 import {
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_STEM_COUNT,
+  DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
+  DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
+  DEFAULT_STRICT_ENCLOSURE_BONUS,
+  effectiveStrictBonus,
   modeInfo,
   roundsOf,
   type GameSettings,
@@ -140,6 +145,24 @@ const BOARD_CENTRE = { q: 0, r: 0 } as const
  */
 const platesPerRound = settings.value?.platesPerRound ?? DEFAULT_PLATES_PER_ROUND
 
+/** Stems paid for enclosing a plate. Fixed for the game, so the tableau can hold it too. */
+const stemsPerInternalAnchor =
+  settings.value?.stemsPerInternalAnchor ?? DEFAULT_STEMS_PER_INTERNAL_ANCHOR
+
+/** Stems paid for enclosing a bare cell the plates have wrapped. */
+const stemsPerExternalAnchor =
+  settings.value?.stemsPerExternalAnchor ?? DEFAULT_STEMS_PER_EXTERNAL_ANCHOR
+
+/**
+ * Extra stems when the enclosure is strict all the way round.
+ *
+ * Read through `effectiveStrictBonus` rather than straight off the settings, so the "zero under strict
+ * placement" rule holds even for a stored game that predates it or was edited by hand.
+ */
+const strictEnclosureBonus = settings.value
+  ? effectiveStrictBonus(settings.value)
+  : DEFAULT_STRICT_ENCLOSURE_BONUS
+
 const tableau = createTableau({
   cells,
   drawerSlots: DRAWER_SLOTS,
@@ -147,6 +170,9 @@ const tableau = createTableau({
   sourceLots: platesPerRound,
   sourceTilesPerLot: SOURCE_TILES_PER_LOT,
   placementRule: settings.value?.placementRule ?? DEFAULT_PLACEMENT_RULE,
+  stemsPerInternalAnchor,
+  stemsPerExternalAnchor,
+  strictEnclosureBonus,
 })
 
 /**
@@ -688,10 +714,60 @@ function onSelectPayment(id: string): void {
  * Spent items are **destroyed**, not moved: they leave the game rather than going anywhere, which is
  * what discarding means. Plates and stems go with the tiles.
  */
+/**
+ * Anchors that have already paid out. Each pays once, ever.
+ *
+ * Enclosure itself is derived and therefore reversible — that is what lets the emblem light up under a
+ * provisional placement and go dark again on cancel. Payment must not be: without this an anchor could
+ * be emptied and refilled to mint stems indefinitely.
+ */
+const paidAnchors = new Set<string>()
+
+/**
+ * A name for an anchor that survives the board moving underneath it.
+ *
+ * An internal anchor is named by its **plate**, not its cell, because a plate can be picked up and put
+ * down elsewhere — and an anchor that has been paid for should not pay again just because it is now at
+ * different coordinates. An external anchor has no owner to be named by, so its cell is all there is;
+ * it is also a hole in the plates, which only closes, so it does not travel.
+ */
+function anchorKey(anchor: Anchor): string {
+  if (anchor.kind === 'external') return `external:${anchor.cell.q},${anchor.cell.r}`
+  return `internal:${tableau.coverageAt(anchor.cell)?.plateId ?? `${anchor.cell.q},${anchor.cell.r}`}`
+}
+
+/**
+ * Hand out stems for any anchor enclosed by the move just settled.
+ *
+ * Run on payment rather than on the placement landing, because until the price is paid the placement is
+ * only provisional — the anchor lights up to show what is on offer, but cancelling has to leave the
+ * player with nothing gained.
+ *
+ * Every board plate is checked rather than just the one that was touched. It costs nothing at this
+ * scale and it means the award cannot be missed by whatever future move encloses a plate some other
+ * way. `canPlaceTile` has already refused any placement whose reward would not fit, so the slots are
+ * there.
+ */
+function awardEnclosedAnchors(): void {
+  for (const anchor of tableau.anchors()) {
+    const key = anchorKey(anchor)
+    if (paidAnchors.has(key) || !tableau.anchorIsEnclosed(anchor.cell)) continue
+    paidAnchors.add(key)
+    // The rate for its kind, plus the strict bonus if its ring earns one.
+    for (let i = 0; i < tableau.anchorReward(anchor); i++) {
+      const slot = tableau.freeDrawerSlots()[0]
+      if (slot === undefined) break
+      tableau.addStem(slot)
+    }
+  }
+}
+
 function applyPayment(): void {
   const current = phase.value
   if (current.kind !== 'paying' || !canApply.value) return
   for (const id of current.selected) tableau.discard(id)
+  // After the payment: spending can free slots, and the reward should be able to use them.
+  awardEnclosedAnchors()
   revision.value++
   endTurn()
 }
@@ -811,6 +887,10 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <CellHighlight
         :cells="targetCells"
         :valid="targetValid"
+      />
+      <ExternalAnchors
+        :tableau="tableau"
+        :revision="revision"
       />
       <SourceChrome
         :lots="platesPerRound"

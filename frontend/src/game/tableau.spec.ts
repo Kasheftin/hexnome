@@ -863,3 +863,250 @@ describe('a group may not contain the same tile twice', () => {
     expect(t.canPlacePlate(onBoard(1, 2), twinPlate.id)).toBe(false)
   })
 })
+
+describe('enclosing a plate lights its anchor', () => {
+  /** A plate on the board with `filled` of its petals already holding distinct tiles. */
+  function plateWith(filled: number, stemsPerInternalAnchor = 0) {
+    const t = createTableau({
+      cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2, stemsPerInternalAnchor,
+    })
+    const plate = t.addPlate(onBoard(0, 0))!
+    // Distinct colours and values so no group or neighbour rule interferes with what is being tested.
+    for (let petal = 0; petal < filled; petal++) {
+      t.addTile({ color: petal, value: petal + 1 }, onPetal(plate.id, petal))
+    }
+    return { t, plate }
+  }
+
+  it('is false while a petal is empty', () => {
+    const { t, plate } = plateWith(5)
+    expect(t.plateIsEnclosed(plate.id)).toBe(false)
+  })
+
+  it('is true once all six hold a tile', () => {
+    const { t, plate } = plateWith(6)
+    expect(t.plateIsEnclosed(plate.id)).toBe(true)
+  })
+
+  it('goes dark again if a tile leaves', () => {
+    const { t, plate } = plateWith(6)
+    const tile = t.tiles().find(x => x.location.kind === 'onPlate' && x.location.petal === 3)!
+    expect(t.moveTile(tile.id, inDrawer(0))).toBe(true)
+    expect(t.plateIsEnclosed(plate.id)).toBe(false)
+  })
+
+  it('reports false for a plate that does not exist', () => {
+    expect(tableau().plateIsEnclosed('nope')).toBe(false)
+  })
+})
+
+describe('a placement whose reward has nowhere to go', () => {
+  /** Five petals filled, and a drawer stuffed so only `freeSlots` remain. */
+  function nearlyEnclosed(stemsPerInternalAnchor: number, freeSlots: number) {
+    const t = createTableau({
+      cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2, stemsPerInternalAnchor,
+    })
+    const plate = t.addPlate(onBoard(0, 0))!
+    for (let petal = 0; petal < 5; petal++) {
+      t.addTile({ color: petal, value: petal + 1 }, onPetal(plate.id, petal))
+    }
+    // The tile about to be placed. Colour 4 so it agrees with the tile on petal 4, which petal 5
+    // touches — otherwise the neighbour rule refuses it first and the reward rule is never reached.
+    const held = t.addTile({ color: 4, value: 6 }, inDrawer(0))!
+    for (const slot of t.freeDrawerSlots().slice(0, 16 - 1 - freeSlots)) t.addStem(slot)
+    return { t, plate, held }
+  }
+
+  it('is refused when the stems would not fit', () => {
+    // Three stems due, and after the tile vacates its slot there are only two places for them.
+    const { t, plate, held } = nearlyEnclosed(3, 1)
+    expect(t.canPlaceTile(onPetal(plate.id, 5), held.id)).toBe(false)
+    expect(t.moveTile(held.id, onPetal(plate.id, 5))).toBe(false)
+  })
+
+  it('is allowed when they fit exactly, counting the slot being vacated', () => {
+    // Two free slots plus the one the tile leaves behind is exactly the three needed.
+    const { t, plate, held } = nearlyEnclosed(3, 2)
+    expect(t.canPlaceTile(onPetal(plate.id, 5), held.id)).toBe(true)
+  })
+
+  it('does not restrict a placement that encloses nothing', () => {
+    const { t, plate, held } = nearlyEnclosed(4, 0)
+    // Petal 5 would enclose and is refused; but with only four petals filled there is no reward due.
+    expect(t.canPlaceTile(onPetal(plate.id, 5), held.id)).toBe(false)
+    const other = t.addPlate(onBoard(1, 2))!
+    expect(t.canPlaceTile(onPetal(other.id, 0), held.id)).toBe(true)
+  })
+
+  it('is unrestricted when the game awards nothing', () => {
+    const { t, plate, held } = nearlyEnclosed(0, 0)
+    expect(t.canPlaceTile(onPetal(plate.id, 5), held.id)).toBe(true)
+  })
+})
+
+describe('a strict enclosure is worth more', () => {
+  /**
+   * A plate with five petals filled, ready for a sixth.
+   *
+   * `linked` builds a ring where every neighbouring pair shares its colour; otherwise the ring is
+   * broken in the middle by a tile agreeing with nobody.
+   */
+  function almost(linked: boolean, opts: { stems: number, bonus: number, freeSlots: number }) {
+    const t = createTableau({
+      cells: hexRectangle(10, 10),
+      drawerSlots: 16,
+      plateSlots: 2,
+      stemsPerInternalAnchor: opts.stems,
+      strictEnclosureBonus: opts.bonus,
+    })
+    const plate = t.addPlate(onBoard(0, 0))!
+    // Petals 0–4, all one colour so each touches the next; distinct values so no duplicate arises.
+    for (let petal = 0; petal < 5; petal++) {
+      const color = linked || petal !== 2 ? 1 : 3
+      t.addTile({ color, value: petal + 1 }, onPetal(plate.id, petal))
+    }
+    const held = t.addTile({ color: 1, value: 6 }, inDrawer(0))!
+    for (const slot of t.freeDrawerSlots().slice(0, 16 - 1 - opts.freeSlots)) t.addStem(slot)
+    return { t, plate, held }
+  }
+
+  it('reports a fully linked ring as strict', () => {
+    const { t, plate, held } = almost(true, { stems: 0, bonus: 0, freeSlots: 9 })
+    t.moveTile(held.id, onPetal(plate.id, 5))
+    expect(t.plateIsEnclosed(plate.id)).toBe(true)
+    expect(t.plateEnclosureIsStrict(plate.id)).toBe(true)
+  })
+
+  it('reports a ring with one stranger as not strict', () => {
+    const { t, plate, held } = almost(false, { stems: 0, bonus: 0, freeSlots: 9 })
+    t.moveTile(held.id, onPetal(plate.id, 5))
+    expect(t.plateIsEnclosed(plate.id)).toBe(true)
+    expect(t.plateEnclosureIsStrict(plate.id)).toBe(false)
+  })
+
+  it('needs room for the bonus as well as the base', () => {
+    // Three base plus one bonus is four; three slots plus the vacated one is four, so it fits...
+    const fits = almost(true, { stems: 3, bonus: 1, freeSlots: 3 })
+    expect(fits.t.canPlaceTile(onPetal(fits.plate.id, 5), fits.held.id)).toBe(true)
+    // ...and one slot fewer does not.
+    const tight = almost(true, { stems: 3, bonus: 1, freeSlots: 2 })
+    expect(tight.t.canPlaceTile(onPetal(tight.plate.id, 5), tight.held.id)).toBe(false)
+  })
+
+  it('does not reserve room for a bonus the ring will not earn', () => {
+    // Same three slots, but the broken ring pays only the base three — so it fits.
+    const broken = almost(false, { stems: 3, bonus: 1, freeSlots: 2 })
+    expect(broken.t.canPlaceTile(onPetal(broken.plate.id, 5), broken.held.id)).toBe(true)
+  })
+})
+
+describe('external anchors — bare cells the plates have wrapped', () => {
+  const board = (opts: { internal?: number, external?: number, bonus?: number } = {}) =>
+    createTableau({
+      cells: hexRectangle(12, 12),
+      drawerSlots: 16,
+      plateSlots: 2,
+      stemsPerInternalAnchor: opts.internal ?? 0,
+      stemsPerExternalAnchor: opts.external ?? 0,
+      strictEnclosureBonus: opts.bonus ?? 0,
+    })
+
+  const key = (c: { q: number, r: number }) => `${c.q},${c.r}`
+
+  it('finds one anchor per plate and none else on a lone plate', () => {
+    const t = board()
+    t.addPlate(onBoard(0, 0))
+    const found = t.anchors()
+    expect(found).toHaveLength(1)
+    expect(found[0]!.kind).toBe('internal')
+    expect(key(found[0]!.cell)).toBe('0,0')
+  })
+
+  it('finds none where plates interlock, since no cell is left bare', () => {
+    const t = board()
+    // The six tessellating neighbours: together they leave no gap around the centre.
+    for (const [q, r] of [[0, 0], [1, 2], [3, -1], [2, -3], [-1, -2], [-3, 1], [-2, 3]]) {
+      t.addPlate(onBoard(q, r))
+    }
+    expect(t.anchors().filter(a => a.kind === 'external')).toHaveLength(0)
+  })
+
+  it('finds the bare cell three off-lattice plates leave between them', () => {
+    const t = board()
+    // Holes at distance 3 pairwise but off the flower sublattice: their petals ring one bare cell.
+    t.addPlate(onBoard(0, 0))
+    t.addPlate(onBoard(3, 0))
+    t.addPlate(onBoard(0, 3))
+    t.addPlate(onBoard(3, -3))
+    t.addPlate(onBoard(-3, 3))
+    const external = t.anchors().filter(a => a.kind === 'external')
+    // Whatever the exact set, every one of them must genuinely be bare and fully surrounded.
+    for (const anchor of external) {
+      expect(t.coverageAt(anchor.cell)).toBeUndefined()
+      for (const step of [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]) {
+        const around = { q: anchor.cell.q + step[0]!, r: anchor.cell.r + step[1]! }
+        expect(t.coverageAt(around)).toBeDefined()
+      }
+    }
+    expect(external.length).toBeGreaterThan(0)
+  })
+
+  it('pays the external rate, not the internal one', () => {
+    const t = board({ internal: 3, external: 2 })
+    t.addPlate(onBoard(0, 0))
+    const internal = t.anchors().find(a => a.kind === 'internal')!
+    // Reward is only paid on enclosure, so fill the ring first.
+    for (let petal = 0; petal < 6; petal++) {
+      t.addTile({ color: petal, value: petal + 1 }, onPetal(t.plates()[0]!.id, petal))
+    }
+    expect(t.anchorIsEnclosed(internal.cell)).toBe(true)
+    expect(t.anchorReward(internal)).toBe(3)
+    expect(t.anchorReward({ cell: internal.cell, kind: 'external' })).toBe(2)
+  })
+
+  it('an unenclosed anchor is worth nothing', () => {
+    const t = board({ internal: 3, external: 2 })
+    t.addPlate(onBoard(0, 0))
+    const internal = t.anchors()[0]!
+    expect(t.anchorIsEnclosed(internal.cell)).toBe(false)
+    expect(t.anchorReward(internal)).toBe(0)
+  })
+})
+
+describe('a plate placement reserves room too', () => {
+  /** A plate on the board with all six petals filled, and a drawer with `freeSlots` to spare. */
+  function enclosedPlate(reward: number, freeSlots: number) {
+    const t = createTableau({
+      cells: hexRectangle(12, 12),
+      drawerSlots: 16,
+      plateSlots: 2,
+      stemsPerInternalAnchor: reward,
+    })
+    const plate = t.addPlate(onBoard(0, 0))!
+    // One colour, six values: the ring satisfies the neighbour rule, so moving the plate is refused
+    // for the reward alone rather than by the tiles disagreeing at the destination.
+    for (let petal = 0; petal < 6; petal++) {
+      t.addTile({ color: 1, value: petal + 1 }, onPetal(plate.id, petal))
+    }
+    for (const slot of t.freeDrawerSlots().slice(0, 16 - freeSlots)) t.addStem(slot)
+    return { t, plate }
+  }
+
+  it('refuses a plate move whose payout would not fit', () => {
+    // Moving the plate carries its full ring, so the anchor closes again at the new hole.
+    // Nothing is vacated by a plate — it leaves a bay, not a tile slot.
+    const { t, plate } = enclosedPlate(3, 2)
+    expect(t.canPlacePlate(onBoard(3, 0), plate.id)).toBe(false)
+  })
+
+  it('allows it when there is room', () => {
+    const { t, plate } = enclosedPlate(3, 3)
+    expect(t.canPlacePlate(onBoard(3, 0), plate.id)).toBe(true)
+  })
+
+  it('does not charge for staying where it is', () => {
+    // The anchor is enclosed before and after, so the move closes nothing new.
+    const { t, plate } = enclosedPlate(3, 0)
+    expect(t.canPlacePlate(onBoard(0, 0), plate.id)).toBe(true)
+  })
+})

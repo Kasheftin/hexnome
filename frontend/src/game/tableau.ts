@@ -21,7 +21,13 @@
  * `Stem`. Occupancy for both runs through one index, so a slot can never hold two things.
  */
 import { NEIGHBOR_DIRS, axialAdd, axialKey, type Axial } from './hex'
-import { DEFAULT_PLACEMENT_RULE, groupsAllow, neighboursAllow, type PlacementRule } from './placement'
+import {
+  DEFAULT_PLACEMENT_RULE,
+  groupsAllow,
+  neighboursAllow,
+  ringIsConnected,
+  type PlacementRule,
+} from './placement'
 import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
 
 export type PlateLocation =
@@ -114,6 +120,26 @@ export interface Stem {
   readonly id: string
   /** Always a drawer slot. Stems have nowhere else to be. */
   readonly slot: number
+}
+
+/**
+ * A cell that pays out when the six cells around it are all filled.
+ *
+ * **Both kinds are the same shape of thing** — a cell with six neighbours — and that is the point of
+ * modelling them as cells rather than as properties of a plate. Enclosure, the strict ring and the
+ * reward are then one question asked once, and only the *rate* differs by kind.
+ *
+ * - `internal` — a plate's centre hole. Every placed plate has exactly one, always.
+ * - `external` — a bare cell that no plate covers, with all six neighbours covered. These appear when
+ *   a plate is placed in a way that wraps a gap, which is possible because plates need only connect,
+ *   not interlock (docs/game-design.md, open question 10). On a perfectly tessellated board there are
+ *   none at all.
+ */
+export type AnchorKind = 'internal' | 'external'
+
+export interface Anchor {
+  readonly cell: Axial
+  readonly kind: AnchorKind
 }
 
 /** What a plate puts on a board cell. `petal` is null for the hole. */
@@ -236,6 +262,20 @@ export interface Tableau {
   movePlate(id: string, location: PlateLocation): boolean
   moveTile(id: string, location: TileLocation): boolean
 
+  /** Are all six of a plate's petals filled? Its anchor is lit exactly when this is true. */
+  plateIsEnclosed(plateId: string): boolean
+  /** Is an enclosed plate's ring of six connected pair-to-pair? Earns the strict bonus. */
+  plateEnclosureIsStrict(plateId: string): boolean
+
+  /** Every anchor on the board right now — plate holes, plus any bare cell the plates have wrapped. */
+  anchors(): readonly Anchor[]
+  /** Do all six cells around this one hold a tile? */
+  anchorIsEnclosed(cell: Axial): boolean
+  /** Is the ring of six around this cell connected pair-to-pair? */
+  anchorRingIsStrict(cell: Axial): boolean
+  /** Stems this anchor pays when enclosed, bonus included if its ring is strict. */
+  anchorReward(anchor: Anchor): number
+
   /** Whatever sits in a drawer tile slot — a tile or a stem — by id. */
   drawerSlotOccupant(slot: number): string | undefined
   /** Whichever plate sits in a bay, by id. */
@@ -290,6 +330,9 @@ export function createTableau({
   sourceLots = 0,
   sourceTilesPerLot = 0,
   placementRule = DEFAULT_PLACEMENT_RULE,
+  stemsPerInternalAnchor = 0,
+  stemsPerExternalAnchor = 0,
+  strictEnclosureBonus = 0,
 }: {
   cells: readonly Axial[]
   drawerSlots: number
@@ -301,6 +344,18 @@ export function createTableau({
    * lifetime, so it is taken once here rather than passed to every call that asks about legality.
    */
   placementRule?: PlacementRule
+  /**
+   * Stems awarded for enclosing a plate's anchor — a game setting.
+   *
+   * The tableau needs it only to answer one question: whether a placement that *would* enclose a plate
+   * has somewhere to put the reward. Defaults to zero so a tableau built without it — every test that
+   * does not care — behaves as though there were no award at all.
+   */
+  stemsPerInternalAnchor?: number
+  /** Stems awarded for enclosing an external anchor — a bare cell the plates have wrapped. */
+  stemsPerExternalAnchor?: number
+  /** Extra stems when an enclosure is strict all the way round. Zero when the game is already strict. */
+  strictEnclosureBonus?: number
 }): Tableau {
   const boardCells = new Set(cells.map(axialKey))
   const platesById = new Map<string, Plate>()
@@ -480,14 +535,20 @@ export function createTableau({
    * A moving **tile** vanishes from its old cell, or it would show up as its own neighbour when nudged
    * one petal along. A moving **plate** takes everything it carries with it: its tiles leave their old
    * cells and appear at the new ones, so they can be each other's neighbours at the destination.
+   *
+   * `landing` puts the moving tile at its destination. The placement rules do not want it — they supply
+   * the placed tile separately and would double-count it — but anything asking about the *finished*
+   * board, such as whether a ring of six is complete, very much does.
    */
   function boardAfter(move: {
     tileId?: string
     plateId?: string
     hole?: Axial
     rotation?: number
+    landing?: { cell: Axial, spec: TileSpec }
   }): (cell: Axial) => TileSpec | undefined {
     const arriving = new Map<string, TileSpec>()
+    if (move.landing) arriving.set(axialKey(move.landing.cell), move.landing.spec)
     if (move.plateId !== undefined && move.hole !== undefined) {
       for (const tile of tilesById.values()) {
         if (tile.location.kind !== 'onPlate' || tile.location.plateId !== move.plateId) continue
@@ -518,6 +579,244 @@ export function createTableau({
       if (tile) found.push(tile)
     }
     return found
+  }
+
+  /** Drawer slots holding neither a tile nor a stem, in order. */
+  function freeDrawerSlotList(): number[] {
+    const free: number[] = []
+    for (let slot = 0; slot < drawerSlots; slot++) {
+      if (!occupants.has(tileLocationKey({ kind: 'drawer', slot }))) free.push(slot)
+    }
+    return free
+  }
+
+  /** How many of a plate's six petals hold a tile, with one move imagined as already made. */
+  function filledPetals(plateId: string, move?: { into: number, movingId: string }): number {
+    let filled = 0
+    for (let petal = 0; petal < PETAL_COUNT; petal++) {
+      const occupant = occupants.get(tileLocationKey({ kind: 'onPlate', plateId, petal }))
+      const taken = move && petal === move.into
+        ? true
+        : occupant !== undefined && occupant !== move?.movingId
+      if (taken) filled += 1
+    }
+    return filled
+  }
+
+  /**
+   * Are all six of this plate's petals filled?
+   *
+   * Derived rather than stored, like coverage: a plate is enclosed exactly when its petals say so, and
+   * a flag would be a second answer to the same question waiting to disagree. The consequence is that
+   * enclosure is reversible — a provisional placement lights the anchor and cancelling it goes dark
+   * again — which is what a player watching the board should see.
+   */
+  function plateIsEnclosed(plateId: string): boolean {
+    return platesById.has(plateId) && filledPetals(plateId) === PETAL_COUNT
+  }
+
+  /** A plate's six petals in ring order, or null if any is empty. One move may be imagined as made. */
+  function petalRing(plateId: string, move?: { into: number, movingId: string }): TileSpec[] | null {
+    const ring: TileSpec[] = []
+    for (let petal = 0; petal < PETAL_COUNT; petal++) {
+      /*
+       * Logical petal order *is* ring order. A petal `p` points in direction `p − rotation`, so
+       * consecutive petals point in consecutive directions whatever the rotation — the whole ring is
+       * offset, never reordered. That is what lets this walk 0…5 and get adjacent cells.
+       */
+      let tile: Tile | undefined
+      if (move && petal === move.into) {
+        tile = tilesById.get(move.movingId)
+      } else {
+        const id = occupants.get(tileLocationKey({ kind: 'onPlate', plateId, petal }))
+        // The mover has left wherever it was; it only counts at its destination.
+        tile = id === undefined || id === move?.movingId ? undefined : tilesById.get(id)
+      }
+      if (!tile) return null
+      ring.push(tile)
+    }
+    return ring
+  }
+
+  /**
+   * Is this plate not merely enclosed but enclosed *strictly* — every neighbouring pair around the
+   * ring sharing a colour or a value?
+   */
+  function plateEnclosureIsStrict(plateId: string): boolean {
+    const ring = petalRing(plateId)
+    return ring !== null && ringIsConnected(ring)
+  }
+
+  /* ── anchors ─────────────────────────────────────────────────────────────────
+   *
+   * Everything below works on a *view* of the board rather than on the live one, so the same code
+   * answers "how things are" and "how they would be after this move". `covered` reports which plate
+   * covers a cell and `tileAt` what sits on it; a hypothetical simply supplies different functions.
+   */
+
+  interface BoardView {
+    /** Cells the plates occupy, and which plate each belongs to. */
+    covered: (cell: Axial) => string | undefined
+    tileAt: (cell: Axial) => TileSpec | undefined
+    /** Hole cells of every plate on the board — the internal anchors. */
+    holes: Axial[]
+    /** Every cell the plates occupy, for finding the bare cells beside them. */
+    occupied: Axial[]
+  }
+
+  function boardPlatesWith(move?: PlateMove): { id: string, hole: Axial, rotation: number }[] {
+    const list: { id: string, hole: Axial, rotation: number }[] = []
+    for (const plate of platesById.values()) {
+      if (plate.id === move?.plateId) continue
+      if (plate.location.kind === 'board') {
+        list.push({ id: plate.id, hole: plate.location.hole, rotation: plate.rotation })
+      }
+    }
+    if (move) list.push({ id: move.plateId, hole: move.hole, rotation: move.rotation })
+    return list
+  }
+
+  interface PlateMove { plateId: string, hole: Axial, rotation: number }
+  interface TileMove { movingId: string, cell: Axial, spec: TileSpec }
+
+  /** The board as it is, or as one move would leave it. */
+  function viewOf(move?: { tile?: TileMove, plate?: PlateMove }): BoardView {
+    const plates = boardPlatesWith(move?.plate)
+    const owner = new Map<string, string>()
+    const occupied: Axial[] = []
+    for (const plate of plates) {
+      for (const cell of plateCells(plate.hole)) {
+        owner.set(axialKey(cell), plate.id)
+        occupied.push(cell)
+      }
+    }
+    const tileAt = move?.plate
+      ? boardAfter({ plateId: move.plate.plateId, hole: move.plate.hole, rotation: move.plate.rotation })
+      : boardAfter(move?.tile
+        ? {
+            tileId: move.tile.movingId,
+            landing: { cell: move.tile.cell, spec: move.tile.spec },
+          }
+        : {})
+    return {
+      covered: cell => owner.get(axialKey(cell)),
+      tileAt,
+      holes: plates.map(plate => plate.hole),
+      occupied,
+    }
+  }
+
+  /** Every anchor in a view: one per plate hole, plus every bare cell the plates have wrapped. */
+  function anchorsIn(view: BoardView): Anchor[] {
+    const found: Anchor[] = []
+    const seen = new Set<string>()
+    for (const hole of view.holes) {
+      seen.add(axialKey(hole))
+      found.push({ cell: hole, kind: 'internal' })
+    }
+    /*
+     * Candidates are the bare cells *touching* coverage — nothing further out can have six covered
+     * neighbours, so this reaches every external anchor without walking the board.
+     */
+    for (const cell of view.occupied) {
+      for (const dir of NEIGHBOR_DIRS) {
+        const candidate = axialAdd(cell, dir)
+        const key = axialKey(candidate)
+        if (seen.has(key) || view.covered(candidate)) continue
+        seen.add(key)
+        if (NEIGHBOR_DIRS.every(step => view.covered(axialAdd(candidate, step)))) {
+          found.push({ cell: candidate, kind: 'external' })
+        }
+      }
+    }
+    return found
+  }
+
+  /** The six tiles around a cell in ring order, or null if any of the six is missing. */
+  function ringAround(cell: Axial, view: BoardView): TileSpec[] | null {
+    const ring: TileSpec[] = []
+    for (const dir of NEIGHBOR_DIRS) {
+      const tile = view.tileAt(axialAdd(cell, dir))
+      if (!tile) return null
+      ring.push(tile)
+    }
+    return ring
+  }
+
+  function rewardOf(anchor: Anchor, view: BoardView): number {
+    const ring = ringAround(anchor.cell, view)
+    if (ring === null) return 0
+    const base = anchor.kind === 'internal' ? stemsPerInternalAnchor : stemsPerExternalAnchor
+    return base + (ringIsConnected(ring) ? strictEnclosureBonus : 0)
+  }
+
+  /**
+   * What a move would pay: every anchor it closes, summed.
+   *
+   * **Newly** closed — enclosed afterwards and not before. One move can close more than one at once (a
+   * tile sits beside up to six anchors; a plate can wrap a gap and fill it in the same action), and
+   * reserving room for only one of them would let the rest overflow the drawer.
+   *
+   * An anchor that did not exist before the move counts as newly closed, which is what makes a plate
+   * that creates *and* immediately encloses an external anchor pay out.
+   */
+  function rewardOfMove(move: { tile?: TileMove, plate?: PlateMove }): number {
+    const before = viewOf()
+    const enclosedBefore = new Set(
+      anchorsIn(before)
+        .filter(anchor => ringAround(anchor.cell, before) !== null)
+        .map(anchor => axialKey(anchor.cell)),
+    )
+    const after = viewOf(move)
+    let total = 0
+    for (const anchor of anchorsIn(after)) {
+      if (enclosedBefore.has(axialKey(anchor.cell))) continue
+      total += rewardOf(anchor, after)
+    }
+    return total
+  }
+
+  /** Is there room in the drawer for what this move pays? `vacating` counts the slot it empties. */
+  function rewardHasRoom(reward: number, vacating: number): boolean {
+    return reward <= 0 || freeDrawerSlotList().length + vacating >= reward
+  }
+
+  /**
+   * Would this placement enclose the plate, and if so is there room for what that pays?
+   *
+   * The reward is stems, stems live in drawer slots, and a reward with nowhere to go would either
+   * vanish or overflow. Refusing the move instead is the only option that loses nothing — so this is a
+   * placement rule like any other, checked before the drop rather than discovered after it.
+   *
+   * The slot the tile is *leaving* counts as free: it is vacated by the very move being judged, and
+   * ignoring that would refuse the last placement of a full drawer even when the reward fits exactly.
+   */
+  function tileRewardFits(location: TileLocation, movingId: string): boolean {
+    if (location.kind !== 'onPlate') return true
+    const plate = platesById.get(location.plateId)
+    const tile = tilesById.get(movingId)
+    if (!tile || plate?.location.kind !== 'board') return true
+    const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
+    const reward = rewardOfMove({ tile: { movingId, cell, spec: tile } })
+    const vacating = tile.location.kind === 'drawer' ? 1 : 0
+    return rewardHasRoom(reward, vacating)
+  }
+
+  /**
+   * Does a plate placement pay more than the drawer can hold?
+   *
+   * A plate is the move most able to surprise here: it can **wrap a gap and close it in one action**,
+   * creating an external anchor whose six neighbours are already filled, and it brings its own tile
+   * which may close a neighbouring anchor at the same time. Both are counted, because `rewardOfMove`
+   * compares the whole board before against the whole board after rather than looking at one anchor.
+   *
+   * Nothing is vacated: a plate leaves a *bay*, not a tile slot, so the stems gain no room from it.
+   */
+  function plateRewardFits(hole: Axial, movingId: string): boolean {
+    const plate = platesById.get(movingId)
+    if (!plate) return true
+    const reward = rewardOfMove({ plate: { plateId: movingId, hole, rotation: plate.rotation } })
+    return rewardHasRoom(reward, 0)
   }
 
   /** The board cell a plate's petal would occupy, given where and how the plate sits. */
@@ -557,6 +856,7 @@ export function createTableau({
       if (!plateFits(location.hole, movingId) || !plateConnects(location.hole, movingId)) return false
       // Dealt plates have no id to look tiles up by; only a *move* is a player's placement.
       if (movingId === undefined) return true
+      if (!plateRewardFits(location.hole, movingId)) return false
       const plate = platesById.get(movingId)
       return plate === undefined || plateTilesAgree(location.hole, movingId, plate.rotation)
     }
@@ -591,6 +891,7 @@ export function createTableau({
     const tile = tilesById.get(movingId)
     const plate = platesById.get(location.plateId)
     if (!tile || plate?.location.kind !== 'board') return true
+    if (!tileRewardFits(location, movingId)) return false
     const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
     return tileIsWelcome(cell, tile, boardAfter({ tileId: movingId }))
   }
@@ -734,6 +1035,17 @@ export function createTableau({
       return true
     },
 
+    plateIsEnclosed,
+    plateEnclosureIsStrict,
+
+    anchors: () => anchorsIn(viewOf()),
+    anchorIsEnclosed: cell => ringAround(cell, viewOf()) !== null,
+    anchorRingIsStrict(cell) {
+      const ring = ringAround(cell, viewOf())
+      return ring !== null && ringIsConnected(ring)
+    },
+    anchorReward: anchor => rewardOf(anchor, viewOf()),
+
     drawerSlotOccupant(slot) {
       return occupants.get(tileLocationKey({ kind: 'drawer', slot }))
     },
@@ -817,13 +1129,7 @@ export function createTableau({
       return { kind: 'onPlate', plateId: covered.plateId, petal: covered.petal }
     },
 
-    freeDrawerSlots() {
-      const free: number[] = []
-      for (let slot = 0; slot < drawerSlots; slot++) {
-        if (!occupants.has(tileLocationKey({ kind: 'drawer', slot }))) free.push(slot)
-      }
-      return free
-    },
+    freeDrawerSlots: freeDrawerSlotList,
 
     freePlateSlots() {
       const free: number[] = []

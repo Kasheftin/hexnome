@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupsAllow, isPlacementRule, neighboursAllow } from './placement'
+import { groupsAllow, isPlacementRule, neighboursAllow, ringIsConnected } from './placement'
 
 const BLUE = 1
 const RED = 4
@@ -173,5 +173,40 @@ describe('both groups are checked, not just one', () => {
   it('refuses when only the colour group offends', () => {
     const twoBlues = board({ '1,0': [BLUE, 2], '2,0': [BLUE, 2] })
     expect(groupsAllow(AT(0, 0), spec(BLUE, 5), twoBlues)).toBe(false)
+  })
+})
+
+describe('a ring of tiles is connected when every neighbouring pair agrees', () => {
+  it('accepts a ring held together by colour', () => {
+    const ring = [1, 2, 3, 4, 5, 6].map(v => spec(BLUE, v))
+    expect(ringIsConnected(ring)).toBe(true)
+  })
+
+  it('accepts a ring where each link is made differently', () => {
+    // blue-1 · blue-4 · red-4 · red-2 · green-2 · green-1 · (back to blue-1, by value)
+    const ring = [
+      spec(BLUE, 1), spec(BLUE, 4), spec(RED, 4), spec(RED, 2), spec(GREEN, 2), spec(GREEN, 1),
+    ]
+    expect(ringIsConnected(ring)).toBe(true)
+  })
+
+  it('checks the pair that wraps around, not just the five in a line', () => {
+    // Every consecutive pair agrees except the last back to the first.
+    const ring = [
+      spec(BLUE, 1), spec(BLUE, 2), spec(BLUE, 3), spec(BLUE, 4), spec(BLUE, 5), spec(RED, 6),
+    ]
+    expect(ringIsConnected(ring)).toBe(false)
+  })
+
+  it('refuses a ring with a gap in the middle', () => {
+    const ring = [
+      spec(BLUE, 1), spec(RED, 5), spec(BLUE, 3), spec(BLUE, 4), spec(BLUE, 5), spec(BLUE, 6),
+    ]
+    expect(ringIsConnected(ring)).toBe(false)
+  })
+
+  it('refuses anything too short to form a ring', () => {
+    expect(ringIsConnected([])).toBe(false)
+    expect(ringIsConnected([spec(BLUE, 1)])).toBe(false)
   })
 })

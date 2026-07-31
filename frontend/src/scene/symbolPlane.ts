@@ -24,13 +24,28 @@ import {
  */
 export function createSymbolPlane(
   texture: Texture,
-  { fitRadius, y, offsetUp = 0 }: { fitRadius: number, y: number, offsetUp?: number },
+  { fitRadius, y, offsetUp = 0, widen = 1 }: {
+    fitRadius: number
+    y: number
+    offsetUp?: number
+    /**
+     * Multiplier on the image's own aspect: above 1 widens, below 1 narrows.
+     *
+     * Applied *before* the fit, so shape and size stay independent knobs — the diagonal still comes
+     * out at `2 * fitRadius` whatever this is, and changing it never means re-tuning the scale beside
+     * it.
+     *
+     * For art whose drawn proportions are not the proportions it should occupy. Deliberately a
+     * distortion: 1 is always the honest value, and anything else is a decision about that one image.
+     */
+    widen?: number
+  },
 ): Mesh {
   texture.colorSpace = SRGBColorSpace
   texture.anisotropy = 8
 
   const image = texture.image as { width?: number, height?: number } | undefined
-  const aspect = (image?.width ?? 1) / (image?.height ?? 1)
+  const aspect = ((image?.width ?? 1) / (image?.height ?? 1)) * widen
 
   // Fit the symbol's bounding box inside a circle of `fitRadius`. Normalising by
   // the diagonal means a tall motif and a square one get comparable visual weight,

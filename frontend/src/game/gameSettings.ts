@@ -58,6 +58,29 @@ export const DEFAULT_PLATES_PER_ROUND = 4
  */
 export const STEM_COUNT_CHOICES: readonly number[] = [1, 2, 3, 4]
 export const DEFAULT_STEM_COUNT = 3
+
+/**
+ * Stems awarded for enclosing an anchor — the only way to earn more after the opening allowance.
+ *
+ * Two rates rather than one because the two are not equally hard to reach, and the pair of dials is
+ * where that balance gets tuned. Both share the 1–4 range of the opening allowance, so every stem
+ * number in the game reads on the same scale.
+ */
+export const STEMS_PER_ANCHOR_CHOICES: readonly number[] = [1, 2, 3, 4]
+export const DEFAULT_STEMS_PER_INTERNAL_ANCHOR = 3
+export const DEFAULT_STEMS_PER_EXTERNAL_ANCHOR = 2
+
+/**
+ * An extra stem when an enclosure is strict all the way round — every neighbouring pair of the six
+ * sharing a colour or a value.
+ *
+ * **Meaningless under the strict placement rule, and forced to zero there.** Strict placement already
+ * guarantees it: of any adjacent pair, whichever went down second had to agree with the first, so the
+ * ring is always connected and the bonus would simply be part of the base rate under another name.
+ * Only under the regular rule is placing strictly a choice, and only then is there something to reward.
+ */
+export const STRICT_BONUS_CHOICES: readonly number[] = [0, 1]
+export const DEFAULT_STRICT_ENCLOSURE_BONUS = 1
 export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 
 export interface GameSettings {
@@ -66,6 +89,12 @@ export interface GameSettings {
   readonly platesPerRound: number
   /** Stems each player is dealt at the start of the game. */
   readonly initialStems: number
+  /** Stems awarded for enclosing an internal anchor. */
+  readonly stemsPerInternalAnchor: number
+  /** Stems awarded for enclosing an external anchor. */
+  readonly stemsPerExternalAnchor: number
+  /** Extra stems for a strict enclosure. Always 0 when `placementRule` is `strict`. */
+  readonly strictEnclosureBonus: number
   /** How strictly a placed tile must agree with its neighbours. See game/placement.ts. */
   readonly placementRule: PlacementRule
   /** Epoch milliseconds. Supplied by the caller so this module never reads the clock. */
@@ -96,6 +125,28 @@ export function isStemCount(value: unknown): boolean {
   return typeof value === 'number' && STEM_COUNT_CHOICES.includes(value)
 }
 
+export function isStemsPerAnchor(value: unknown): boolean {
+  return typeof value === 'number' && STEMS_PER_ANCHOR_CHOICES.includes(value)
+}
+
+export function isStrictBonus(value: unknown): boolean {
+  return typeof value === 'number' && STRICT_BONUS_CHOICES.includes(value)
+}
+
+/**
+ * The bonus a game actually runs with.
+ *
+ * One function so the rule cannot be applied in one place and forgotten in another: the menu hides the
+ * control under strict placement, and this makes the same thing true of a settings blob that was
+ * hand-edited, stored before the rule existed, or written by an older build.
+ */
+export function effectiveStrictBonus(settings: {
+  placementRule: PlacementRule
+  strictEnclosureBonus: number
+}): number {
+  return settings.placementRule === 'strict' ? 0 : settings.strictEnclosureBonus
+}
+
 export const PLACEMENT_RULE_LABELS: Readonly<Record<PlacementRule, string>> = {
   regular: 'Regular',
   strict: 'Strict',
@@ -113,6 +164,9 @@ export function defaultGameSettings(createdAt: number): GameSettings {
     mode: DEFAULT_SINGLEPLAYER_MODE,
     platesPerRound: DEFAULT_PLATES_PER_ROUND,
     initialStems: DEFAULT_STEM_COUNT,
+    stemsPerInternalAnchor: DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
+    stemsPerExternalAnchor: DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
+    strictEnclosureBonus: DEFAULT_STRICT_ENCLOSURE_BONUS,
     placementRule: DEFAULT_PLACEMENT_RULE,
     createdAt,
   }
@@ -123,7 +177,7 @@ export function defaultGameSettings(createdAt: number): GameSettings {
  *
  * Returns null rather than a patched-up default on a bad `kind` or `mode`: those name what the
  * game *is*, so quietly substituting one would drop a player into a different game from the one
- * they started. `platesPerRound`, `initialStems` and `placementRule` are different — they are dials,
+ * they started. `platesPerRound`, the stem counts and `placementRule` are different — they are dials,
  * so an unrecognised value falls back to the default rather than discarding the whole game. That also
  * makes them safe to add: a game saved before a dial existed simply gets its default.
  */
@@ -134,6 +188,10 @@ export function parseGameSettings(value: unknown): GameSettings | null {
   if (!isGameKind(raw.kind)) return null
   if (!isSingleplayerMode(raw.mode)) return null
 
+  const placementRule = isPlacementRule(raw.placementRule)
+    ? raw.placementRule
+    : DEFAULT_PLACEMENT_RULE
+
   return {
     kind: raw.kind,
     mode: raw.mode,
@@ -143,7 +201,20 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     initialStems: isStemCount(raw.initialStems)
       ? (raw.initialStems as number)
       : DEFAULT_STEM_COUNT,
-    placementRule: isPlacementRule(raw.placementRule) ? raw.placementRule : DEFAULT_PLACEMENT_RULE,
+    stemsPerInternalAnchor: isStemsPerAnchor(raw.stemsPerInternalAnchor)
+      ? (raw.stemsPerInternalAnchor as number)
+      : DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
+    stemsPerExternalAnchor: isStemsPerAnchor(raw.stemsPerExternalAnchor)
+      ? (raw.stemsPerExternalAnchor as number)
+      : DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
+    placementRule,
+    // Normalised on the way in, so nothing downstream has to remember the pairing.
+    strictEnclosureBonus: effectiveStrictBonus({
+      placementRule,
+      strictEnclosureBonus: isStrictBonus(raw.strictEnclosureBonus)
+        ? (raw.strictEnclosureBonus as number)
+        : DEFAULT_STRICT_ENCLOSURE_BONUS,
+    }),
     createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt)
       ? raw.createdAt
       : 0,

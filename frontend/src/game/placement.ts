@@ -138,3 +138,19 @@ export function groupsAllow(
   return !hasDuplicates(connectedGroup(origin, spec, 'color', tileAt))
     && !hasDuplicates(connectedGroup(origin, spec, 'value', tileAt))
 }
+
+/**
+ * Is every adjacent pair around a ring of tiles connected — sharing a colour or a value?
+ *
+ * The petals of a plate form a closed ring, each touching the next, so this walks all six pairs
+ * including the one that wraps from the last back to the first. A gap anywhere breaks it.
+ *
+ * **Under the strict placement rule this is always true**, which is why the bonus it feeds is disabled
+ * there. Of any adjacent pair, one was placed after the other, and strict required it to agree with
+ * every neighbour it found — so agreement round the whole ring comes for free. Only under the regular
+ * rule is placing strictly a choice, and only then is there anything to reward.
+ */
+export function ringIsConnected(ring: readonly TileSpec[]): boolean {
+  if (ring.length < 2) return false
+  return ring.every((tile, index) => agrees(tile, ring[(index + 1) % ring.length] as TileSpec))
+}

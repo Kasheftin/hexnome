@@ -26,17 +26,18 @@ import { createPlateBaseGeometry } from './plateBaseGeometry'
  *
  * Each cell wears the same mark as the **reverse side** — an inset hex, a gap of bare slab, then a thin
  * outline (scene/plateBackVisual.ts). Both faces draw from `PLATE_TONES` and the same radii, and the
- * reverse carries seven of them too, so **the only difference between the two faces is the colour of the
- * centre mark**. One object seen from two sides, not two objects that resemble each other.
+ * reverse carries seven of them too. One object seen from two sides, not two objects that resemble
+ * each other.
  *
  * The slab is what makes it read as **one physical piece**. Without it a plate is seven unconnected
  * hexes floating over the board. Being a real solid rather than a decal, its bevelled edge catches the
  * key light, which is what conveys thickness under a camera that only ever sees the top.
  *
- * The centre **hole is darker than the six sockets**, and that one tone is the whole difference. It can
- * never be filled, which has to be legible at a glance — a plate that appears to offer seven usable
- * spaces instead of six misleads in a way no amount of prettiness makes up for. It keeps the outline, so
- * it stays in the family; only its fill changes. A token symbol will sit in it later.
+ * The centre **has no fill at all** — its outline is drawn and the slab shows through it. The hole used
+ * to be a darker socket, on the reasoning that a plate must not look like it offers seven usable spaces
+ * when it offers six. The anchor emblem now does that job and does it better: an ornate crest is
+ * unmistakably not a place to put a tile, in a way a slightly darker hexagon never quite was. Leaving
+ * the dark fill underneath only muddied the emblem it sits behind.
  *
  * A painted socket texture (`plate-full.png`) was tried here twice and dropped twice: the ornate art did
  * not sit with the plain cardboard slab the reverse established. See docs/art-spec.md, Asset 0.
@@ -80,13 +81,6 @@ const socketMaterial = new MeshStandardMaterial({
   side: DoubleSide,
 })
 
-const holeMaterial = new MeshStandardMaterial({
-  color: PLATE_TONES.hole,
-  roughness: 0.6,
-  metalness: 0.15,
-  side: DoubleSide,
-})
-
 const FLAT_X = -Math.PI / 2
 
 /** The seven cell centres: the hole first, then the six petals in order. */
@@ -99,11 +93,13 @@ export function createPlateVisual(): Group {
   group.add(new Mesh(baseGeometry, slabMaterial))
 
   CELL_OFFSETS.forEach((offset, cell) => {
-    // Cell 0 is the hole: same outline, darker fill.
-    const mark = new Mesh(markGeometry, cell === 0 ? holeMaterial : socketMaterial)
-    mark.rotation.x = FLAT_X
-    mark.position.set(offset.x, PLATE_SOCKET_Y, offset.z)
-    group.add(mark)
+    // Cell 0 is the hole. It keeps its outline but gets no fill: the anchor emblem sits there.
+    if (cell !== 0) {
+      const mark = new Mesh(markGeometry, socketMaterial)
+      mark.rotation.x = FLAT_X
+      mark.position.set(offset.x, PLATE_SOCKET_Y, offset.z)
+      group.add(mark)
+    }
 
     const ring = new Mesh(ringGeometry, socketMaterial)
     ring.rotation.x = FLAT_X
@@ -121,7 +117,6 @@ export function disposePlateVisualAssets(): void {
   ringGeometry.dispose()
   slabMaterial.dispose()
   socketMaterial.dispose()
-  holeMaterial.dispose()
 }
 
 /** Offset of a petal's centre from the plate's hole, in world units at scale 1. */

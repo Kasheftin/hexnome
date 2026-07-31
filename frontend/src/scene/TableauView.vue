@@ -86,6 +86,13 @@ import {
   type DraftDecor,
 } from './draftDecor'
 import { registerGrabbable } from './grabbables'
+import {
+  attachAnchorVisual,
+  disposeAnchorAssets,
+  disposeAnchorVisual,
+  showAnchor,
+  type AnchorVisual,
+} from './anchorVisual'
 import { createPlateBackVisual, disposePlateBackAssets } from './plateBackVisual'
 import { createPlateVisual, disposePlateVisualAssets, petalOffset } from './plateVisual'
 import { boardToScreen, screenToBoard, unitsPerPixel } from './screenProjection'
@@ -237,6 +244,8 @@ interface View {
    * disagree.
    */
   faceDown?: boolean
+  /** Only on revealed plates: the emblem in the centre hole. */
+  anchor?: AnchorVisual
   /** Drafting overlays. Tiles only; undefined on plate views. */
   decor?: DraftDecor
 }
@@ -1000,6 +1009,10 @@ onBeforeRender(({ delta }) => {
     const plate = props.tableau.plate(id)
     if (!plate) continue
 
+    // Lit exactly when the plate's six petals are full — including provisionally, which is why this
+    // is read every frame rather than set once when a placement lands.
+    if (view.anchor) showAnchor(view.anchor, props.tableau.plateIsEnclosed(id))
+
     // A plate is drafted — and spent — as a whole object, so the marker covers the whole plate.
     if (view.decor) {
       showDraftState(view.decor, props.draftStates?.get(id) ?? props.payStates?.get(id) ?? 'active')
@@ -1046,6 +1059,16 @@ onBeforeRender(({ delta }) => {
     view.spin += (spinTarget - view.spin) * Math.min(1, delta * PLATE_SPIN_EASE)
     if (Math.abs(spinTarget - view.spin) < 0.0005) view.spin = spinTarget
     view.object.rotation.y = view.spin
+
+    /*
+     * The anchor stays upright while its plate turns, exactly as the tiles on it do.
+     *
+     * A hexagon maps onto itself every 60°, so the plate can spin without looking wrong — but the
+     * emblem drawn on it cannot: it has a top. Cancelling the plate's rotation locally gives a world
+     * rotation of zero, and using the same eased `spin` rather than the target means it stays upright
+     * *during* the turn and not merely at the end of it.
+     */
+    if (view.anchor) view.anchor.holder.rotation.y = -view.spin
 
     view.object.position.copy(view.world)
     view.object.scale.setScalar(view.scale)
@@ -1226,6 +1249,7 @@ function reconcileViews(): void {
       // A plate that turned over: its face is baked into the mesh, so rebuild rather than restyle.
       if (existing.faceDown === plate.faceDown) continue
       if (existing.decor) disposeDraftDecor(existing.decor)
+      if (existing.anchor) disposeAnchorVisual(existing.anchor)
       scene.value?.remove(existing.object)
       owners.delete(existing.object)
       plateViews.delete(plate.id)
@@ -1235,6 +1259,8 @@ function reconcileViews(): void {
     const group: Group = plate.faceDown ? createPlateBackVisual() : createPlateVisual()
     group.renderOrder = 1
     const plateDecor = attachPlateDraftDecor(group)
+    // Face-down plates get none: an emblem on the reverse would claim the front is showing.
+    const anchor = plate.faceDown ? undefined : attachAnchorVisual(group)
     plateViews.set(plate.id, {
       object: group,
       world: new Vector3(),
@@ -1247,6 +1273,7 @@ function reconcileViews(): void {
       fresh: true,
       faceDown: plate.faceDown,
       decor: plateDecor,
+      anchor,
     })
     group.rotation.y = -plate.rotation * (Math.PI / 3)
     owners.set(group, { kind: 'plate', id: plate.id })
@@ -1325,6 +1352,7 @@ function reconcileViews(): void {
   for (const [id, view] of [...plateViews]) {
     if (props.tableau.plate(id)) continue
     if (view.decor) disposeDraftDecor(view.decor)
+    if (view.anchor) disposeAnchorVisual(view.anchor)
     scene.value?.remove(view.object)
     owners.delete(view.object)
     plateViews.delete(id)
@@ -1408,6 +1436,7 @@ onBeforeUnmount(() => {
   tokenGeometry.dispose()
   disposePlateVisualAssets()
   disposePlateBackAssets()
+  disposeAnchorAssets()
   disposeDraftDecorAssets()
   disposePlateDraftDecorAssets()
   disposeCoinDraftDecorAssets()

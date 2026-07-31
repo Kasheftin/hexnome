@@ -268,17 +268,19 @@ export const PLATE_BASE_Y = 0.03
  *
  * - Face **down**: all seven the same. Nothing can be placed on a face-down plate, so singling out a
  *   cell would imply a structure that is not there.
- * - Face **up**: the centre takes `hole` instead. That cell is the plate's hole — never fillable — and a
- *   plate that appears to offer seven usable spaces instead of six misleads about the rules. It is also
- *   where a token symbol will go.
+ * - Face **up**: the centre gets no fill at all — its outline is drawn and the slab shows through,
+ *   under the anchor emblem that sits there.
  *
- * One difference, one tone. Anything more and the two faces stop reading as one object seen from two
- * sides, which a painted front and a plain back demonstrated: it looked like two kinds of piece.
+ * There used to be a third tone, `hole`, a darker socket for that centre. Its job was to say "this cell
+ * can never be filled", and the emblem now says it far more plainly than a slightly darker hexagon ever
+ * did — so the tone was removed rather than left behind doing nothing.
+ *
+ * Two tones, no more. Anything more and the faces stop reading as one object seen from two sides, which
+ * a painted front and a plain back demonstrated: it looked like two kinds of piece.
  */
 export const PLATE_TONES = {
   slab: '#6d5636',
   socket: '#54422b',
-  hole: '#2e2417',
 } as const
 
 /**
@@ -416,6 +418,74 @@ export const SOURCE_SCRIM_OPACITY = 0.28
  * look perfectly free and still be refused. A refusal the player cannot see is a refusal they will
  * blame on the controls.
  */
+/* ── Anchors ─────────────────────────────────────────────────────────────────── */
+
+/**
+ * The emblem in a plate's centre hole: dark until the plate's six petals are filled, then lit.
+ *
+ * Two textures rather than one tinted texture, because the difference between them is not a colour —
+ * the gem gains an inner glow and highlights the metal around it, which no tint reproduces. They are
+ * cropped from the same box in the source art (docs/art-spec.md), so swapping one for the other cannot
+ * make the emblem shift.
+ */
+export const ANCHOR_TEXTURE_URLS = {
+  off: '/textures/anchor-off.png',
+  on: '/textures/anchor-on.png',
+} as const
+
+/**
+ * Emblem size in the hole, in **hole radii**, fitted by bounding-box diagonal like every other symbol.
+ *
+ * The art is a *tall* hexagon — a crest with points above and below — so fitting it by the diagonal
+ * leaves it narrower than the hole it sits in. Raise this to push the points over the hole's rim.
+ */
+export const ANCHOR_SCALE = 1.4
+
+/**
+ * Width against height, as a multiplier on the art's own proportions. Above 1 widens it.
+ *
+ * The crest is drawn markedly taller than the cell it sits in — 816×1220 in the source, so **0.67**
+ * wide-to-tall against a regular pointy-top hexagon's **0.87** — which is why it reads as stretched.
+ * Two numbers worth knowing while dialling this in:
+ *
+ * - `1.06` matches the hexagonal *body* to the cell, leaving the points above and below overhanging.
+ * - `1.29` matches the whole crest, points included, and visibly squashes the hexagon doing it.
+ *
+ * Independent of {@link ANCHOR_SCALE}: this changes the shape, that changes the size, and neither
+ * needs re-tuning when the other moves.
+ */
+export const ANCHOR_RATIO = 1.15
+
+/** Nudge up the screen, in hole radii. Same convention as `SYMBOL_OFFSET_UP`. */
+export const ANCHOR_OFFSET_UP = 0
+
+/**
+ * How an **external** anchor is told apart from an internal one: a tint multiplied over the same art.
+ *
+ * They pay different amounts, so they have to be distinguishable at a glance — but they are the same
+ * kind of thing, so two separate illustrations would overstate the difference and double the art to
+ * keep in step. A multiply keeps the emblem identical in every other way.
+ *
+ * Cool against the internal one's warm brass, and darker, because an external anchor is a *gap* — it
+ * sits on bare board rather than on a plate, and reading as slightly recessed suits what it is. Values
+ * above 1 brighten, so this can go either way while tuning.
+ */
+export const ANCHOR_EXTERNAL_TINT = '#7f9fc4'
+
+/**
+ * The bare-cell disc an external anchor is drawn on.
+ *
+ * An internal anchor has a plate under it. An external one is a hole in the plates by definition, so
+ * without something behind it the emblem would float on the board's empty honeycomb. This is that
+ * something: a plain dark hex, the size of a plate's cell mark, so the two anchors sit in similarly
+ * sized recesses.
+ */
+export const ANCHOR_EXTERNAL_PAD_COLOR = '#241d12'
+export const ANCHOR_EXTERNAL_PAD_R = 0.86
+
+/** Clear of the hole's own face, by the same hair every other decal uses. */
+export const ANCHOR_LIFT = 0.008
+
 export const HIGHLIGHT_COLORS = {
   valid: '#8fe6c0',
   invalid: '#ff4d3d',

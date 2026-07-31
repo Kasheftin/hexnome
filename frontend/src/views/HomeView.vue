@@ -22,7 +22,13 @@ import {
   PLATES_PER_ROUND_CHOICES,
   SINGLEPLAYER_MODES,
   STEM_COUNT_CHOICES,
+  STEMS_PER_ANCHOR_CHOICES,
   DEFAULT_STEM_COUNT,
+  DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
+  DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
+  DEFAULT_STRICT_ENCLOSURE_BONUS,
+  STRICT_BONUS_CHOICES,
+  effectiveStrictBonus,
   PLACEMENT_RULE_HINTS,
   PLACEMENT_RULE_LABELS,
   modeInfo,
@@ -46,6 +52,18 @@ const kind = ref<GameKind | null>(null)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
 const initialStems = ref<number>(DEFAULT_STEM_COUNT)
+const stemsPerInternalAnchor = ref<number>(DEFAULT_STEMS_PER_INTERNAL_ANCHOR)
+const stemsPerExternalAnchor = ref<number>(DEFAULT_STEMS_PER_EXTERNAL_ANCHOR)
+const strictEnclosureBonus = ref<number>(DEFAULT_STRICT_ENCLOSURE_BONUS)
+
+/**
+ * The bonus is only a choice under the regular rule.
+ *
+ * Hidden rather than disabled under strict, because a disabled control invites the question "why can I
+ * not have this?" when the honest answer is that strict placement already gives it to you every time.
+ * The chosen value is kept while hidden, so switching to strict and back does not silently reset it.
+ */
+const strictBonusApplies = computed(() => placementRule.value !== 'strict')
 const placementRule = ref<PlacementRule>(DEFAULT_PLACEMENT_RULE)
 
 /** The choices made so far, newest last. Empty on the title screen. */
@@ -81,6 +99,12 @@ function startGame(): void {
     mode: mode.value,
     platesPerRound: platesPerRound.value,
     initialStems: initialStems.value,
+    stemsPerInternalAnchor: stemsPerInternalAnchor.value,
+    stemsPerExternalAnchor: stemsPerExternalAnchor.value,
+    strictEnclosureBonus: effectiveStrictBonus({
+      placementRule: placementRule.value,
+      strictEnclosureBonus: strictEnclosureBonus.value,
+    }),
     placementRule: placementRule.value,
   })
   void router.push({ path: '/game', query: { id } })
@@ -195,7 +219,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
         </fieldset>
 
         <fieldset class="group">
-          <legend>Stems</legend>
+          <legend>Initial stems on game start</legend>
           <div class="counts">
             <button
               v-for="count in STEM_COUNT_CHOICES"
@@ -205,6 +229,40 @@ const selectedMode = computed(() => modeInfo(mode.value))
               :class="{ chosen: initialStems === count }"
               :aria-pressed="initialStems === count"
               @click="initialStems = count"
+            >
+              {{ count }}
+            </button>
+          </div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>Stems per enclosed internal anchor</legend>
+          <div class="counts">
+            <button
+              v-for="count in STEMS_PER_ANCHOR_CHOICES"
+              :key="count"
+              type="button"
+              class="count"
+              :class="{ chosen: stemsPerInternalAnchor === count }"
+              :aria-pressed="stemsPerInternalAnchor === count"
+              @click="stemsPerInternalAnchor = count"
+            >
+              {{ count }}
+            </button>
+          </div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>Stems per enclosed external anchor</legend>
+          <div class="counts">
+            <button
+              v-for="count in STEMS_PER_ANCHOR_CHOICES"
+              :key="count"
+              type="button"
+              class="count"
+              :class="{ chosen: stemsPerExternalAnchor === count }"
+              :aria-pressed="stemsPerExternalAnchor === count"
+              @click="stemsPerExternalAnchor = count"
             >
               {{ count }}
             </button>
@@ -228,6 +286,30 @@ const selectedMode = computed(() => modeInfo(mode.value))
           <p class="description">
             A tile with nothing beside it may go anywhere. Once it touches something, this decides how
             much of what it touches has to share its colour or its symbol.
+          </p>
+        </fieldset>
+
+        <fieldset
+          v-if="strictBonusApplies"
+          class="group"
+        >
+          <legend>Stem bonus for strict enclosure</legend>
+          <div class="counts">
+            <button
+              v-for="count in STRICT_BONUS_CHOICES"
+              :key="count"
+              type="button"
+              class="count"
+              :class="{ chosen: strictEnclosureBonus === count }"
+              :aria-pressed="strictEnclosureBonus === count"
+              @click="strictEnclosureBonus = count"
+            >
+              {{ count }}
+            </button>
+          </div>
+          <p class="description">
+            Extra stems when every neighbouring pair around an enclosed anchor matches. Strict placement
+            guarantees that already, so the bonus only exists under the regular rule.
           </p>
         </fieldset>
 
