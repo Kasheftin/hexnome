@@ -50,6 +50,7 @@ import {
 } from '@/game/payment'
 import { platesToReveal, pushLot, shouldRefill } from '@/game/source'
 import { createTableau, type PlateLocation, type TileLocation } from '@/game/tableau'
+import { DEFAULT_PLACEMENT_RULE } from '@/game/placement'
 import {
   FIRST_TURN,
   IDLE,
@@ -133,6 +134,7 @@ const tableau = createTableau({
   plateSlots: PLATE_SLOTS,
   sourceLots: platesPerRound,
   sourceTilesPerLot: SOURCE_TILES_PER_LOT,
+  placementRule: settings.value?.placementRule ?? DEFAULT_PLACEMENT_RULE,
 })
 
 /**

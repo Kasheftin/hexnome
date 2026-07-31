@@ -72,8 +72,10 @@ There are two kinds of objects: **tiles** and **plates**.
   to the plate and moves only with it. It still counts for scoring like any other tile.
 - **A plate can be rotated** in sixth-turns, while it is in the drawer or while being dragged — not
   once it is on the board. Because a flower is six-fold symmetric, rotating never changes which cells a
-  plate covers, so it can never make a placement legal or illegal; it only changes which petal points
-  where, and therefore which cell the plate's tile lands on.
+  plate *covers*; it changes which petal points where, and therefore **which cell the plate's own tile
+  lands on**. That used to make rotation cosmetic. It no longer is: under
+  [the neighbour rule](#the-neighbour-rule) the token's cell decides what it has to agree with, so a
+  hole that refuses a plate may accept the same plate turned.
 - **36 distinct plates** (6 colors × 6 values of the pre-filled tile).
 - Plates **tessellate the grid as flowers** and are placed **edge-to-edge** with existing plates.
   Petals of adjacent plates are grid-adjacent, so tiles can touch across plate boundaries — this is
@@ -83,15 +85,89 @@ There are two kinds of objects: **tiles** and **plates**.
 > its own 7 sub-cells (1 hole + 6 petals). Petals of neighbouring plates share edges on the fine
 > grid. Plate placement is constrained to valid flower-lattice positions adjacent to existing plates.
 
-> **As implemented, placement is looser than that.** A plate may go anywhere its seven cells are all
-> free — it is *not* snapped to the flower sublattice, and it does *not* have to touch an existing
-> plate. That is what the current stage asked for, and it is strictly more permissive, so tightening it
-> later is adding a predicate rather than rewriting anything.
+### The connection rule
+
+**Every plate after the first must touch one already on the board**, and touching means **sharing an
+edge**. The board is one connected sheet: plates may not be dropped off on their own to be joined up
+later, so the tableau grows outward from the starting plate.
+
+Hexes have no corners that meet without an edge between them, so "shares an edge" and "is a neighbour"
+are the same test — a plate connects if any of its seven cells neighbours a cell of another plate.
+
+Two consequences worth knowing, both of which fall out rather than being separately specified:
+
+- The **first** plate is exempt, having nothing to touch. That is what lets the starting plate land in
+  the middle of an empty board.
+- Legal holes for a second plate are **exactly the ring at distance 3** from the first. Nearer overlaps;
+  further cannot reach. That is 18 positions around any given plate.
+
+> **Placement is still looser than the working model above in one respect.** A plate is *not* snapped to
+> the flower sublattice — it need only connect, not interlock. So of those 18 positions, 6 tessellate
+> cleanly and 12 leave gaps.
 >
-> It does have a consequence worth deciding on: off-lattice plates leave **stranded cells** — single
+> The gaps are the consequence worth deciding on: off-lattice plates leave **stranded cells** — single
 > cells too hemmed in for any flower to cover them, which can therefore never hold a tile. Snapping to
-> the sublattice makes the board tessellate perfectly and no cell is ever stranded. See
+> the sublattice would make the board tessellate perfectly and strand nothing. See
 > [Open questions](#open-questions).
+
+### The neighbour rule
+
+A tile landing on the board looks at the **six cells around it**.
+
+- If none of them holds a tile, the placement is free. An isolated tile answers to nobody.
+- If any of them does, the neighbours have a say — and how much of a say is a **game setting**.
+
+| Setting | A tile may land if… |
+|---|---|
+| **Regular** (default) | **at least one** neighbour shares its colour **or** its value |
+| **Strict** | **every** neighbour shares its colour **or** its value |
+
+Regular asks a tile to belong *somewhere*; strict asks it to belong *everywhere it touches*. Anything
+strict allows, regular allows too.
+
+Neighbours are counted across plate boundaries as well as within a plate — petals of adjacent plates
+share edges, and that is exactly how groups grow beyond one flower.
+
+**A plate is checked the same way, through the tile it carries.** Its token sits on a cell like any
+other, so that cell's six neighbours are examined by the same rule. One consequence worth knowing at
+the table: **rotating a plate moves its token to a different cell**, so a hole that refuses a plate may
+accept it turned. The rotation controls in the bay are therefore part of placement, not decoration.
+
+> **Open — what "every neighbour must match" means when they match differently.** As built, each
+> neighbour is judged on its own: one may agree by colour while the next agrees by value. The stricter
+> reading is that a *single* attribute must carry all of them, which is how drafting and payment work.
+> The two only differ when neighbours agree on different attributes. See
+> [Open questions](#open-questions).
+
+### Groups, and the no-duplicates rule
+
+Every tile on the board belongs to **two groups at once**:
+
+- its **colour group** — the run of connected tiles sharing its colour;
+- its **value group** — the run of connected tiles sharing its value.
+
+"Connected" means reachable by stepping from tile to adjacent tile *without leaving the attribute*: a
+colour group is walked through same-colour tiles only. Both groups always contain the tile itself, so
+both exist even for a tile standing alone.
+
+**Neither group may contain the same tile twice** — the same colour *and* the same value. A group is a
+set of distinct things, and a placement that would break that is refused.
+
+The case that shows why this is not just "no two identical tiles touching":
+
+```
+Blue-1 · gap · Blue-1        legal — nothing connects them, so they are in different groups
+Blue-1 · Blue-2 · Blue-1     refused — one colour group now holds two Blue-1s
+```
+
+The Blue-2 is not a duplicate of anything. It is the **bridge** that makes two distant tiles collide,
+and it is the bridge that gets refused. A group can be walked a long way round, so the duplicate it
+finds need not be anywhere near the tile being placed.
+
+The obvious consequence, which needs no separate rule: **a tile can never go beside a copy of itself.**
+Two identical tiles adjacent are connected in *both* groups, so both are duplicated at once.
+
+Like the neighbour rule, this applies to a plate through the tile it carries.
 
 ## What each player owns
 
@@ -310,7 +386,12 @@ On your turn you choose **one** action:
    source into your personal **drawer**. See [What a draft takes](#what-a-draft-takes).
 2. **Place** — take **one** item from your drawer and place it on your board:
    - a **tile** may go **only onto an empty petal of an already-placed plate**;
-   - a **plate** must **connect edge-to-edge** to an existing plate;
+   - a **plate** needs its seven cells free and must **share an edge** with a plate already on the
+     board — see [The connection rule](#the-connection-rule);
+   - whatever is placed must agree with whatever it ends up **next to** — see
+     [The neighbour rule](#the-neighbour-rule);
+   - and must not put a **duplicate** into either group it joins — see
+     [Groups, and the no-duplicates rule](#groups-and-the-no-duplicates-rule);
    - placing requires **payment** (below).
 3. **Pass**.
 
@@ -385,12 +466,15 @@ turn.
 Both **same-color** and **same-value** connected groups score. A single tile can contribute to
 **both** a color group and a value group.
 
+These are the same groups placement is judged against — see
+[Groups, and the no-duplicates rule](#groups-and-the-no-duplicates-rule). A group can therefore never
+contain a duplicate by the time it is scored: the placement that would have created one was refused.
+
 - **Color group** — connected tiles of the **same color**, size ≥ 3 → scores the **sum of the tiles'
-  values**. **No duplicate value** within the group (e.g. green {1, 2, 1} is illegal).
+  values**.
   - *Example:* touching green tiles 1, 2, 4 → **1 + 2 + 4 = 7 points**.
 - **Value group** — connected tiles of the **same value**, size ≥ 3 → scores the **sum of their
-  values** (= value × size). Whether a parallel "no duplicate color" restriction applies, and the
-  exact formula, are open.
+  values** (= value × size). The exact formula is open.
 
 ## Jokers
 
@@ -430,11 +514,11 @@ none of these block current work. The rules module must leave room for them rath
 1. ~~**Payment** — is the drawer the only source? Can plates be spent, or only tiles?~~ **Resolved** —
    see [Payment](#payment-azul-style). The drawer is the only source; plates may be spent and pay as
    their own token. Still open: whether the placed item's own tile counts toward anything in scoring.
-2. **Value-group scoring** — exact formula, and whether a parallel "no duplicate color" restriction
-   applies.
-3. **Rule enforcement** — is a no-duplicate violation an *illegal placement* (blocked by the UI) or a
-   *legal but non-scoring* one? This decides whether that validation is a hard gate or an advisory
-   hint, so it affects the UI as well as the rules.
+2. **Value-group scoring** — exact formula. The "no duplicate colour" half is now settled: both groups
+   are checked for duplicates at placement time.
+3. ~~**Rule enforcement** — is a no-duplicate violation an *illegal placement* or a *legal but
+   non-scoring* one?~~ **Resolved — illegal.** It is a hard gate: the model refuses the move and the
+   drop marker turns red. See [Groups, and the no-duplicates rule](#groups-and-the-no-duplicates-rule).
 4. **Shared source** — *composition is settled* (36 plates, 108 tiles), and so is its **shape**: six
    lots, each a face-down plate under four loose tiles (see
    [How the source presents itself](#how-the-source-presents-itself)). Still open: **when it
@@ -448,15 +532,22 @@ none of these block current work. The rules module must leave room for them rath
 8. **Bonuses and goals** — the mockup shows per-goal bonuses ("complete all goals before the
    opponent"), but the goal system itself is not designed yet.
 9. **Puzzles mode** — fixed *sequence* or fixed *pool*?
-10. **Plate placement freedom** — should plates snap to the flower sublattice (generated by `(1,2)` and
-    `(3,-1)`, so the board tessellates and no cell is stranded), and must they touch an existing plate?
-    Currently neither constraint is applied: any position with seven free cells is legal.
+10. **Plate placement freedom** — half resolved. Plates **must touch** an existing plate; see
+    [The connection rule](#the-connection-rule). Still open: whether they must also **snap to the flower
+    sublattice** (generated by `(1,2)` and `(3,-1)`, so the board tessellates and no cell is stranded).
+    Today 18 holes are legal around a plate, of which only 6 interlock; the other 12 connect but leave
+    gaps, and gaps are what strand cells.
 11. **Pass** — always available, or only when no other action is legal? Currently unconditional.
 14. ~~**Spending a stem** — what does a stem buy when placing a tile?~~ **Resolved** — a stem is a wild
     payer: it counts as one item toward the price, matches nothing, and is exempt from the equal-items
     rule. Any number may be used in one payment. See [Payment](#payment-azul-style).
 15. **Earning stems** — beyond the opening allowance, how are they awarded? Still the only open part
     of the stem design.
+16. **What "strict" means with mixed neighbours** — under the strict placement rule, each neighbour is
+    currently judged on its own, so one may agree by colour and another by value. Should a *single*
+    attribute have to satisfy all of them instead, as it does for drafting and payment? Only affects
+    positions where neighbours agree on different attributes. See
+    [The neighbour rule](#the-neighbour-rule).
 12. **Drafting a face-down plate** — a plate's color and symbol are hidden in the source, so it cannot
     be matched against a draft criterion. Does drafting a color/symbol also sweep plates whose hidden
     tile matches (revealed on take)? Or are plates taken by a separate action? Currently plates are

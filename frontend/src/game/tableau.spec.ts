@@ -587,3 +587,279 @@ describe('rearranging the drawer', () => {
     expect(t.swapDrawerItems(tile.id, 'nope')).toBe(false)
   })
 })
+
+/**
+ * Distance in cells between two holes. Local to the spec: the rule under test is about *touching*,
+ * and this only exists to describe the answer compactly.
+ */
+function holeDistance(a: { q: number, r: number }, b: { q: number, r: number }): number {
+  const dq = a.q - b.q
+  const dr = a.r - b.r
+  return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr))
+}
+
+describe('the board is one connected sheet', () => {
+  const big = () => createTableau({ cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2 })
+
+  it('lets the first plate land anywhere, having nothing to touch', () => {
+    const t = big()
+    expect(t.canPlacePlate(onBoard(0, 0))).toBe(true)
+    expect(t.canPlacePlate(onBoard(5, -2))).toBe(true)
+  })
+
+  it('refuses a second plate that touches nothing', () => {
+    const t = big()
+    t.addPlate(onBoard(0, 0))
+    // Four cells away: the two flowers come no closer than a cell apart, so no shared edge.
+    expect(t.canPlacePlate(onBoard(4, -4))).toBe(false)
+    expect(t.addPlate(onBoard(4, -4))).toBeUndefined()
+  })
+
+  it('accepts one that shares an edge', () => {
+    const t = big()
+    t.addPlate(onBoard(0, 0))
+    // The tessellating neighbour: flowers interlock with no gap between them.
+    expect(t.canPlacePlate(onBoard(1, 2))).toBe(true)
+    expect(t.addPlate(onBoard(1, 2))).toBeDefined()
+  })
+
+  it('is exactly the ring at distance three — nearer overlaps, further cannot touch', () => {
+    const t = big()
+    t.addPlate(onBoard(0, 0))
+    const legal: string[] = []
+    for (let q = -6; q <= 6; q++) {
+      for (let r = -6; r <= 6; r++) {
+        if (t.canPlacePlate(onBoard(q, r))) legal.push(`${q},${r}`)
+      }
+    }
+    expect(legal).toHaveLength(18)
+    for (const key of legal) {
+      const [q, r] = key.split(',').map(Number) as [number, number]
+      expect(holeDistance({ q, r }, { q: 0, r: 0 })).toBe(3)
+    }
+  })
+
+  it('does not let a plate count itself as its own connection', () => {
+    const t = big()
+    const only = t.addPlate(onBoard(0, 0))!
+    // The lone plate may go anywhere: excluding itself leaves nothing to connect to.
+    expect(t.canPlacePlate(onBoard(4, -4), only.id)).toBe(true)
+    expect(t.movePlate(only.id, onBoard(4, -4))).toBe(true)
+  })
+
+  it('keeps a plate able to stay exactly where it is', () => {
+    const t = big()
+    const first = t.addPlate(onBoard(0, 0))!
+    const second = t.addPlate(onBoard(1, 2))!
+    expect(t.canPlacePlate(onBoard(1, 2), second.id)).toBe(true)
+    expect(t.canPlacePlate(onBoard(0, 0), first.id)).toBe(true)
+  })
+
+  it('grows outward: a third plate may touch either of the first two', () => {
+    const t = big()
+    t.addPlate(onBoard(0, 0))
+    t.addPlate(onBoard(1, 2))
+    // Distance 3 from the second and 6 from the first — reachable only through the second.
+    expect(t.canPlacePlate(onBoard(2, 4))).toBe(true)
+    // Distance 6 from both: an island.
+    expect(t.canPlacePlate(onBoard(6, -6))).toBe(false)
+  })
+
+  it('still refuses an overlap, connected or not', () => {
+    const t = big()
+    t.addPlate(onBoard(0, 0))
+    // Distance 2 shares cells, so it is out on the older rule before the new one is reached.
+    expect(t.canPlacePlate(onBoard(2, 0))).toBe(false)
+    expect(t.canPlacePlate(onBoard(1, 1))).toBe(false)
+  })
+})
+
+describe('a tile has to agree with its neighbours', () => {
+  /** Two plates side by side on the flower sublattice, so their petals touch. */
+  function pair(rule?: 'regular' | 'strict') {
+    const t = createTableau({
+      cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2, placementRule: rule,
+    })
+    const a = t.addPlate(onBoard(0, 0))!
+    const b = t.addPlate(onBoard(1, 2))!
+    return { t, a, b }
+  }
+
+  it('lets a tile land where nothing is adjacent', () => {
+    const { t, a } = pair()
+    const loose = t.addTile(BLUE, inDrawer(0))!
+    expect(t.canPlaceTile(onPetal(a.id, 0), loose.id)).toBe(true)
+  })
+
+  it('regular: accepts a tile that agrees with one of its neighbours', () => {
+    const { t, a } = pair('regular')
+    // Petals 0 and 1 of the same plate are adjacent cells.
+    t.addTile({ color: 1, value: 5 }, onPetal(a.id, 0))
+    t.addTile({ color: 3, value: 2 }, onPetal(a.id, 1))
+    const sharesColor = t.addTile({ color: 1, value: 6 }, inDrawer(0))!
+    expect(t.canPlaceTile(onPetal(a.id, 5), sharesColor.id)).toBe(true)
+  })
+
+  it('regular: refuses one that agrees with none of them', () => {
+    const { t, a } = pair('regular')
+    t.addTile({ color: 1, value: 5 }, onPetal(a.id, 0))
+    const stranger = t.addTile({ color: 3, value: 6 }, inDrawer(0))!
+    expect(t.canPlaceTile(onPetal(a.id, 5), stranger.id)).toBe(false)
+    expect(t.moveTile(stranger.id, onPetal(a.id, 5))).toBe(false)
+  })
+
+  it('strict: refuses when only some neighbours agree', () => {
+    const strictish = createTableau({
+      cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2, placementRule: 'strict',
+    })
+    const plate = strictish.addPlate(onBoard(0, 0))!
+    strictish.addTile({ color: 1, value: 5 }, onPetal(plate.id, 0))
+    strictish.addTile({ color: 3, value: 2 }, onPetal(plate.id, 4))
+    const half = strictish.addTile({ color: 1, value: 6 }, inDrawer(0))!
+    // Petal 5 touches both petal 0 and petal 4. Blue agrees with the first, not the second.
+    expect(strictish.canPlaceTile(onPetal(plate.id, 5), half.id)).toBe(false)
+    // The same tile is fine under the looser rule.
+    const { t, a } = pair('regular')
+    t.addTile({ color: 1, value: 5 }, onPetal(a.id, 0))
+    t.addTile({ color: 3, value: 2 }, onPetal(a.id, 4))
+    const same = t.addTile({ color: 1, value: 6 }, inDrawer(0))!
+    expect(t.canPlaceTile(onPetal(a.id, 5), same.id)).toBe(true)
+  })
+
+  it('counts neighbours across a plate boundary, not just within one plate', () => {
+    const { t, a, b } = pair('regular')
+    // Plate b's petal 2 sits on (1,1), which touches two of plate a's cells: petal 0 at (1,0) and
+    // petal 5 at (0,1). Groups spanning plates is the point of the flower layout, so the rule has to
+    // see across the seam. Two *different* blues, since a wall of identical tiles is itself illegal.
+    t.addTile({ color: 1, value: 5 }, onPetal(a.id, 0))
+    t.addTile({ color: 1, value: 2 }, onPetal(a.id, 5))
+    const stranger = t.addTile({ color: 3, value: 6 }, inDrawer(0))!
+    expect(t.canPlaceTile(onPetal(b.id, 2), stranger.id)).toBe(false)
+    const kin = t.addTile({ color: 1, value: 6 }, inDrawer(1))!
+    expect(t.canPlaceTile(onPetal(b.id, 2), kin.id)).toBe(true)
+    // A petal of b facing away from a has no neighbours at all, so anything may go there.
+    expect(t.canPlaceTile(onPetal(b.id, 0), stranger.id)).toBe(true)
+  })
+
+  it('does not let a tile count itself when it is already on the board', () => {
+    const { t, a } = pair('regular')
+    const only = t.addTile({ color: 1, value: 5 }, onPetal(a.id, 0))!
+    // Moving it one petal along: its own old cell is adjacent, and must not vouch for it.
+    expect(t.canPlaceTile(onPetal(a.id, 1), only.id)).toBe(true)
+  })
+
+  it('leaves the drawer and the source alone', () => {
+    const { t } = pair('strict')
+    const loose = t.addTile({ color: 3, value: 6 }, inDrawer(0))!
+    expect(t.canPlaceTile(inDrawer(5), loose.id)).toBe(true)
+  })
+
+  it('checks a plate through the tile it carries', () => {
+    const t = createTableau({
+      cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2, placementRule: 'regular',
+    })
+    const onTable = t.addPlate(onBoard(0, 0))!
+    t.addTile({ color: 1, value: 5 }, onPetal(onTable.id, 0))
+    t.addTile({ color: 1, value: 2 }, onPetal(onTable.id, 5))
+
+    // Petal 2 is the one that lands on (1,1), against the filled plate. A token anywhere else on
+    // the incoming plate would touch nothing, and the placement would be free.
+    const held = t.addPlate(inPlateSlot(0))!
+    t.addTile({ color: 3, value: 6 }, onPetal(held.id, 2), { fixed: true })
+    expect(t.canPlacePlate(onBoard(1, 2), held.id)).toBe(false)
+
+    const friendly = t.addPlate(inPlateSlot(1))!
+    t.addTile({ color: 1, value: 3 }, onPetal(friendly.id, 2), { fixed: true })
+    expect(t.canPlacePlate(onBoard(1, 2), friendly.id)).toBe(true)
+  })
+
+  it('follows the token round when the plate is turned', () => {
+    const t = createTableau({
+      cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2, placementRule: 'regular',
+    })
+    const onTable = t.addPlate(onBoard(0, 0))!
+    t.addTile({ color: 1, value: 5 }, onPetal(onTable.id, 0))
+    t.addTile({ color: 1, value: 2 }, onPetal(onTable.id, 5))
+
+    const held = t.addPlate(inPlateSlot(0))!
+    t.addTile({ color: 3, value: 6 }, onPetal(held.id, 2), { fixed: true })
+    // Facing the blues, its stranger token is refused.
+    expect(t.canPlacePlate(onBoard(1, 2), held.id)).toBe(false)
+    // Turned, the token points somewhere with no neighbours, and the same hole opens up.
+    t.rotatePlate(held.id, 3)
+    expect(t.canPlacePlate(onBoard(1, 2), held.id)).toBe(true)
+  })
+
+  it('defaults to regular', () => {
+    const t = createTableau({ cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2 })
+    const plate = t.addPlate(onBoard(0, 0))!
+    t.addTile({ color: 1, value: 5 }, onPetal(plate.id, 0))
+    t.addTile({ color: 3, value: 2 }, onPetal(plate.id, 4))
+    const half = t.addTile({ color: 1, value: 6 }, inDrawer(0))!
+    // Accepted, so the default is the looser rule.
+    expect(t.canPlaceTile(onPetal(plate.id, 5), half.id)).toBe(true)
+  })
+})
+
+describe('a group may not contain the same tile twice', () => {
+  /**
+   * Two plates on the flower sublattice. Plate a's petal 0 is (1,0) and its petal 5 is (0,1);
+   * plate b's petal 2 is (1,1), which touches both — so the three cells form a little chain.
+   */
+  function pair() {
+    const t = createTableau({ cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2 })
+    const a = t.addPlate(onBoard(0, 0))!
+    const b = t.addPlate(onBoard(1, 2))!
+    return { t, a, b }
+  }
+
+  it('refuses a tile next to its own copy', () => {
+    const { t, a } = pair()
+    t.addTile({ color: 1, value: 3 }, onPetal(a.id, 0))
+    const twin = t.addTile({ color: 1, value: 3 }, inDrawer(0))!
+    // Petals 0 and 1 are adjacent cells, so the two would be connected in both groups at once.
+    expect(t.canPlaceTile(onPetal(a.id, 1), twin.id)).toBe(false)
+  })
+
+  it('refuses the bridge that joins two distant copies', () => {
+    const { t, a, b } = pair()
+    // Blue-1 at (1,0) and Blue-1 at (1,1): not adjacent to each other, so both may stand.
+    t.addTile({ color: 1, value: 1 }, onPetal(a.id, 0))
+    t.addTile({ color: 1, value: 1 }, onPetal(b.id, 2))
+    // (0,1) touches (1,0) and (1,1). A blue tile there joins the two Blue-1s into one colour group.
+    const bridge = t.addTile({ color: 1, value: 2 }, inDrawer(0))!
+    expect(t.canPlaceTile(onPetal(a.id, 5), bridge.id)).toBe(false)
+    // Another colour does not join the two by colour — but a value-1 tile joins them by *value*,
+    // so the same cell is refused for the other of the two reasons.
+    const neutral = t.addTile({ color: 3, value: 1 }, inDrawer(1))!
+    expect(t.canPlaceTile(onPetal(a.id, 5), neutral.id)).toBe(false)
+  })
+
+  it('allows two copies to stand while nothing connects them', () => {
+    const { t, a, b } = pair()
+    t.addTile({ color: 1, value: 1 }, onPetal(a.id, 0))
+    const twin = t.addTile({ color: 1, value: 1 }, inDrawer(0))!
+    // Plate b's petal 0 is (2,2), three cells from (1,0): nothing links them, so both may stand.
+    expect(t.canPlaceTile(onPetal(b.id, 0), twin.id)).toBe(true)
+  })
+
+  it('checks the value group as well as the colour group', () => {
+    const { t, a, b } = pair()
+    // Two Red-4s that do not touch, then a Green-4 bridging them by value.
+    t.addTile({ color: 4, value: 4 }, onPetal(a.id, 0))
+    t.addTile({ color: 4, value: 4 }, onPetal(b.id, 2))
+    const bridge = t.addTile({ color: 2, value: 4 }, inDrawer(0))!
+    expect(t.canPlaceTile(onPetal(a.id, 5), bridge.id)).toBe(false)
+  })
+
+  it('applies to a plate through the tile it carries', () => {
+    const t = createTableau({ cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2 })
+    const onTable = t.addPlate(onBoard(0, 0))!
+    t.addTile({ color: 1, value: 3 }, onPetal(onTable.id, 0))
+
+    // A plate whose token is the same tile, landing where the two would touch.
+    const twinPlate = t.addPlate(inPlateSlot(0))!
+    t.addTile({ color: 1, value: 3 }, onPetal(twinPlate.id, 2), { fixed: true })
+    expect(t.canPlacePlate(onBoard(1, 2), twinPlate.id)).toBe(false)
+  })
+})

@@ -32,7 +32,7 @@ import { HEX_SIZE, HIGHLIGHT_COLORS, HIGHLIGHT_Y } from './constants'
 
 const props = defineProps<{
   cells: readonly Axial[]
-  /** Legal drop target? Illegal ones get a quiet, desaturated treatment. */
+  /** Legal drop target? Illegal ones are outlined in red, and do not pulse. */
   valid: boolean
 }>()
 
@@ -110,8 +110,15 @@ onBeforeRender(({ elapsed }) => {
   glowMaterial.color.set(colour)
   bandMaterial.color.set(colour)
   glowMaterial.blending = props.valid ? AdditiveBlending : NormalBlending
-  glowMaterial.opacity = props.valid ? 0.16 + pulse * 0.12 : 0.16
-  bandMaterial.opacity = props.valid ? 0.75 + pulse * 0.25 : 0.3
+  glowMaterial.opacity = props.valid ? 0.16 + pulse * 0.12 : 0.14
+  /*
+   * The refusal is stated at full strength — the outline is as solid as the accepting one, only red.
+   *
+   * It does not pulse, though. The pulse is an invitation, and a steady band reads as a stop rather
+   * than a beckon: the two states then differ in hue *and* in behaviour, which survives being looked
+   * at by someone who cannot tell the two hues apart.
+   */
+  bandMaterial.opacity = props.valid ? 0.75 + pulse * 0.25 : 0.92
 })
 
 onBeforeUnmount(() => {

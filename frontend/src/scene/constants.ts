@@ -407,9 +407,18 @@ export const SOURCE_SCRIM_COLOR = '#05070a'
  */
 export const SOURCE_SCRIM_OPACITY = 0.28
 
+/**
+ * The drop-target marker: where a held piece would land, and whether it may.
+ *
+ * **Invalid is a real red, and as loud as valid.** It used to be a desaturated maroon drawn at a third
+ * of the opacity, which read as "nothing here" rather than "not there" — fine when the only illegal
+ * drop was an obvious overlap, misleading now that plates must also *connect*, since a position can
+ * look perfectly free and still be refused. A refusal the player cannot see is a refusal they will
+ * blame on the controls.
+ */
 export const HIGHLIGHT_COLORS = {
   valid: '#8fe6c0',
-  invalid: '#6a4b4b',
+  invalid: '#ff4d3d',
 } as const
 
 /**

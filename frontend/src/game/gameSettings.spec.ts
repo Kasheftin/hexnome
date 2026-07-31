@@ -8,12 +8,14 @@ import {
   parseGameSettings,
   roundsOf,
 } from './gameSettings'
+import { DEFAULT_PLACEMENT_RULE } from './placement'
 
 const valid = {
   kind: 'singleplayer',
   mode: 'classic',
   platesPerRound: 5,
   initialStems: 2,
+  placementRule: 'strict',
   createdAt: 1_700_000_000_000,
 }
 
@@ -76,6 +78,7 @@ describe('defaults', () => {
     expect(s.kind).toBe('singleplayer')
     expect(s.platesPerRound).toBe(DEFAULT_PLATES_PER_ROUND)
     expect(s.initialStems).toBe(DEFAULT_STEM_COUNT)
+    expect(s.placementRule).toBe(DEFAULT_PLACEMENT_RULE)
     expect(s.createdAt).toBe(123)
     expect(parseGameSettings(s)).toEqual(s)
   })
@@ -97,5 +100,26 @@ describe('game ids', () => {
     for (const id of ids) {
       expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     }
+  })
+})
+
+describe('the placement rule is a dial, not an identity', () => {
+  it('keeps a recognised value', () => {
+    expect(parseGameSettings({ ...valid, placementRule: 'strict' })?.placementRule).toBe('strict')
+    expect(parseGameSettings({ ...valid, placementRule: 'regular' })?.placementRule).toBe('regular')
+  })
+
+  it('falls back rather than discarding the game', () => {
+    for (const bad of [undefined, null, '', 'lenient', 3, {}]) {
+      const parsed = parseGameSettings({ ...valid, placementRule: bad })
+      expect(parsed).not.toBeNull()
+      expect(parsed?.placementRule).toBe(DEFAULT_PLACEMENT_RULE)
+    }
+  })
+
+  it('gives a game saved before the setting existed the default', () => {
+    const older: Record<string, unknown> = { ...valid }
+    delete older.placementRule
+    expect(parseGameSettings(older)?.placementRule).toBe(DEFAULT_PLACEMENT_RULE)
   })
 })

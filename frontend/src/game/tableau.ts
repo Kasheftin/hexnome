@@ -20,7 +20,8 @@
  * A third kind of object, the **stem**, lives only in the drawer and shares its slots with tiles — see
  * `Stem`. Occupancy for both runs through one index, so a slot can never hold two things.
  */
-import { axialKey, type Axial } from './hex'
+import { NEIGHBOR_DIRS, axialAdd, axialKey, type Axial } from './hex'
+import { DEFAULT_PLACEMENT_RULE, groupsAllow, neighboursAllow, type PlacementRule } from './placement'
 import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
 
 export type PlateLocation =
@@ -51,8 +52,8 @@ export interface Plate {
    * Clockwise rotation in sixth-turn steps.
    *
    * A flower is six-fold symmetric, so rotating a plate never changes *which* seven cells
-   * it covers — only which petal points where. Rotation is therefore a permutation of the
-   * petals, and placement legality is entirely unaffected by it.
+   * it covers — only which petal points where. Fit and connection are therefore unaffected by it;
+   * the neighbour rule is not, since turning the plate moves its own tile to a different cell.
    *
    * Deliberately **not** wrapped into 0…5. Kept as a running integer so the rendered angle
    * is continuous and can be eased; wrapping would make a step from 5 to 0 look like a
@@ -179,6 +180,15 @@ export interface Tableau {
   /** The board cell a tile sits on, if its plate is on the board. */
   cellOfTile(id: string): Axial | undefined
 
+  /**
+   * May a plate go here?
+   *
+   * On the **board** that means two things: all seven cells are on the board and free, *and* the plate
+   * touches one already placed — the tableau is a single connected sheet. The first plate is exempt,
+   * having nothing to touch. Elsewhere it just means the bay or lot is empty.
+   *
+   * `movingId` excludes a plate from blocking itself, so "put it back where it is" is always legal.
+   */
   canPlacePlate(location: PlateLocation, movingId?: string): boolean
   canPlaceTile(location: TileLocation, movingId?: string): boolean
   /**
@@ -279,12 +289,18 @@ export function createTableau({
   plateSlots,
   sourceLots = 0,
   sourceTilesPerLot = 0,
+  placementRule = DEFAULT_PLACEMENT_RULE,
 }: {
   cells: readonly Axial[]
   drawerSlots: number
   plateSlots: number
   sourceLots?: number
   sourceTilesPerLot?: number
+  /**
+   * How strictly a tile has to agree with its neighbours — a game setting, fixed for the game's
+   * lifetime, so it is taken once here rather than passed to every call that asks about legality.
+   */
+  placementRule?: PlacementRule
 }): Tableau {
   const boardCells = new Set(cells.map(axialKey))
   const platesById = new Map<string, Plate>()
@@ -325,6 +341,45 @@ export function createTableau({
       if (covered && covered.plateId !== movingId) return false
     }
     return true
+  }
+
+  /**
+   * Does a plate at this hole touch one already on the board?
+   *
+   * **The board is one connected sheet.** Plates may not be dropped off on their own to be joined up
+   * later: every plate after the first has to share an edge with what is already there, so the tableau
+   * grows outward from the starting plate rather than as islands.
+   *
+   * Touching means **sharing an edge**, which for hexes is the same as being neighbours — so this asks
+   * whether any of the new plate's seven cells has a neighbour belonging to another plate. Corner
+   * contact does not arise: hexes have no corners that touch without an edge between them.
+   *
+   * The moving plate is excluded from "another", which matters twice. Sliding a plate to an adjacent
+   * hole must not count its own old cells as the connection it needs, and the **first** plate on the
+   * board has nothing to touch at all — with no other plates, this is vacuously true and anywhere is
+   * legal. That is what lets the opening plate land in the middle of an empty board.
+   */
+  function plateConnects(hole: Axial, movingId?: string): boolean {
+    let others = false
+    for (const plate of platesById.values()) {
+      if (plate.location.kind === 'board' && plate.id !== movingId) {
+        others = true
+        break
+      }
+    }
+    if (!others) return true
+
+    const own = new Set(plateCells(hole).map(axialKey))
+    for (const cell of plateCells(hole)) {
+      for (const dir of NEIGHBOR_DIRS) {
+        const key = axialKey(axialAdd(cell, dir))
+        // A cell of the plate itself is not something it can be connected *to*.
+        if (own.has(key)) continue
+        const covered = coverage.get(key)
+        if (covered && covered.plateId !== movingId) return true
+      }
+    }
+    return false
   }
 
   function inRange(n: number, limit: number): boolean {
@@ -404,8 +459,107 @@ export function createTableau({
     occupants.set(plateLocationKey({ kind: 'plateSlot', slot }), id)
   }
 
+  /** What tile, if any, is on this cell right now. */
+  function settledTileAt(cell: Axial): Tile | undefined {
+    const covered = coverage.get(axialKey(cell))
+    if (!covered || covered.petal === null) return undefined
+    const id = occupants.get(
+      tileLocationKey({ kind: 'onPlate', plateId: covered.plateId, petal: covered.petal }),
+    )
+    return id === undefined ? undefined : tilesById.get(id)
+  }
+
+  /**
+   * The board **as it would be** once a move lands: a cell → tile lookup.
+   *
+   * Both placement rules ask questions about the finished board rather than the current one — what a
+   * tile would touch, what group it would join — so both take their answers from here. One view rather
+   * than a bespoke lookup per rule is the point: two views would be two chances to disagree about what
+   * "after the move" means.
+   *
+   * A moving **tile** vanishes from its old cell, or it would show up as its own neighbour when nudged
+   * one petal along. A moving **plate** takes everything it carries with it: its tiles leave their old
+   * cells and appear at the new ones, so they can be each other's neighbours at the destination.
+   */
+  function boardAfter(move: {
+    tileId?: string
+    plateId?: string
+    hole?: Axial
+    rotation?: number
+  }): (cell: Axial) => TileSpec | undefined {
+    const arriving = new Map<string, TileSpec>()
+    if (move.plateId !== undefined && move.hole !== undefined) {
+      for (const tile of tilesById.values()) {
+        if (tile.location.kind !== 'onPlate' || tile.location.plateId !== move.plateId) continue
+        const cell = cellOfPetal(move.hole, move.rotation ?? 0, tile.location.petal)
+        arriving.set(axialKey(cell), tile)
+      }
+    }
+    return cell => {
+      const key = axialKey(cell)
+      const incoming = arriving.get(key)
+      if (incoming) return incoming
+      const covered = coverage.get(key)
+      // Everything the moving plate used to cover is empty now — it has gone.
+      if (!covered || covered.plateId === move.plateId) return undefined
+      const settled = settledTileAt(cell)
+      return settled === undefined || settled.id === move.tileId ? undefined : settled
+    }
+  }
+
+  /** The tiles on the six cells around this one, seen through a given board. */
+  function neighboursOf(
+    cell: Axial,
+    view: (at: Axial) => TileSpec | undefined,
+  ): TileSpec[] {
+    const found: TileSpec[] = []
+    for (const dir of NEIGHBOR_DIRS) {
+      const tile = view(axialAdd(cell, dir))
+      if (tile) found.push(tile)
+    }
+    return found
+  }
+
+  /** The board cell a plate's petal would occupy, given where and how the plate sits. */
+  function cellOfPetal(hole: Axial, rotation: number, petal: number): Axial {
+    // Inverse of the coverage mapping: logical petal p points in direction p − rotation.
+    return petalCell(hole, normalizePetal(petal - rotation))
+  }
+
+  /** Both rules, asked of one tile arriving on one cell. */
+  function tileIsWelcome(
+    cell: Axial,
+    spec: TileSpec,
+    view: (at: Axial) => TileSpec | undefined,
+  ): boolean {
+    return neighboursAllow(spec, neighboursOf(cell, view), placementRule)
+      && groupsAllow(cell, spec, view)
+  }
+
+  /**
+   * Would every tile this plate carries be welcome where the plate is going?
+   *
+   * A plate arriving from a bay carries exactly one tile — its own token — which is the case the rules
+   * are written for. A plate lifted off the board can carry more, and each is checked, because a tile
+   * riding along is still a tile that ends up somewhere.
+   */
+  function plateTilesAgree(hole: Axial, movingId: string, rotation: number): boolean {
+    const view = boardAfter({ plateId: movingId, hole, rotation })
+    for (const tile of tilesById.values()) {
+      if (tile.location.kind !== 'onPlate' || tile.location.plateId !== movingId) continue
+      if (!tileIsWelcome(cellOfPetal(hole, rotation, tile.location.petal), tile, view)) return false
+    }
+    return true
+  }
+
   function canPlacePlate(location: PlateLocation, movingId?: string): boolean {
-    if (location.kind === 'board') return plateFits(location.hole, movingId)
+    if (location.kind === 'board') {
+      if (!plateFits(location.hole, movingId) || !plateConnects(location.hole, movingId)) return false
+      // Dealt plates have no id to look tiles up by; only a *move* is a player's placement.
+      if (movingId === undefined) return true
+      const plate = platesById.get(movingId)
+      return plate === undefined || plateTilesAgree(location.hole, movingId, plate.rotation)
+    }
     if (location.kind === 'plateSlot' && !inRange(location.slot, plateSlots)) return false
     if (location.kind === 'source' && !inRange(location.lot, sourceLots)) return false
     const occupant = occupants.get(plateLocationKey(location))
@@ -423,7 +577,22 @@ export function createTableau({
       if (!platesById.has(location.plateId)) return false
     }
     const occupant = occupants.get(tileLocationKey(location))
-    return occupant === undefined || occupant === movingId
+    if (occupant !== undefined && occupant !== movingId) return false
+
+    /*
+     * The placement rules, which only a landing on the **board** can break.
+     *
+     * Asked here rather than by the caller so that every path — the drag, the model, whatever comes
+     * next — gets the same answer. `movingId` is required: without a tile there is nothing whose
+     * colour and value to compare, and the dealing primitives (`addTile`, `revealPlate`) pass no id
+     * because dealing is not a placement. Those set the board up; this governs playing on it.
+     */
+    if (location.kind !== 'onPlate' || movingId === undefined) return true
+    const tile = tilesById.get(movingId)
+    const plate = platesById.get(location.plateId)
+    if (!tile || plate?.location.kind !== 'board') return true
+    const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
+    return tileIsWelcome(cell, tile, boardAfter({ tileId: movingId }))
   }
 
   return {

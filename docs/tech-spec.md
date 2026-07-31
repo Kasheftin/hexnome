@@ -475,6 +475,43 @@ stored beside them, so the two cannot disagree. `petalAt(cell)` returns null for
 uncovered cell, which means "tiles only go into plate petals" falls out of target resolution instead of
 needing a separate check.
 
+**The board is one connected sheet, and that is a model rule.** `canPlacePlate` on a board location is
+two predicates: `plateFits` (all seven cells on the board and free) and `plateConnects` (some cell
+neighbours a cell of *another* plate). Hexes have no corners that meet without an edge, so "shares an
+edge" needs no separate test — neighbouring is the whole of it.
+
+`movingId` is excluded from "another", which does two jobs at once. Sliding a plate must not count its
+own old cells as the connection it needs; and the **first** plate on the board has nothing to touch, so
+with no other plates the predicate is vacuously true and anywhere is legal. The opening plate lands by
+that exemption rather than by a special case.
+
+The geometry that falls out is worth knowing when reading tests: the legal holes for a second plate are
+**exactly the ring at distance 3**, eighteen of them. Distance ≤2 overlaps; distance ≥4 cannot reach.
+Six of the eighteen interlock on the flower sublattice and twelve leave gaps — connecting is a weaker
+constraint than tessellating, and whether to tighten it is still open (docs/game-design.md, question 10).
+
+**Both placement rules ask about the board as it would be, so there is one view of that.**
+`game/placement.ts` holds the pure rules — `neighboursAllow` (regular/strict) and `groupsAllow` (no
+duplicate inside a colour or value group) — and both take a `cell → tile` lookup rather than a tableau.
+The tableau supplies it from `boardAfter`, which returns the board *after the move*: a moving tile
+absent from its old cell, a moving plate's tiles absent from theirs and present at their destinations.
+
+One view rather than a lookup per rule is deliberate. Two would be two chances to disagree about what
+"after the move" means, and the disagreement would show up as a placement the highlight allows and the
+model then refuses. It also removed a bug that existed while there were two: the neighbour lookup for a
+tile excluded its whole destination plate, which quietly hid the other petals of that plate — the
+busiest neighbours it has.
+
+`groupsAllow` is a flood fill per attribute, expanding only newly reached cells, so it is linear in the
+group's size. It runs on every pointer move during a drag; groups are bounded by the tiles actually
+placed, which is tens, so this is not worth optimising.
+
+**The rules are enforced on moves, not on dealing.** `canPlaceTile`/`canPlacePlate` apply them only
+when given a `movingId` — the id is what identifies the colour and value to judge. `addTile`,
+`addPlate` and `revealPlate` pass none, because dealing is not a placement: they set the board up,
+and the rules govern playing on it. A consequence for tests: a spec can `addTile` a board the rules
+would never have allowed, and then get surprising answers from it. Two of ours did exactly that.
+
 Rendering makes the attachment **real rather than simulated**: a tile on a plate is `add()`-ed to the
 plate's `Object3D`, so three derives its world matrix from the plate's every frame and the pair is one
 rigid body by construction. A tile's local transform is just its petal offset.
@@ -522,9 +559,22 @@ One ordering trap in `scene/constants.ts`: these heights are now derived from on
 referring to one declared further down the file throws a temporal-dead-zone `ReferenceError` at module
 load. Typecheck did not catch it; only running it did.
 
+**A refusal has to be as loud as an invitation.** The marker was mint when legal and a desaturated
+maroon at a third of the opacity when not, which read as "nothing here" rather than "not there". That
+was survivable while the only illegal drop was an obvious overlap — the player could see the collision
+themselves. It stopped being survivable with the connection rule, because a position can look perfectly
+free and still be refused, and a refusal nobody can see gets blamed on the controls.
+
+So invalid is now a real red at full band opacity. It also **does not pulse**: the pulse is an
+invitation, and a steady outline reads as a stop. The two states then differ in behaviour as well as
+hue, which still works for someone who cannot separate the two hues.
+
 **Rotation is a permutation, not a transform of the footprint.** A flower is six-fold symmetric, so
-turning a plate cannot change which seven cells it covers — placement legality is completely unaffected
-by rotation, and no code needs to re-check it. What changes is the mapping between cells and petals: a
+turning a plate cannot change which seven cells it covers — *fit* and *connection* are therefore
+unaffected by rotation. The **neighbour rule is not**: it asks about the cell the plate's token lands
+on, and rotation is exactly what moves the token from one cell to another. So `canPlacePlate` reads the
+plate's rotation, and the same hole can refuse a plate and accept it turned. What changes is the
+mapping between cells and petals: a
 cell lying in direction `d` from the hole holds logical petal `d + rotation`, and conversely petal `p`
 points in direction `p − rotation`. Those two are inverses, and a test walks a tile through all six
 petals at all six rotations to hold them that way.

@@ -23,10 +23,17 @@ import {
   SINGLEPLAYER_MODES,
   STEM_COUNT_CHOICES,
   DEFAULT_STEM_COUNT,
+  PLACEMENT_RULE_HINTS,
+  PLACEMENT_RULE_LABELS,
   modeInfo,
   type GameKind,
   type SingleplayerMode,
 } from '@/game/gameSettings'
+import {
+  DEFAULT_PLACEMENT_RULE,
+  PLACEMENT_RULES,
+  type PlacementRule,
+} from '@/game/placement'
 import { useSavedGames } from '@/composables/useSavedGames'
 
 type Step = 'title' | 'kind' | 'singleplayer'
@@ -39,6 +46,7 @@ const kind = ref<GameKind | null>(null)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
 const initialStems = ref<number>(DEFAULT_STEM_COUNT)
+const placementRule = ref<PlacementRule>(DEFAULT_PLACEMENT_RULE)
 
 /** The choices made so far, newest last. Empty on the title screen. */
 const trail = computed(() => {
@@ -73,6 +81,7 @@ function startGame(): void {
     mode: mode.value,
     platesPerRound: platesPerRound.value,
     initialStems: initialStems.value,
+    placementRule: placementRule.value,
   })
   void router.push({ path: '/game', query: { id } })
 }
@@ -200,6 +209,26 @@ const selectedMode = computed(() => modeInfo(mode.value))
               {{ count }}
             </button>
           </div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>Placement</legend>
+          <button
+            v-for="rule in PLACEMENT_RULES"
+            :key="rule"
+            type="button"
+            class="option"
+            :class="{ chosen: placementRule === rule }"
+            :aria-pressed="placementRule === rule"
+            @click="placementRule = rule"
+          >
+            <span class="option-label">{{ PLACEMENT_RULE_LABELS[rule] }}</span>
+            <span class="rounds">{{ PLACEMENT_RULE_HINTS[rule] }}</span>
+          </button>
+          <p class="description">
+            A tile with nothing beside it may go anywhere. Once it touches something, this decides how
+            much of what it touches has to share its colour or its symbol.
+          </p>
         </fieldset>
 
         <button
