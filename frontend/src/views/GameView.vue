@@ -69,6 +69,7 @@ import SourceChrome from '@/scene/SourceChrome.vue'
 import TileEnvironment from '@/scene/TileEnvironment.vue'
 import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
+import TurnAnnounce from '@/ui/TurnAnnounce.vue'
 import {
   BOARD_HALF_COLS,
   BOARD_HALF_ROWS,
@@ -107,7 +108,17 @@ const modeLabel = computed(() => {
 
 onMounted(() => {
   // No id, or one we cannot read: there is no game here, so send them somewhere that works.
-  if (!settings.value) void router.replace('/')
+  if (!settings.value) {
+    void router.replace('/')
+    return
+  }
+  /*
+   * The first turn is announced like any other. Its lot is dealt just before the card rather than behind
+   * it — see `cardWork`. The board's starting plate and the player's stems are part of neither: they are
+   * the tableau, not a deal.
+   */
+  beginTurn()
+  announceTurn(count.value.turn)
 })
 
 /**
@@ -227,8 +238,6 @@ function dealLot(): boolean {
   }
 }
 
-dealLot()
-
 const targetCells = shallowRef<Axial[]>([])
 const targetValid = shallowRef(false)
 const targetTileSlot = shallowRef<number | null>(null)
@@ -332,7 +341,8 @@ const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.s
  * Is the turn in a state where a gesture may name its own action? Governed by
  * {@link INFER_ACTIONS_FROM_GESTURES}, so turning that off restores choose-then-act everywhere at once.
  */
-const inferring = computed(() => INFER_ACTIONS_FROM_GESTURES && phase.value.kind === 'idle')
+const inferring = computed(() =>
+  INFER_ACTIONS_FROM_GESTURES && phase.value.kind === 'idle' && announcing.value === null)
 
 const canStartTake = computed(() => inferring.value && options.value.take)
 const canStartPut = computed(() => inferring.value && options.value.put)
@@ -405,11 +415,99 @@ function cancelAction(): void {
  * Every completed action lands here, a pass included, which is what makes this the one place the turn
  * count advances. Cancelling deliberately does not: an abandoned action was not a turn.
  */
+/* ── the turn card ────────────────────────────────────────────────────────────── */
+
+/**
+ * How long the card holds once it has actually arrived.
+ *
+ * The only duration left in JavaScript. Entering and leaving are timed by CSS in TurnAnnounce.vue and
+ * reported back as events, so nothing here has to guess how long an animation took — which matters most
+ * on the first turn, when the scene is starting up behind the card and animations run late while timers
+ * do not.
+ */
+const CARD_HOLD_MS = 620
+
+/**
+ * Slightly longer than the leave transition in TurnAnnounce.vue, so the bar returns to a clear screen.
+ *
+ * A timer rather than the `after-leave` event, which sounds like the more honest signal and is not.
+ * Vue falls back to a duration-derived timer when `transitionend` does not arrive, and measured on the
+ * page's frame clock that fallback fired while the card was still fully opaque — the bar came back on
+ * top of it. Anchoring the *start* of the sequence on `after-enter` is what makes a plain timer safe
+ * here: by then the scene work is done and the main thread is free, so the clock and the animation agree.
+ */
+const CARD_LEAVE_MS = 440
+
+/**
+ * A backstop, not a schedule.
+ *
+ * If a transition event never arrives — element torn down mid-flight, a browser that skips the
+ * animation entirely — the sequence would stall with the bar hidden and the turn unplayable. This ends
+ * it regardless. Generously long, because reaching it at all means something unexpected happened.
+ */
+const CARD_SAFETY_MS = 4000
+
+/** The turn the card is announcing, or null while play is live. */
+const announcing = shallowRef<number | null>(null)
+/** Flipped false to start the exit; `announcing` clears when the exit reports itself finished. */
+const cardVisible = shallowRef(false)
+
+let cardTimers: ReturnType<typeof setTimeout>[] = []
+
+function clearCardTimers(): void {
+  for (const timer of cardTimers) clearTimeout(timer)
+  cardTimers = []
+}
+
+function finishAnnouncement(): void {
+  clearCardTimers()
+  cardWork = null
+  cardVisible.value = false
+  announcing.value = null
+}
+
+/**
+ * Work to run once the card is up, if any. Cleared as soon as it runs, so it cannot run twice.
+ *
+ * A field rather than a parameter of `onCardShown` because the card decides *when*, and only the caller
+ * knows *what* — and one caller has nothing for it to do. The opening turn deals its lot before
+ * announcing rather than behind the card: the first deal is much the heaviest (a plate, four tiles and
+ * their textures, all cold) and its jank outlasted the hold, so the card was still fading out when the
+ * bar came back. Doing it first costs nothing visible — the scene eases pieces into place, so they still
+ * arrive while the card is fading in — and leaves the card's whole life on an unblocked main thread.
+ */
+let cardWork: (() => void) | null = null
+
+/** Announce a turn, optionally restocking behind the card once it is up. */
+function announceTurn(turn: number, work?: () => void): void {
+  clearCardTimers()
+  cardWork = work ?? null
+  announcing.value = turn
+  cardVisible.value = true
+  cardTimers.push(setTimeout(finishAnnouncement, CARD_SAFETY_MS))
+}
+
+/**
+ * The card is fully up. Restock behind it, then start the hold.
+ *
+ * Restocking here rather than on a timer is what makes the new lot *arrive* on screen instead of having
+ * always been there: the card is opaque, the plate and its tiles appear underneath it, and the card
+ * then leaves to reveal them.
+ */
+function onCardShown(): void {
+  cardWork?.()
+  cardWork = null
+  cardTimers.push(setTimeout(() => { cardVisible.value = false }, CARD_HOLD_MS))
+  cardTimers.push(setTimeout(finishAnnouncement, CARD_HOLD_MS + CARD_LEAVE_MS))
+}
+
+onBeforeUnmount(clearCardTimers)
+
 function endTurn(): void {
   revealEmptiedLots()
   count.value = nextTurn(count.value)
   phase.value = IDLE
-  beginTurn()
+  announceTurn(count.value.turn, beginTurn)
 }
 
 /**
@@ -801,24 +899,33 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       </button>
     </div>
 
-    <ActionBar
-      :phase="phase"
-      :options="options"
-      :selection="selection"
-      :can-confirm="canConfirm"
-      :fits="fits"
-      :pay-cost="payCost"
-      :pay-selection="paySelection"
-      :can-apply="canApply"
-      :attribute="draftAttr"
-      :completed="completed"
-      :anchor-x="drawerLayout.left + drawerLayout.width / 2"
-      :anchor-y="drawerLayout.top"
-      :turn-label="turnLabel"
-      @choose="chooseAction"
-      @confirm="confirmTake"
-      @apply="applyPayment"
-      @cancel="cancelAction"
+    <Transition name="bar">
+      <ActionBar
+        v-if="announcing === null"
+        :phase="phase"
+        :options="options"
+        :selection="selection"
+        :can-confirm="canConfirm"
+        :fits="fits"
+        :pay-cost="payCost"
+        :pay-selection="paySelection"
+        :can-apply="canApply"
+        :attribute="draftAttr"
+        :completed="completed"
+        :anchor-x="drawerLayout.left + drawerLayout.width / 2"
+        :anchor-y="drawerLayout.top"
+        :turn-label="turnLabel"
+        @choose="chooseAction"
+        @confirm="confirmTake"
+        @apply="applyPayment"
+        @cancel="cancelAction"
+      />
+    </Transition>
+
+    <TurnAnnounce
+      :turn="announcing"
+      :visible="cardVisible"
+      @shown="onCardShown"
     />
 
     <header class="chrome-panel top">
@@ -878,6 +985,23 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 </template>
 
 <style scoped>
+/*
+ * The action bar fades in when a turn becomes the player's.
+ *
+ * Also insurance. The bar returns on a timer, and at page load the browser is still compiling shaders
+ * and decoding textures, which can stall the turn card's exit animation past the moment the timer
+ * expects it to have finished — measured, roughly 300ms of it. A hard swap would show the bar popping in
+ * over a card still visibly fading; a crossfade of the same two things looks deliberate. Mid-game, where
+ * the thread is free and the two do not overlap at all, this is simply a soft arrival.
+ */
+.bar-enter-active {
+  transition: opacity 240ms ease-out;
+}
+
+.bar-enter-from {
+  opacity: 0;
+}
+
 .stage {
   position: relative;
   height: 100%;
