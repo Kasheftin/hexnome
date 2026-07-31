@@ -29,7 +29,7 @@ import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { createBag } from '@/game/bag'
-import { createDeck, type DealtPlate } from '@/game/deck'
+import { createDeck, dealStartingPlates, type DealtPlate } from '@/game/deck'
 import {
   canConfirmDraft,
   completedStrategies,
@@ -40,8 +40,16 @@ import {
   type DraftItem,
 } from '@/game/draft'
 import { hexRectangle } from '@/game/hex'
+import {
+  canConfirmPayment,
+  paymentCost,
+  paymentStates as paymentStatesOf,
+  togglePayment,
+  type Payer,
+  type PaymentTarget,
+} from '@/game/payment'
 import { platesToReveal, pushLot, shouldRefill } from '@/game/source'
-import { createTableau } from '@/game/tableau'
+import { createTableau, type PlateLocation, type TileLocation } from '@/game/tableau'
 import {
   FIRST_TURN,
   IDLE,
@@ -71,6 +79,7 @@ import {
 import { createDrawerLayout } from '@/scene/drawerLayout'
 import {
   DEFAULT_PLATES_PER_ROUND,
+  DEFAULT_STEM_COUNT,
   modeInfo,
   roundsOf,
   type GameSettings,
@@ -106,6 +115,9 @@ onMounted(() => {
 const cells = hexRectangle(BOARD_HALF_COLS, BOARD_HALF_ROWS)
 const DRAWER_SLOTS = DRAWER_COLS * DRAWER_ROWS
 
+/** Where the player's tableau starts. The board is a rectangle centred here. */
+const BOARD_CENTRE = { q: 0, r: 0 } as const
+
 /**
  * One source slot per plate the round deals.
  *
@@ -130,7 +142,21 @@ const tableau = createTableau({
  * that resets with the board. A restock draws one plate and a full heap of tiles off the top of each.
  */
 const deck = createDeck(gameId.value)
-const plateBag = createBag(deck.plates)
+
+/**
+ * Each player's opening plate comes out of the bag before anything else.
+ *
+ * The dealer reads the shuffled bag in draw order and takes the first value-1 plate for the first
+ * player, the next for the second, and so on (game/deck.ts). They are **removed**, so they can never
+ * appear in the shared source — they are already on a board.
+ *
+ * One player for now. The seat count is capped at six by arithmetic rather than by policy: there is one
+ * plate per (colour, value) pair, so exactly six carry value 1.
+ */
+const PLAYERS = 1
+const opening = dealStartingPlates(deck.plates, PLAYERS)
+
+const plateBag = createBag(opening.remaining)
 const tileBag = createBag(deck.tiles)
 
 /** Plates dealt into the source this round. The round is over as a supply once this reaches its quota. */
@@ -165,12 +191,39 @@ function dealLot(): boolean {
 }
 
 /**
- * The opening deal: one lot in the source, and an empty drawer.
+ * The opening position: one plate at the centre of the board, the player's stems in the drawer, and one
+ * lot in the source.
  *
- * **The drawer starts empty on purpose.** A turn is either draft-from-source or place-from-drawer, so
- * with nothing in the drawer the only legal first move is a draft — the rule expressed as a starting
- * position rather than as a check.
+ * **The starting plate goes straight to the board.** It is where the player's tableau grows from — every
+ * later plate has to connect to it, and every drafted tile needs an empty petal to sit in, so without it
+ * the board is unplayable and *Put* has nowhere to go.
+ *
+ * **Stems take ordinary tile slots**, so they are a cost as well as a gift: three stems is three fewer
+ * places to put a drafted tile until they are spent. `freeDrawerSlots` counts them as taken without
+ * knowing what they are, so the drawer's capacity rules need no special case.
+ *
+ * Everything here happens once, before the first turn.
  */
+{
+  const start = opening.starting[0]
+  const centre = tableau.addPlate({ kind: 'board', hole: BOARD_CENTRE })
+  if (start && centre) {
+    // `fixed`: the plate's own tile, part of the plate and never separable from it.
+    tableau.addTile(
+      { color: start.color, value: start.value },
+      { kind: 'onPlate', plateId: centre.id, petal: start.petal },
+      { fixed: true },
+    )
+  }
+
+  const stems = settings.value?.initialStems ?? DEFAULT_STEM_COUNT
+  for (let i = 0; i < stems; i++) {
+    const slot = tableau.freeDrawerSlots()[0]
+    if (slot === undefined) break
+    tableau.addStem(slot)
+  }
+}
+
 dealLot()
 
 const targetCells = shallowRef<Axial[]>([])
@@ -318,6 +371,10 @@ function chooseAction(action: TurnAction): void {
 
 /** Back to the action list, with any part-built selection discarded. */
 function cancelAction(): void {
+  if (phase.value.kind === 'paying') {
+    cancelPayment()
+    return
+  }
   phase.value = IDLE
 }
 
@@ -396,9 +453,122 @@ function confirmTake(): void {
   endTurn()
 }
 
-/** A `put` turn is spent the moment something reaches the board. */
-function onPlaced(): void {
-  if (phase.value.kind === 'putting') endTurn()
+/**
+ * Something reached the board: the placement is made, but not yet bought.
+ *
+ * The item stays where it landed so the player can see what they are paying for, and `origin` is kept
+ * so Cancel can put it back exactly. The turn does not end here — it ends when the price is paid.
+ */
+function onPlaced(
+  item: { kind: 'tile' | 'plate', id: string },
+  origin: TileLocation | PlateLocation,
+): void {
+  if (phase.value.kind !== 'putting') return
+  phase.value = { kind: 'paying', item, origin, selected: [] }
+}
+
+/* ── paying for a placement ───────────────────────────────────────────────────── */
+
+/** What is being placed, described by colour and value — a plate by its own token. */
+const payTarget = computed<PaymentTarget | null>(() => {
+  void revision.value
+  const p = phase.value
+  if (p.kind !== 'paying') return null
+  const spec = p.item.kind === 'tile' ? tableau.tile(p.item.id) : tableau.plateToken(p.item.id)
+  return spec ? { color: spec.color, value: spec.value } : null
+})
+
+/**
+ * Everything in the drawer that could pay: loose tiles, plates in bays, and stems.
+ *
+ * A plate offers itself rather than its token, because spending it spends the whole plate — the same
+ * reason a plate drafts as one object.
+ */
+const purse = computed<Payer[]>(() => {
+  void revision.value
+  const out: Payer[] = tableau.tiles()
+    .filter(tile => tile.location.kind === 'drawer')
+    .map(tile => ({ id: tile.id, kind: 'tile' as const, color: tile.color, value: tile.value }))
+
+  for (const plate of tableau.plates()) {
+    if (plate.location.kind !== 'plateSlot') continue
+    const token = tableau.plateToken(plate.id)
+    if (token) out.push({ id: plate.id, kind: 'plate', color: token.color, value: token.value })
+  }
+  for (const stem of tableau.stems()) out.push({ id: stem.id, kind: 'stem' })
+  return out
+})
+
+const paySelected = computed(() => phase.value.kind === 'paying' ? phase.value.selected : [])
+
+/** Null unless paying, which is what tells the scene to stop marking the drawer. */
+const payStates = computed(() => {
+  const target = payTarget.value
+  return target ? paymentStatesOf(target, purse.value, paySelected.value) : null
+})
+
+const payCost = computed(() => payTarget.value ? paymentCost(payTarget.value) : 0)
+
+const canApply = computed(() => {
+  const target = payTarget.value
+  return target !== null && canConfirmPayment(target, purse.value, paySelected.value)
+})
+
+/** The payers picked so far, for the bar to show. Stems have no face, so they show as such. */
+const paySelection = computed(() => {
+  const byId = new Map(purse.value.map(payer => [payer.id, payer]))
+  return paySelected.value.flatMap(id => {
+    const payer = byId.get(id)
+    if (!payer) return []
+    return [{
+      color: payer.color ?? 0,
+      value: payer.value ?? 0,
+      plate: payer.kind === 'plate',
+      stem: payer.kind === 'stem',
+    }]
+  })
+})
+
+function onSelectPayment(id: string): void {
+  const current = phase.value
+  const target = payTarget.value
+  if (current.kind !== 'paying' || !target) return
+  phase.value = {
+    ...current,
+    selected: togglePayment(target, purse.value, current.selected, id),
+  }
+}
+
+/**
+ * Pay up and end the turn.
+ *
+ * Spent items are **destroyed**, not moved: they leave the game rather than going anywhere, which is
+ * what discarding means. Plates and stems go with the tiles.
+ */
+function applyPayment(): void {
+  const current = phase.value
+  if (current.kind !== 'paying' || !canApply.value) return
+  for (const id of current.selected) tableau.discard(id)
+  revision.value++
+  endTurn()
+}
+
+/**
+ * Undo the placement entirely.
+ *
+ * The item goes back exactly where it came from and nothing is spent, so an abandoned placement costs
+ * the player nothing — including their turn, since `endTurn` is not called.
+ */
+function cancelPayment(): void {
+  const current = phase.value
+  if (current.kind !== 'paying') return
+  if (current.item.kind === 'tile') {
+    tableau.moveTile(current.item.id, current.origin as TileLocation)
+  } else {
+    tableau.movePlate(current.item.id, current.origin as PlateLocation)
+  }
+  revision.value++
+  phase.value = IDLE
 }
 
 function onTarget(cells: Axial[], valid: boolean): void {
@@ -510,7 +680,9 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :game-id="gameId"
         :draggable="phase.kind === 'putting'"
         :draft-states="draftStates"
+        :pay-states="payStates"
         :revision="revision"
+        @select-payment="onSelectPayment"
         @select-tile="onSelectTile"
         @placed="onPlaced"
         @target="onTarget"
@@ -585,6 +757,9 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       :selection="selection"
       :can-confirm="canConfirm"
       :fits="fits"
+      :pay-cost="payCost"
+      :pay-selection="paySelection"
+      :can-apply="canApply"
       :attribute="draftAttr"
       :completed="completed"
       :anchor-x="drawerLayout.left + drawerLayout.width / 2"
@@ -592,6 +767,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       :turn-label="turnLabel"
       @choose="chooseAction"
       @confirm="confirmTake"
+      @apply="applyPayment"
       @cancel="cancelAction"
     />
 

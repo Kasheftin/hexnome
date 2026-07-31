@@ -118,6 +118,36 @@ Two consequences worth knowing before you look at the screen and think something
 `plateGrid.ts` owns both directions of this mapping and is the first thing to unit-test — an error
 here is invisible in the data and glaringly wrong on screen.
 
+### Stems
+
+`Stem` in `tableau.ts` is deliberately **not** a `Tile`. A stem has no colour and no symbol, so making it
+a tile with null fields would push those questions into every piece of code that handles tiles —
+drafting, scoring, matching. It shares only what it genuinely shares: a drawer slot.
+
+Occupancy for both runs through the **same index**, keyed on the tile location, so a slot can never hold
+two things and `freeDrawerSlots` counts stems as taken without knowing what they are. The drawer capacity
+rules therefore need no special case at all.
+
+`moveStem` takes a slot number rather than a location, which makes "stem onto the board" *unrepresentable*
+rather than merely rejected. A stem is never draggable, so `pick` refuses it — while still treating it as
+**opaque**, so a press on a stem does not fall through to whatever is behind it. Its one move is being
+spent as payment, which is a click rather than a drag.
+
+The coin is `scene/stemVisual.ts`: a real `CylinderGeometry`, not a disc, for the same reason tiles are
+prisms — under a top-down camera the rim is the only surface whose normals sweep through a range, so it
+is the only part that can catch a highlight. Its texture loads lazily and patches coins made before the
+load lands, because stems are dealt during setup and would otherwise stay blank for the whole game.
+
+### One tableau per player, one shared source
+
+Each player owns a board and a drawer; the shared source is the only object between them. `tableau.ts`
+currently holds all three, which is correct for one seat and will need splitting at two: the source
+belongs to the game, the board and drawer belong to a player.
+
+Worth knowing before that split: `Tableau` already keys the source separately (`PlateLocation.source`,
+`TileLocation.source`) and `game/source.ts` only ever touches source locations, so the seam is roughly
+where it needs to be already.
+
 ### Seeded bags
 
 `game/random.ts` holds the primitives — `cyrb128` → `sfc32` → descending Fisher-Yates — and
@@ -129,6 +159,11 @@ page loaded.
 ```
 createDeck(gameId) → { plates: DealtPlate[36], tiles: TileSpec[108] }
 ```
+
+`dealStartingPlates` then pulls each player's opening plate out of the bag — the first value-1 plate in
+draw order for the first player, and so on — before the source sees any of it. Removed rather than
+copied, so a plate on someone's board can never also turn up in the source. That caps a game at **six
+players**, by arithmetic: one plate per (colour, value) pair means exactly six carry value 1.
 
 Three things this buys, in order of when they matter:
 
@@ -613,9 +648,9 @@ owns layout; the renderer follows.
 
 ### Turns and drafting
 
-`game/turn.ts` holds the phase (`idle` / `taking` / `putting`) and which actions are open;
-`game/draft.ts` holds the draft rule. Both pure, both unit-tested — the rule is where the bugs that
-matter live, and it is entirely testable without a canvas.
+`game/turn.ts` holds the phase (`idle` / `taking` / `putting` / `paying`) and which actions are open;
+`game/draft.ts` holds the draft rule and `game/payment.ts` the payment rule. All pure, all unit-tested
+— the rule is where the bugs that matter live, and it is entirely testable without a canvas.
 
 `GameView` owns the phase because it governs both the scene and the DOM bar; `ui/ActionBar.vue` renders
 it. `TableauView` receives a `draggable` flag and a `draftStates` map and reports clicks back. It never
@@ -639,6 +674,33 @@ pinned at 1 until the round structure exists.
 **Only a board placement ends a `putting` turn.** Reordering the drawer is not spending your turn, so
 `TableauView` emits `placed` only when the destination is the board — for a tile, that means the plate
 it landed on is itself on the board.
+
+### Placing is two steps, because it has a price
+
+A placement moves the item to the board *first* and charges for it *second* (`putting` → `paying`).
+The alternative — collect the payment, then move — would have the player buying something they cannot
+yet see, on a board where "which petal" is most of the decision.
+
+That only works because the move is genuinely undoable, which is what the `paying` phase's `origin`
+field is for: it records where the item came from, so Cancel restores it exactly and the turn does not
+advance. Without `origin` the provisional placement would be provisional in name only.
+
+Three consequences worth stating, since each was a bug before it was a rule:
+
+- **Dragging is off while paying.** `draggable` is true only in `putting`. The drawer is still live in
+  `paying`, but for a different gesture — clicking to pick payers, routed through `pickDrawerItem()`.
+- **Confirm requires the price *exactly*.** Not "at least": the surplus would be destroyed silently.
+- **Spent items are destroyed, not moved.** `tableau.discard(id)` removes them outright. There is no
+  discard pile, and inventing a location for one would put a place in the model the rules do not have.
+  `discard` takes an id of any kind so a caller settling a mixed payment need not sort tiles from
+  plates from stems first.
+
+**Everything spendable must be a raycast root, and everything destroyable must be swept.** Payment is
+the first feature that both *clicks* stems and *destroys* objects, and it broke on each. Stems were
+missing from `castTo()`'s root list, which does not merely make them unclickable — an object that is
+not a root is invisible to every pick, so presses fell straight through the coin. And `reconcileViews`
+swept orphaned tiles and plates but not stems, so a spent stem stayed on the table, still wearing its
+selection ring, long after the model had forgotten it. Both lists have to cover all three kinds.
 
 **Draft states are drawn as overlays, not by restyling the tile.** Tiles share one material per palette
 colour, so dimming one would dim every tile of that colour everywhere. The alternative — a material
@@ -970,6 +1032,6 @@ throughout. Prettier. Vue SFCs are `PascalCase.vue`; plain modules are `camelCas
 
 ## Deliberately not in Stage 1
 
-Drafting, payment, scoring, jokers, stages, goals, Google SSO, the Nest.js backend, lobbies, online
-play, sound, and the tutorial. Stage 1 is a graphics vertical slice — see
-[tasklist.md](tasklist.md).
+Scoring, stages, goals, Google SSO, the Nest.js backend, lobbies, online play, sound, and the tutorial.
+Stage 1 is a graphics vertical slice — see [tasklist.md](tasklist.md). Drafting, payment and stems have
+since been built on top of it and are no longer on this list.

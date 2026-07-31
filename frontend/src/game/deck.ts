@@ -113,3 +113,56 @@ export function createDeck(gameId: string, options: DeckOptions = {}): Deck {
 
   return { plates, tiles }
 }
+
+/**
+ * The value every player's starting plate carries.
+ *
+ * One is the smallest symbol, so everyone opens from the same modest footing — the interesting
+ * decisions should come from what gets drafted, not from an unequal hand.
+ */
+export const STARTING_PLATE_VALUE = 1
+
+/**
+ * The most players a game can seat: **six**.
+ *
+ * Not a policy, an arithmetic fact. Every player is dealt a distinct value-1 plate, the bag holds one
+ * plate per (colour, value) pair, and there are six colours — so there are exactly six value-1 plates
+ * in existence. A seventh player would have nothing to open with.
+ */
+export const MAX_PLAYERS = TILE_COLOR_COUNT
+
+export interface StartingDeal {
+  /** One plate per player, in seating order. Shorter than asked only if the bag ran out. */
+  readonly starting: DealtPlate[]
+  /** What is left for the shared source, in unchanged draw order. */
+  readonly remaining: DealtPlate[]
+}
+
+/**
+ * Pull each player's opening plate out of the bag before play begins.
+ *
+ * The dealer reads the shuffled bag in **draw order** and takes the first value-1 plate for the first
+ * player, the next for the second, and so on. Order matters and is not incidental: the bag's order is
+ * derived from the game id, so which player opens with which colour is settled by the id too, the same
+ * way everything else about the deal is.
+ *
+ * The plates are **removed**, not copied — they are in a player's drawer, so they can never turn up in
+ * the shared source. Everything else keeps its relative order, so the source is dealt exactly as it
+ * would have been minus those plates.
+ *
+ * Happens once, at the start of the game.
+ */
+export function dealStartingPlates(
+  plates: readonly DealtPlate[],
+  players: number,
+): StartingDeal {
+  const wanted = Math.max(0, Math.min(Math.floor(players), MAX_PLAYERS))
+  const starting: DealtPlate[] = []
+  const remaining: DealtPlate[] = []
+
+  for (const plate of plates) {
+    if (starting.length < wanted && plate.value === STARTING_PLATE_VALUE) starting.push(plate)
+    else remaining.push(plate)
+  }
+  return { starting, remaining }
+}

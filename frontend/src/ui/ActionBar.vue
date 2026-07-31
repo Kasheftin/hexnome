@@ -26,6 +26,11 @@ const props = defineProps<{
   options: TurnOptions
   /** Items picked so far, in click order. A plate shows its own token. */
   selection: readonly { color: number, value: number, plate: boolean }[]
+  /** What the placement costs, and what has been put towards it. */
+  payCost: number
+  paySelection: readonly { color: number, value: number, plate: boolean, stem: boolean }[]
+  /** True when the payment is exactly right. */
+  canApply: boolean
   /** True when the selection is a complete, legal draft *and* it fits the drawer. */
   canConfirm: boolean
   /** Whether the drawer has room for the selection. False is what "out of space" reports. */
@@ -43,6 +48,7 @@ const props = defineProps<{
 defineEmits<{
   choose: [action: 'take' | 'put' | 'pass']
   confirm: []
+  apply: []
   cancel: []
 }>()
 
@@ -65,6 +71,19 @@ function symbolOf(spec: { value: number }): string {
  * contradicting itself — the player would read the selection as done and the button as broken — so an
  * unfinished sweep says so.
  */
+/**
+ * What the placement still owes.
+ *
+ * A free placement says so outright rather than showing "0 of 0", which reads as a broken counter. The
+ * running count matters more than the total once picking starts, so it leads with what is left.
+ */
+const paySummary = computed(() => {
+  if (props.payCost === 0) return 'free — nothing to pay'
+  const left = props.payCost - props.paySelection.length
+  if (left > 0) return `spend ${left} more of ${props.payCost}`
+  return props.canApply ? 'paid' : 'that will not do'
+})
+
 const draftSummary = computed(() => {
   const first = props.selection[0]
   if (!first) return 'pick a tile'
@@ -175,12 +194,55 @@ const draftSummary = computed(() => {
     </template>
 
     <!-- Placing -->
-    <template v-else>
+    <template v-else-if="phase.kind === 'putting'">
       <div class="doing">
         <span class="verb">Put</span>
-        <span class="hint">drag one item onto the board</span>
+        <span class="hint">drag a plate or tile onto the board</span>
       </div>
       <div class="actions">
+        <button
+          type="button"
+          class="action quiet"
+          @click="$emit('cancel')"
+        >
+          Cancel
+        </button>
+      </div>
+    </template>
+
+    <!-- Paying -->
+    <template v-else>
+      <div class="doing">
+        <span class="verb">Pay</span>
+        <span
+          v-if="paySelection.length"
+          class="chips"
+        >
+          <span
+            v-for="(spec, i) in paySelection"
+            :key="i"
+            class="chip"
+            :class="{ 'chip-plate': spec.plate, 'chip-stem': spec.stem }"
+            :style="spec.stem ? undefined : { background: colorOf(spec) }"
+          >
+            <img
+              v-if="!spec.stem"
+              :src="symbolOf(spec)"
+              alt=""
+            >
+          </span>
+        </span>
+        <span class="hint">{{ paySummary }}</span>
+      </div>
+      <div class="actions">
+        <button
+          type="button"
+          class="action"
+          :disabled="!canApply"
+          @click="$emit('apply')"
+        >
+          Apply
+        </button>
         <button
           type="button"
           class="action quiet"
@@ -305,6 +367,16 @@ const draftSummary = computed(() => {
 .chip-plate {
   outline: 2px solid #b99b58;
   outline-offset: 1px;
+}
+
+/*
+ * A stem has no colour and no symbol, so its chip is a plain gold disc — round, like the coin it
+ * stands for, against the hexagons of everything else.
+ */
+.chip-stem {
+  clip-path: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #d8b25e, #7a6a3c);
 }
 
 :is(.action):focus-visible {

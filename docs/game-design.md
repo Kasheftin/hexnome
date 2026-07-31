@@ -48,10 +48,8 @@ hexagonal, so it needs the inner ring to stay distinguishable.
 - A **pointy-top hexagonal grid**, addressed with axial coordinates.
 - Practically bounded but treated as effectively endless: up to ~100–200 cells in each direction.
   The camera **pans and zooms** across it.
-- The game **starts with one plate already placed at the center**, holding a single value-1 tile.
-  **Not implemented yet, and it matters:** a tile may only go into a petal of a placed plate, so with an
-  empty board a drafted tile has nowhere legal to go. Choosing *Put* with only tiles in the drawer is
-  currently a dead end you can only cancel out of. Dealing this centre plate is what unblocks it.
+- The game **starts with one plate already placed at the center**, holding a single value-1 tile —
+  see [The opening plate](#the-opening-plate).
 - Only placed plates and tiles are "real". A faint empty **honeycomb grid** is drawn behind them for
   orientation — the Opus Magnum look.
 
@@ -94,6 +92,61 @@ There are two kinds of objects: **tiles** and **plates**.
 > cells too hemmed in for any flower to cover them, which can therefore never hold a tile. Snapping to
 > the sublattice makes the board tessellate perfectly and no cell is ever stranded. See
 > [Open questions](#open-questions).
+
+## What each player owns
+
+This is a **puzzle game played beside other people**, not against them. Each player has their **own
+board** and their **own drawer**, and neither can be touched by anyone else. Nothing you place, hold or
+score is reachable by another player.
+
+The **shared source is the only common object**, and therefore the only place interaction happens: you
+can take the tiles someone else was building towards. Once an item is in your drawer it is yours, and
+from there the game is solitaire.
+
+That is worth being explicit about because it decides the shape of the state: **one tableau per player**
+(board + drawer), plus **one shared source** between them. `src/game/tableau.ts` currently models a
+single player's board and drawer *and* the source together, which is right for singleplayer and will
+need splitting when a second seat arrives.
+
+### The opening plate
+
+Before the first turn, the dealer reads the shuffled plate bag in **draw order** and takes the first
+**value-1** plate for the first player, the next for the second, and so on. Each is placed at the
+**centre of that player's board**, holding its own tile.
+
+- Every player therefore opens from the same modest footing — a value-1 plate — with the colour decided
+  by the game's id, like the rest of the deal.
+- Those plates are **removed from the bag**. They are on a board, so they can never appear in the shared
+  source.
+- **At most six players.** Not a policy, arithmetic: there is one plate per (colour, value) pair, so
+  exactly six carry value 1. A seventh player would have nothing to open with.
+
+It happens **once**, at the start of the game — not once per round.
+
+The centre plate is what makes the board playable at all: a plate must connect to an existing plate, and
+a tile may only go into an empty petal of a placed plate. Without it there is nowhere to put anything.
+
+## Stems (the jokers)
+
+**Stems** — stem cells — are the game's wild card, and they behave unlike anything else on the table.
+
+- They live **only in the player's drawer**, and they occupy an ordinary **tile slot**. That makes them a
+  cost as well as a gift: a stem is one fewer place to put a drafted tile until it is spent.
+- They **can never reach the board**. There is no move that puts a stem on a plate.
+- They are **spent as wild payment** when placing: a stem counts as one item toward the price, matches
+  neither colour nor value because it has neither, and any number may go into one payment. See
+  [Payment](#payment-azul-style).
+- Each player is dealt **`initialStems`** of them at the start of the game — a setting, 1–4, default 3.
+  Once per game, before the first turn.
+- Where else stems come from is undecided; they are described as bonuses.
+
+A stem is deliberately **not a tile**. It has no colour and no symbol, so it cannot be drafted, matched
+or scored, and it never appears in the shared source. It shares exactly one thing with a tile — the slot
+it stands in.
+
+Visually it is a **coin**: a round token among hexagons. Everything else on the table tessellates with
+everything else; a stem never joins the board, so being round says it plays by different rules before a
+player has read anything.
 
 ## Shared source (common space)
 
@@ -268,20 +321,48 @@ not.
 The **drawer starts empty**, so the first turn can only be a draft. That is a starting position
 rather than a rule to check — there is simply nothing to place yet.
 
-> Two things about this are unsettled and worth not losing. Whether **pass** is always available or
-> only when you cannot act is undecided; and it is not yet clear whether the **payment** requirement
-> above survives, since the action list as most recently described does not mention it. See
-> [Open questions](#open-questions).
+> One thing about this is unsettled and worth not losing: whether **pass** is always available or only
+> when you cannot act. See [Open questions](#open-questions).
 
 ## Payment (Azul-style)
 
-- Placing an item of value/level **L** costs **(L − 1)**: value-1 is **free**, value-2 costs 1, …,
-  value-6 costs 5.
-- You **pay by discarding tiles from your drawer** that share the placed item's **color** *or* its
-  **value**.
+Placing costs. The price is paid out of **your own drawer**, which is the only payment source — no
+other player's drawer, and nothing on the board.
 
-> Open: whether plates may be spent as payment, and whether the drawer is the only payment source.
-> See [Open questions](#open-questions).
+- Placing an item of value/level **L** costs **(L − 1)** items: value-1 is **free**, value-2 costs 1,
+  …, value-6 costs 5. Note the count is **L − 1**, not L: a blue-3 costs **two** objects.
+- Every payer must share the placed item's **color**, *or* every payer must share its **value** — the
+  same one-attribute rule a draft follows, but anchored on the item being placed rather than
+  discovered from the selection.
+- **No two equal items anywhere in the transaction**, spanning what is placed *and* what pays for it.
+  So a blue-3 cannot be paid for with another blue-3, and two yellow-3s cannot pay together.
+- **Plates may be spent**, and a plate pays as its **own token** — exactly as it drafts as its own
+  token. Spending a plate spends the whole plate.
+- **Stems are wild**: any number of them, no matching required, and they are exempt from the
+  equal-items rule, having no colour or value to be equal by.
+- Spent items are **destroyed**. There is no discard pile to reclaim them from.
+
+Worked example — placing a **blue-3** costs two objects. A stem plus a blue-2 plate works (colour). A
+yellow-3 plus a red-3 works (value). Another blue-3, tile or plate, is barred outright.
+
+Because nothing can share *both* the placed item's colour and its value without being equal to it, the
+**first non-stem payer settles which attribute is in play**. There is no gradual narrowing here as
+there is in drafting.
+
+### The two-step flow
+
+A placement is one turn but **two** steps, because the player should see what they are buying before
+they buy it:
+
+1. Choose **Place**. The prompt reads "drag a plate or tile onto the board".
+2. Drag the item to a legal position. It **lands there** — the move is made, provisionally.
+3. The prompt changes to the price. Dragging is now off; instead every drawer item becomes
+   **selectable**, and the ones that cannot legally pay are dimmed.
+4. **Apply** is enabled only when the payment is *exactly* right — not merely sufficient, since
+   overpaying would silently destroy items the player wanted. A free (value-1) placement is
+   confirmable immediately, with nothing selected.
+5. **Cancel** undoes the placement entirely: the item returns to exactly where it came from, nothing
+   is spent, and the turn does **not** advance.
 
 ## Drawer
 
@@ -334,12 +415,12 @@ the common source and the turn order. Each player's board and drawer are private
 
 ## Open questions
 
-These are **deliberately unresolved**. Stage 1 is a graphics vertical slice
-([tasklist.md](tasklist.md)) and does not implement drafting, payment, or scoring, so none of these
-block current work. The rules module must leave room for them rather than answer them.
+These are **deliberately unresolved**. Drafting and payment are now implemented; scoring is not, so
+none of these block current work. The rules module must leave room for them rather than answer them.
 
-1. **Payment** — is the drawer the only source? Can plates be spent, or only tiles? Does the placed
-   item's own tile count toward anything?
+1. ~~**Payment** — is the drawer the only source? Can plates be spent, or only tiles?~~ **Resolved** —
+   see [Payment](#payment-azul-style). The drawer is the only source; plates may be spent and pay as
+   their own token. Still open: whether the placed item's own tile counts toward anything in scoring.
 2. **Value-group scoring** — exact formula, and whether a parallel "no duplicate color" restriction
    applies.
 3. **Rule enforcement** — is a no-duplicate violation an *illegal placement* (blocked by the UI) or a
@@ -352,7 +433,9 @@ block current work. The rules module must leave room for them rather than answer
    Only one lot is dealt so far.
 5. **Drawer cap** — is 16 a rule or only the mockup's layout?
 6. **Stages** — how many, and what resets between them.
-7. **Jokers** — what they do and how they are spent.
+7. ~~**Jokers** — what they do and how they are spent.~~ **Resolved** — they are
+   [stems](#stems-the-jokers), and they are spent as wild payment. See question 15 for how they are
+   earned, which is still open.
 8. **Bonuses and goals** — the mockup shows per-goal bonuses ("complete all goals before the
    opponent"), but the goal system itself is not designed yet.
 9. **Puzzles mode** — fixed *sequence* or fixed *pool*?
@@ -360,13 +443,17 @@ block current work. The rules module must leave room for them rather than answer
     `(3,-1)`, so the board tessellates and no cell is stranded), and must they touch an existing plate?
     Currently neither constraint is applied: any position with seven free cells is legal.
 11. **Pass** — always available, or only when no other action is legal? Currently unconditional.
+14. ~~**Spending a stem** — what does a stem buy when placing a tile?~~ **Resolved** — a stem is a wild
+    payer: it counts as one item toward the price, matches nothing, and is exempt from the equal-items
+    rule. Any number may be used in one payment. See [Payment](#payment-azul-style).
+15. **Earning stems** — beyond the opening allowance, how are they awarded? Still the only open part
+    of the stem design.
 12. **Drafting a face-down plate** — a plate's color and symbol are hidden in the source, so it cannot
     be matched against a draft criterion. Does drafting a color/symbol also sweep plates whose hidden
     tile matches (revealed on take)? Or are plates taken by a separate action? Currently plates are
     not draftable at all.
-13. **Does payment survive?** The action list as most recently described is draft / place / pass, with
-    no mention of payment — but the Payment section above still specifies it. One of the two is stale.
-    This is the same uncertainty as question 1 seen from the other side.
+13. ~~**Does payment survive?**~~ **Resolved — yes.** Placing costs (L − 1) items and is confirmed in a
+    second step; the action list is draft / place / pass, where *place* means place-and-pay.
 
 _Resolved since:_ **what a draft takes** — one attribute, every distinct tile carrying it, at most one
 copy of each; see [What a draft takes](#what-a-draft-takes). This settles the "or the same symbol, but

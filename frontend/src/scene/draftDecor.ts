@@ -1,4 +1,5 @@
 import {
+  CircleGeometry,
   DoubleSide,
   Mesh,
   MeshBasicMaterial,
@@ -13,6 +14,8 @@ import {
   HIGHLIGHT_COLORS,
   PLATE_BASE_MARGIN,
   PLATE_BASE_THICKNESS,
+  STEM_RADIUS,
+  STEM_THICKNESS,
   TILE_SIZE,
   TILE_THICKNESS,
 } from './constants'
@@ -261,4 +264,57 @@ export function attachPlateDraftDecor(plate: Mesh | { add(o: Mesh): unknown }): 
 export function disposePlateDraftDecorAssets(): void {
   plateDimGeometry.dispose()
   plateRingGeometry.dispose()
+}
+
+
+/* ── the same three states, for a stem coin ───────────────────────────────────── */
+
+/**
+ * Round decor for a round object.
+ *
+ * A hexagonal overlay on a coin would leave its corners hanging over the slot and clip the coin's own
+ * edge — and the whole point of drawing a stem as a coin is that it is visibly not a hexagon. The
+ * marker has to agree with the shape it marks.
+ */
+const coinDimGeometry: BufferGeometry = flatten(new CircleGeometry(STEM_RADIUS * 1.04, 32))
+const coinRingGeometry: BufferGeometry = flatten(
+  new RingGeometry(STEM_RADIUS * 1.0, STEM_RADIUS * 1.22, 32),
+)
+
+/** Above the coin's face and the emblem plane that sits on it. */
+const COIN_DECOR_Y = STEM_THICKNESS / 2 + DECOR_CLEARANCE
+
+export function attachCoinDraftDecor(coin: Mesh): DraftDecor {
+  const dim = new Mesh(coinDimGeometry, new MeshBasicMaterial({
+    color: '#05070a',
+    transparent: true,
+    opacity: 0.62,
+    side: DoubleSide,
+    depthWrite: false,
+  }))
+  dim.position.y = COIN_DECOR_Y
+  dim.renderOrder = 6
+  dim.visible = false
+  coin.add(unpickable(dim))
+
+  const ring = new Mesh(coinRingGeometry, new MeshBasicMaterial({
+    color: HIGHLIGHT_COLORS.valid,
+    transparent: true,
+    opacity: 0.95,
+    side: DoubleSide,
+    depthWrite: false,
+    depthTest: false,
+  }))
+  ring.position.y = COIN_DECOR_Y
+  ring.renderOrder = 30
+  ring.visible = false
+  coin.add(unpickable(ring))
+
+  return { dim, ring }
+}
+
+/** Shared coin geometry — call once, when no stems remain. */
+export function disposeCoinDraftDecorAssets(): void {
+  coinDimGeometry.dispose()
+  coinRingGeometry.dispose()
 }

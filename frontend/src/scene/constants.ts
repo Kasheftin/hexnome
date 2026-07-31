@@ -92,6 +92,47 @@ export const TILE_BEVEL = 0.15
  */
 export const TILE_ENV_INTENSITY = 1
 
+/* ── Stems (the jokers) ──────────────────────────────────────────────────────── */
+
+/**
+ * A stem is a **coin**, not a tile: a low cylinder rather than a hexagonal prism.
+ *
+ * The shape is the whole tell. Everything else on the table is a hexagon that tessellates with
+ * everything else; a stem never joins the board, so making it round says at a glance that it plays by
+ * different rules — before a player has read anything.
+ *
+ * It occupies a tile slot, so it is sized against the tile it displaces rather than against the slot.
+ */
+export const STEM_RADIUS = TILE_SIZE * 0.72
+export const STEM_THICKNESS = TILE_THICKNESS * 0.85
+/** Round enough that no facet is visible at the sizes a coin is drawn. */
+export const STEM_SEGMENTS = 48
+
+/**
+ * The emblem's size on the coin face, in **coin radii**.
+ *
+ * `createSymbolPlane` fits an image by its bounding-box *diagonal*, so for the square stem art the
+ * emblem spans `scale / √2` of the coin's diameter. Two numbers worth knowing while tuning:
+ *
+ * - `1.41` (≈ √2) fills the coin exactly, edge to edge, hiding the metal entirely.
+ * - `1.30` leaves a thin ring of rim showing, which is the default.
+ *
+ * Below about 1.0 the coin reads as mostly bare metal with a small badge on it.
+ */
+export const STEM_SYMBOL_SCALE = 1.3
+
+/**
+ * Nudge the emblem across the coin face, in fractions of `STEM_RADIUS`. Positive is **up the screen**.
+ *
+ * Same convention as `SYMBOL_OFFSET_UP` for tiles, and flipped to world −Z in the same one place — see
+ * `createSymbolPlane`. Here because the art is provisional and its optical centre may not be its
+ * bounding-box centre.
+ */
+export const STEM_SYMBOL_OFFSET_UP = 0
+
+/** Provisional art, from `external assets/joker.png` — see docs/art-spec.md. */
+export const STEM_TEXTURE_URL = '/textures/stem.png'
+
 /**
  * The six tile colours, in palette order — a tile's `color` is an index into this list.
  *

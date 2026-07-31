@@ -8,7 +8,12 @@
  * Choosing is a distinct step from doing, which is what the `idle` phase represents — nothing on the
  * table is interactive until an action is chosen, so a stray click cannot commit a move the player
  * never picked.
+ *
+ * Placing takes **two** steps rather than one — `putting` then `paying` — because a placement has a
+ * price. The item lands on the board first so the player can see what they are buying, and the turn
+ * only ends when the price is paid. Until then Cancel restores the board exactly.
  */
+import type { PlateLocation, TileLocation } from './tableau'
 
 export type TurnAction = 'take' | 'put' | 'pass'
 
@@ -17,8 +22,24 @@ export type TurnPhase =
   | { readonly kind: 'idle' }
   /** Drafting. The source is live; `selected` holds tile ids (see draft.ts). */
   | { readonly kind: 'taking', readonly selected: readonly string[] }
-  /** Placing. The drawer and board are live. */
+  /** Placing. The drawer and board are live, and a drag is what moves the item. */
   | { readonly kind: 'putting' }
+  /**
+   * Placed, and now settling up.
+   *
+   * The item is **already on the board** — the move happened, so it renders where it landed and the
+   * player can see what they are paying for. `origin` is what makes that safe: Cancel puts it back
+   * exactly where it came from, so a provisional placement is genuinely undoable rather than merely
+   * discouraged.
+   *
+   * Dragging is off in this phase. The drawer is live for a different purpose: picking what to spend.
+   */
+  | {
+      readonly kind: 'paying'
+      readonly item: { readonly kind: 'tile' | 'plate', readonly id: string }
+      readonly origin: TileLocation | PlateLocation
+      readonly selected: readonly string[]
+    }
 
 export const IDLE: TurnPhase = { kind: 'idle' }
 

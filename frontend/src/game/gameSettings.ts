@@ -47,12 +47,23 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
 
 export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6]
 export const DEFAULT_PLATES_PER_ROUND = 4
+
+/**
+ * Stems each player starts with — the jokers, dealt into the drawer before the first turn.
+ *
+ * They occupy ordinary tile slots, so this is also a handicap dial in disguise: every stem is one
+ * fewer slot for drafted tiles until it is spent.
+ */
+export const STEM_COUNT_CHOICES: readonly number[] = [1, 2, 3, 4]
+export const DEFAULT_STEM_COUNT = 3
 export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 
 export interface GameSettings {
   readonly kind: GameKind
   readonly mode: SingleplayerMode
   readonly platesPerRound: number
+  /** Stems each player is dealt at the start of the game. */
+  readonly initialStems: number
   /** Epoch milliseconds. Supplied by the caller so this module never reads the clock. */
   readonly createdAt: number
 }
@@ -77,11 +88,16 @@ export function isPlatesPerRound(value: unknown): boolean {
   return typeof value === 'number' && PLATES_PER_ROUND_CHOICES.includes(value)
 }
 
+export function isStemCount(value: unknown): boolean {
+  return typeof value === 'number' && STEM_COUNT_CHOICES.includes(value)
+}
+
 export function defaultGameSettings(createdAt: number): GameSettings {
   return {
     kind: 'singleplayer',
     mode: DEFAULT_SINGLEPLAYER_MODE,
     platesPerRound: DEFAULT_PLATES_PER_ROUND,
+    initialStems: DEFAULT_STEM_COUNT,
     createdAt,
   }
 }
@@ -91,8 +107,8 @@ export function defaultGameSettings(createdAt: number): GameSettings {
  *
  * Returns null rather than a patched-up default on a bad `kind` or `mode`: those name what the
  * game *is*, so quietly substituting one would drop a player into a different game from the one
- * they started. `platesPerRound` is different — it is a dial, so an out-of-range value falls
- * back to the default rather than discarding the whole game.
+ * they started. `platesPerRound` and `initialStems` are different — they are dials, so an
+ * out-of-range value falls back to the default rather than discarding the whole game.
  */
 export function parseGameSettings(value: unknown): GameSettings | null {
   if (typeof value !== 'object' || value === null) return null
@@ -107,6 +123,9 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     platesPerRound: isPlatesPerRound(raw.platesPerRound)
       ? (raw.platesPerRound as number)
       : DEFAULT_PLATES_PER_ROUND,
+    initialStems: isStemCount(raw.initialStems)
+      ? (raw.initialStems as number)
+      : DEFAULT_STEM_COUNT,
     createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt)
       ? raw.createdAt
       : 0,

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MAX_PLAYERS,
   STANDARD_TILE_COPIES,
+  STARTING_PLATE_VALUE,
+  dealStartingPlates,
   TILE_COLOR_COUNT,
   TILE_VALUE_COUNT,
   createDeck,
@@ -136,5 +139,55 @@ describe('the two bags are independent', () => {
     const { plates } = createDeck(ID_A)
     const { tiles } = createDeck(ID_A, { tileCopies: 1 })
     expect(tiles.map(key)).not.toEqual(plates.map(key))
+  })
+})
+
+describe('the opening plates', () => {
+  it('gives one player the first value-1 plate in draw order', () => {
+    const { plates } = createDeck(ID_A)
+    const { starting, remaining } = dealStartingPlates(plates, 1)
+
+    const firstOne = plates.find(p => p.value === STARTING_PLATE_VALUE)
+    expect(starting).toEqual([firstOne])
+    // Removed, so it can never reach the shared source.
+    expect(remaining).toHaveLength(plates.length - 1)
+    expect(remaining).not.toContain(firstOne)
+  })
+
+  it('deals them round in seating order, one each', () => {
+    const { plates } = createDeck(ID_A)
+    const { starting } = dealStartingPlates(plates, 4)
+    const ones = plates.filter(p => p.value === STARTING_PLATE_VALUE)
+
+    expect(starting).toEqual(ones.slice(0, 4))
+    // Every player opens on a value-1 plate, and no two share a colour — there is one per colour.
+    expect(starting.every(p => p.value === STARTING_PLATE_VALUE)).toBe(true)
+    expect(new Set(starting.map(p => p.color)).size).toBe(4)
+  })
+
+  it('leaves everything else in its original relative order', () => {
+    const { plates } = createDeck(ID_A)
+    const { starting, remaining } = dealStartingPlates(plates, 3)
+    const taken = new Set(starting)
+    expect(remaining).toEqual(plates.filter(p => !taken.has(p)))
+  })
+
+  it('seats at most six, because only six value-1 plates exist', () => {
+    const { plates } = createDeck(ID_A)
+    expect(plates.filter(p => p.value === STARTING_PLATE_VALUE)).toHaveLength(MAX_PLAYERS)
+    // Asking for more cannot conjure a seventh.
+    expect(dealStartingPlates(plates, 99).starting).toHaveLength(MAX_PLAYERS)
+  })
+
+  it('takes nothing for nobody', () => {
+    const { plates } = createDeck(ID_A)
+    expect(dealStartingPlates(plates, 0)).toEqual({ starting: [], remaining: [...plates] })
+  })
+
+  it('is decided by the game id, like the rest of the deal', () => {
+    const a = dealStartingPlates(createDeck(ID_A).plates, 2).starting
+    const b = dealStartingPlates(createDeck(ID_B).plates, 2).starting
+    expect(a).toEqual(dealStartingPlates(createDeck(ID_A).plates, 2).starting)
+    expect(a).not.toEqual(b)
   })
 })

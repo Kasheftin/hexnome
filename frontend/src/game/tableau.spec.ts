@@ -400,3 +400,100 @@ describe('the shared source', () => {
     expect(t.canPlaceTile({ kind: 'source', lot: 0, index: 0 })).toBe(false)
   })
 })
+
+describe('stems', () => {
+  it('take a drawer slot, and a tile cannot then use it', () => {
+    const t = tableau()
+    const stem = t.addStem(3)!
+    expect(stem.slot).toBe(3)
+    expect(t.stems()).toHaveLength(1)
+    // One occupancy index for both, so the slot cannot hold two things.
+    expect(t.canPlaceTile(inDrawer(3))).toBe(false)
+    expect(t.addTile(RED, inDrawer(3))).toBeUndefined()
+    expect(t.freeDrawerSlots()).not.toContain(3)
+  })
+
+  it('cannot take a slot a tile already holds', () => {
+    const t = tableau()
+    t.addTile(RED, inDrawer(0))
+    expect(t.addStem(0)).toBeUndefined()
+  })
+
+  it('refuses a slot that does not exist', () => {
+    const t = tableau()
+    expect(t.addStem(16)).toBeUndefined()
+    expect(t.addStem(-1)).toBeUndefined()
+  })
+
+  it('moves between drawer slots, freeing the one it left', () => {
+    const t = tableau()
+    const stem = t.addStem(3)!
+    expect(t.moveStem(stem.id, 7)).toBe(true)
+    expect(t.stems()[0]!.slot).toBe(7)
+    expect(t.canPlaceTile(inDrawer(3))).toBe(true)
+    expect(t.canPlaceTile(inDrawer(7))).toBe(false)
+  })
+
+  it('will not move onto an occupied slot', () => {
+    const t = tableau()
+    const stem = t.addStem(3)!
+    t.addTile(RED, inDrawer(4))
+    expect(t.moveStem(stem.id, 4)).toBe(false)
+    expect(t.stems()[0]!.slot).toBe(3)
+  })
+
+  it('has nowhere to go but a drawer slot', () => {
+    // The rule is in the signature: moveStem takes a slot number, so "stem onto the board" is not
+    // something a caller can even express.
+    const t = tableau()
+    const stem = t.addStem(0)!
+    expect(t.moveStem(stem.id, 99)).toBe(false)
+    expect(t.stems()[0]!.slot).toBe(0)
+  })
+
+  it('is not a tile, so drafting and scoring never see it', () => {
+    const t = tableau()
+    t.addStem(0)
+    expect(t.tiles()).toHaveLength(0)
+  })
+})
+
+describe('discarding', () => {
+  it('removes a drawer tile and frees its slot', () => {
+    const t = tableau()
+    const tile = t.addTile(RED, inDrawer(2))!
+    expect(t.discard(tile.id)).toBe(true)
+    expect(t.tiles()).toHaveLength(0)
+    expect(t.canPlaceTile(inDrawer(2))).toBe(true)
+  })
+
+  it('removes a stem and frees its slot', () => {
+    const t = tableau()
+    const stem = t.addStem(2)!
+    expect(t.discard(stem.id)).toBe(true)
+    expect(t.stems()).toHaveLength(0)
+    expect(t.canPlaceTile(inDrawer(2))).toBe(true)
+  })
+
+  it('takes a plate\'s tiles with it, since they are addressed against it', () => {
+    const t = tableau()
+    const p = t.addPlate(inPlateSlot(0))!
+    t.addTile(RED, onPetal(p.id, 0), { fixed: true })
+    t.addTile(BLUE, onPetal(p.id, 1))
+    expect(t.discard(p.id)).toBe(true)
+    expect(t.plates()).toHaveLength(0)
+    expect(t.tiles()).toHaveLength(0)
+    expect(t.freePlateSlots()).toEqual([0, 1])
+  })
+
+  it('frees the board cells a discarded plate covered', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    t.discard(p.id)
+    for (const cell of plateCells({ q: 0, r: 0 })) expect(t.coverageAt(cell)).toBeUndefined()
+  })
+
+  it('reports an unknown id rather than pretending', () => {
+    expect(tableau().discard('nope')).toBe(false)
+  })
+})

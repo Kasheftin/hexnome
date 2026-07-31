@@ -21,6 +21,8 @@ import {
   GAME_KINDS,
   PLATES_PER_ROUND_CHOICES,
   SINGLEPLAYER_MODES,
+  STEM_COUNT_CHOICES,
+  DEFAULT_STEM_COUNT,
   modeInfo,
   type GameKind,
   type SingleplayerMode,
@@ -36,6 +38,7 @@ const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
+const initialStems = ref<number>(DEFAULT_STEM_COUNT)
 
 /** The choices made so far, newest last. Empty on the title screen. */
 const trail = computed(() => {
@@ -69,6 +72,7 @@ function startGame(): void {
     kind: 'singleplayer',
     mode: mode.value,
     platesPerRound: platesPerRound.value,
+    initialStems: initialStems.value,
   })
   void router.push({ path: '/game', query: { id } })
 }
@@ -175,6 +179,23 @@ const selectedMode = computed(() => modeInfo(mode.value))
               :class="{ chosen: platesPerRound === count }"
               :aria-pressed="platesPerRound === count"
               @click="platesPerRound = count"
+            >
+              {{ count }}
+            </button>
+          </div>
+        </fieldset>
+
+        <fieldset class="group">
+          <legend>Stems</legend>
+          <div class="counts">
+            <button
+              v-for="count in STEM_COUNT_CHOICES"
+              :key="count"
+              type="button"
+              class="count"
+              :class="{ chosen: initialStems === count }"
+              :aria-pressed="initialStems === count"
+              @click="initialStems = count"
             >
               {{ count }}
             </button>

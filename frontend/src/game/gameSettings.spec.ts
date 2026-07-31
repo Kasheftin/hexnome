@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PLATES_PER_ROUND,
+  DEFAULT_STEM_COUNT,
   SINGLEPLAYER_MODES,
   createGameId,
   defaultGameSettings,
@@ -12,6 +13,7 @@ const valid = {
   kind: 'singleplayer',
   mode: 'classic',
   platesPerRound: 5,
+  initialStems: 2,
   createdAt: 1_700_000_000_000,
 }
 
@@ -43,6 +45,14 @@ describe('parsing settings that came back from storage', () => {
     }
   })
 
+  it('falls back rather than failing on a bad stem count', () => {
+    // A dial like platesPerRound, not an identity: worth repairing instead of discarding the game.
+    for (const bad of [0, 5, 2.5, -1, '3', null, undefined, NaN]) {
+      const parsed = parseGameSettings({ ...valid, initialStems: bad })
+      expect(parsed?.initialStems).toBe(DEFAULT_STEM_COUNT)
+    }
+  })
+
   it('tolerates a missing or nonsense timestamp', () => {
     expect(parseGameSettings({ ...valid, createdAt: undefined })?.createdAt).toBe(0)
     expect(parseGameSettings({ ...valid, createdAt: Infinity })?.createdAt).toBe(0)
@@ -65,6 +75,7 @@ describe('defaults', () => {
     const s = defaultGameSettings(123)
     expect(s.kind).toBe('singleplayer')
     expect(s.platesPerRound).toBe(DEFAULT_PLATES_PER_ROUND)
+    expect(s.initialStems).toBe(DEFAULT_STEM_COUNT)
     expect(s.createdAt).toBe(123)
     expect(parseGameSettings(s)).toEqual(s)
   })

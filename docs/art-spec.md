@@ -50,6 +50,22 @@ than anything in code.
 | 5 | 448×409 | +0.7% x, +0.2% y |
 | 6 | 400×448 | +0.1% x, +0.1% y |
 
+## Stem emblem
+
+**File:** `frontend/public/textures/stem.png`, 448×448 — from `external assets/joker.png`.
+
+The source is a 1024×1536 render on an **opaque** brown background, so it needed keying rather than a
+straight crop. A flood fill from the corners cleared 40% of it but left a halo: the vignette right around
+the emblem is too dark to fall inside any threshold that also spares the emblem's near-black outline.
+
+Since a stem is drawn on a **round** coin, the answer was a circular mask rather than a better key —
+centred on the emblem at (512, 752) with radius 380, supersampled and lightly blurred so the edge is not
+jagged, then cropped square and scaled to a 448 long edge like the value symbols. What vignette survives
+inside the circle reads as the coin's rim shadow.
+
+Provisional art. Size and position on the coin are tunable without touching it, via `STEM_SYMBOL_SCALE`
+and `STEM_SYMBOL_OFFSET_UP` in `scene/constants.ts`.
+
 ## Asset 0 — Plate socket art (in hand, **not used**)
 
 **File:** `frontend/public/textures/plate-full.png` — currently one tile, from

@@ -75,9 +75,11 @@ import {
   TILE_THICKNESS,
 } from './constants'
 import {
+  attachCoinDraftDecor,
   attachDraftDecor,
   attachPlateDraftDecor,
   disposeDraftDecor,
+  disposeCoinDraftDecorAssets,
   disposeDraftDecorAssets,
   disposePlateDraftDecorAssets,
   showDraftState,
@@ -88,6 +90,7 @@ import { createPlateBackVisual, disposePlateBackAssets } from './plateBackVisual
 import { createPlateVisual, disposePlateVisualAssets, petalOffset } from './plateVisual'
 import { boardToScreen, screenToBoard, unitsPerPixel } from './screenProjection'
 import { createHexPlateGeometry } from './hexPlateGeometry'
+import { createStemVisual, disposeStemAssets } from './stemVisual'
 import { createSymbolPlane } from './symbolPlane'
 import { createTileGeometry, hexApothemOf } from './tileGeometry'
 import { SOURCE_HEAP_SPAN, sourceScatter, type ScatterOffset } from './sourceScatter'
@@ -115,6 +118,14 @@ const props = defineProps<{
    */
   draftStates: ReadonlyMap<string, DraftTileState> | null
   /**
+   * Payment state per **drawer** item — tiles, plates in bays, and stems — or null when not paying.
+   *
+   * Separate from `draftStates` because they cover disjoint places: drafting marks the shared source,
+   * paying marks your own drawer. One map keyed by id would work but would hide that, and the two are
+   * live in different phases.
+   */
+  payStates: ReadonlyMap<string, DraftTileState> | null
+  /**
    * Bumped by the owner on every model mutation.
    *
    * The tableau is plain mutable data, not reactive, so this is how the view learns that plates or
@@ -132,8 +143,13 @@ const emit = defineEmits<{
   hoverPlateSlot: [slot: number | null]
   /** A source tile was clicked while drafting. The turn decides what that means. */
   selectTile: [id: string]
-  /** An item was placed on the board, which is what ends a `putting` turn. */
-  placed: []
+  /**
+   * An item reached the board. Carries where it came from, so the turn can put it back if the player
+   * cancels rather than pays.
+   */
+  placed: [item: { kind: 'tile' | 'plate', id: string }, origin: TileLocation | PlateLocation]
+  /** A drawer item was clicked while paying. */
+  selectPayment: [id: string]
   changed: []
 }>()
 
@@ -214,13 +230,28 @@ interface View {
 
 const plateViews = new Map<string, View>()
 const tileViews = new Map<string, View>()
+const stemViews = new Map<string, View>()
+/**
+ * What a picked object belongs to.
+ *
+ * A discriminated union rather than one shape with a union `kind`, so that ruling out `'stem'` actually
+ * narrows the type — with a single shape TypeScript narrows the *property* and leaves the object alone.
+ */
+type Owner =
+  | { readonly kind: 'tile', readonly id: string }
+  | { readonly kind: 'plate', readonly id: string }
+  | { readonly kind: 'stem', readonly id: string }
+
+/** Anything a drag can hold. Stems are excluded: they are inert. */
+type Draggable = Exclude<Owner, { kind: 'stem' }>
+
 /** Maps a picked object back to what it belongs to. */
-const owners = new Map<Object3D, { kind: 'tile' | 'plate', id: string }>()
+const owners = new Map<Object3D, Owner>()
 const unregisters: (() => void)[] = []
 const symbolTextures: Texture[] = []
 let disposed = false
 
-const held = shallowRef<{ kind: 'tile' | 'plate', id: string } | null>(null)
+const held = shallowRef<Draggable | null>(null)
 const pointer = { x: 0, y: 0 }
 /**
  * Where the held object's centre sits relative to the pointer, in screen pixels, fixed at
@@ -433,13 +464,21 @@ function pointerToCanvas(e: PointerEvent): { x: number, y: number } | null {
  * it exists the column is inert. Being transparent to picking is also what stops a press there from
  * silently starting a drag that could never be completed.
  */
+/**
+ * Everything the ray may hit, in one list.
+ *
+ * Stems belong here even though they can never be dragged: they are spent as payment, which is a
+ * click, and an object that is not a raycast root is invisible to *every* pick — so leaving them out
+ * would make them unspendable and, worse, transparent, letting a press pass through a coin to
+ * whatever sits behind it.
+ */
 function castTo(canvasX: number, canvasY: number): Object3D[] | null {
   const cam = activeCamera()
   const el = canvasEl()
   if (!cam || !el) return null
   ndc.set((canvasX / el.clientWidth) * 2 - 1, -(canvasY / el.clientHeight) * 2 + 1)
   raycaster.setFromCamera(ndc, cam)
-  return [...tileViews.values(), ...plateViews.values()].map(v => v.object)
+  return [...tileViews.values(), ...plateViews.values(), ...stemViews.values()].map(v => v.object)
 }
 
 /**
@@ -461,6 +500,8 @@ function pickSourceItem(canvasX: number, canvasY: number): string | null {
     while (node) {
       const owner = owners.get(node)
       if (owner) {
+        // A stem is never in the source, so it can never be drafted.
+        if (owner.kind === 'stem') return null
         if (owner.kind === 'plate') {
           // The slab of a revealed source plate. A face-down one is not draftable and absorbs the press.
           const plate = props.tableau.plate(owner.id)
@@ -479,18 +520,58 @@ function pickSourceItem(canvasX: number, canvasY: number): string | null {
   return null
 }
 
-function pick(canvasX: number, canvasY: number): { kind: 'tile' | 'plate', id: string } | null {
+/**
+ * The drawer item under the pointer — a tile in a slot, a plate in a bay, or a stem.
+ *
+ * Deliberately blind to everything else: the board and the source are not payment sources, so a click
+ * there during payment should do nothing rather than something surprising.
+ */
+function pickDrawerItem(canvasX: number, canvasY: number): string | null {
   const roots = castTo(canvasX, canvasY)
   if (!roots) return null
   for (const hit of raycaster.intersectObjects(roots, true)) {
     let node: Object3D | null = hit.object
     while (node) {
       const owner = owners.get(node)
-      const draggable = owner
-        && (owner.kind === 'tile'
+      if (owner) {
+        if (owner.kind === 'stem') return owner.id
+        if (owner.kind === 'plate') {
+          return props.tableau.plate(owner.id)?.location.kind === 'plateSlot' ? owner.id : null
+        }
+        const tile = props.tableau.tile(owner.id)
+        if (tile?.location.kind === 'drawer') return tile.id
+        // A plate's token in a bay answers for its plate, exactly as it does when drafting.
+        if (tile?.fixed && tile.location.kind === 'onPlate') {
+          const plate = props.tableau.plate(tile.location.plateId)
+          return plate?.location.kind === 'plateSlot' ? plate.id : null
+        }
+        return null
+      }
+      node = node.parent
+    }
+  }
+  return null
+}
+
+function pick(canvasX: number, canvasY: number): Draggable | null {
+  const roots = castTo(canvasX, canvasY)
+  if (!roots) return null
+  for (const hit of raycaster.intersectObjects(roots, true)) {
+    let node: Object3D | null = hit.object
+    while (node) {
+      const owner = owners.get(node)
+      if (owner) {
+        /*
+         * A stem is never draggable, and it is **opaque**: the walk stops here rather than climbing
+         * past. The only thing a stem does is get spent when placing a tile (undesigned), so there is
+         * no move to offer — but a press on one must not fall through to whatever is behind it either.
+         */
+        if (owner.kind === 'stem') return null
+        const draggable = owner.kind === 'tile'
           ? props.tableau.canDragTile(owner.id)
-          : props.tableau.canDragPlate(owner.id))
-      if (owner && draggable) return owner
+          : props.tableau.canDragPlate(owner.id)
+        if (draggable) return owner
+      }
       // An immovable tile is transparent to picking: keep climbing, and since it is
       // parented to its plate the very next owner found is that plate.
       node = node.parent
@@ -607,6 +688,13 @@ function onPointerDown(e: PointerEvent): void {
     }
   }
 
+  // Paying: a click on anything in the drawer picks it as payment. Nothing is dragged in this phase.
+  if (props.payStates) {
+    const payerId = pickDrawerItem(c.x, c.y)
+    if (payerId !== null) emit('selectPayment', payerId)
+    return
+  }
+
   // Outside the `putting` phase nothing is draggable — see the `draggable` prop.
   if (!props.draggable) return
 
@@ -650,13 +738,17 @@ function onWindowPointerUp(): void {
       ? targetTile?.kind === 'onPlate'
         && props.tableau.plate(targetTile.plateId)?.location.kind === 'board'
       : targetPlate?.kind === 'board'
+    // Captured before the move, because that is what Cancel has to restore.
+    const origin = current.kind === 'tile'
+      ? props.tableau.tile(current.id)?.location
+      : props.tableau.plate(current.id)?.location
     const moved = current.kind === 'tile'
       ? targetTile !== null && props.tableau.moveTile(current.id, targetTile)
       : targetPlate !== null && props.tableau.movePlate(current.id, targetPlate)
     if (moved) {
       emit('changed')
-      // Placing on the board is the whole of a `put` action; rearranging the drawer is not.
-      if (ontoBoard) emit('placed')
+      // Reaching the board opens the payment; rearranging the drawer does not.
+      if (ontoBoard && origin) emit('placed', current, origin)
     }
   }
 
@@ -749,8 +841,10 @@ onBeforeRender(({ delta }) => {
     const plate = props.tableau.plate(id)
     if (!plate) continue
 
-    // A plate is drafted as a whole object, so the marker covers the whole plate.
-    if (view.decor) showDraftState(view.decor, props.draftStates?.get(id) ?? 'active')
+    // A plate is drafted — and spent — as a whole object, so the marker covers the whole plate.
+    if (view.decor) {
+      showDraftState(view.decor, props.draftStates?.get(id) ?? props.payStates?.get(id) ?? 'active')
+    }
 
     if (current?.kind === 'plate' && current.id === id) {
       setRegime(view, 'held')
@@ -799,6 +893,24 @@ onBeforeRender(({ delta }) => {
     view.object.updateMatrixWorld()
   }
 
+  /*
+   * Stems sit in drawer slots exactly as tiles do, and at the same size — they displace a tile, so
+   * looking like one costs is the point.
+   */
+  for (const stem of props.tableau.stems()) {
+    const view = stemViews.get(stem.id)
+    if (!view) continue
+    if (view.decor) showDraftState(view.decor, props.payStates?.get(stem.id) ?? 'active')
+    setRegime(view, 'drawer')
+    const c = l.slotCentre(stem.slot)
+    easeScreen(view, c.x, c.y, ease)
+    const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
+    view.world.set(p.x, DRAWER_TILE_Y, p.z)
+    approachScale(view, drawerTileScale(upp), ease)
+    view.object.position.copy(view.world)
+    view.object.scale.setScalar(view.scale)
+  }
+
   for (const [id, view] of tileViews) {
     const tile = props.tableau.tile(id)
     if (!tile) continue
@@ -811,7 +923,9 @@ onBeforeRender(({ delta }) => {
      * map is null when not drafting, which reads as "no state, show none".
      */
     if (view.decor) {
-      showDraftState(view.decor, props.draftStates?.get(id) ?? 'active')
+      // A tile is marked either as a draft candidate in the source or as a payer in the drawer —
+      // never both, since those are different places and different phases.
+      showDraftState(view.decor, props.draftStates?.get(id) ?? props.payStates?.get(id) ?? 'active')
     }
 
     if (current?.kind === 'tile' && current.id === id) {
@@ -999,8 +1113,42 @@ function reconcileViews(): void {
     unregisters.push(registerGrabbable(mesh))
   }
 
-  // Anything the model no longer has. Nothing removes plates or tiles yet, but leaving the orphan
-  // branch out would mean the first thing that does silently leaks a mesh into the scene.
+  for (const stem of props.tableau.stems()) {
+    if (stemViews.has(stem.id)) continue
+    const coin = createStemVisual()
+    const coinDecor = attachCoinDraftDecor(coin)
+    stemViews.set(stem.id, {
+      object: coin,
+      world: new Vector3(),
+      screenX: 0,
+      screenY: 0,
+      scale: 1,
+      spin: 0,
+      regime: '',
+      settled: false,
+      fresh: true,
+      decor: coinDecor,
+    })
+    owners.set(coin, { kind: 'stem', id: stem.id })
+    scene.value.add(coin)
+    unregisters.push(registerGrabbable(coin))
+  }
+
+  /*
+   * Anything the model no longer has.
+   *
+   * Paying for a placement is the first thing that destroys objects, and it can destroy any of the
+   * three kinds — so all three are swept. A missing branch here does not merely leak a mesh: the
+   * object stays on the table, still clickable, long after the rules say it was spent.
+   */
+  const liveStems = new Set(props.tableau.stems().map(stem => stem.id))
+  for (const [id, view] of [...stemViews]) {
+    if (liveStems.has(id)) continue
+    if (view.decor) disposeDraftDecor(view.decor)
+    view.object.parent?.remove(view.object)
+    owners.delete(view.object)
+    stemViews.delete(id)
+  }
   for (const [id, view] of [...plateViews]) {
     if (props.tableau.plate(id)) continue
     if (view.decor) disposeDraftDecor(view.decor)
@@ -1070,6 +1218,11 @@ onBeforeUnmount(() => {
     if (view.decor) disposeDraftDecor(view.decor)
     scene.value?.remove(view.object)
   }
+  for (const view of stemViews.values()) {
+    if (view.decor) disposeDraftDecor(view.decor)
+    scene.value?.remove(view.object)
+  }
+  stemViews.clear()
   tileViews.clear()
   plateViews.clear()
   owners.clear()
@@ -1084,6 +1237,8 @@ onBeforeUnmount(() => {
   disposePlateBackAssets()
   disposeDraftDecorAssets()
   disposePlateDraftDecorAssets()
+  disposeCoinDraftDecorAssets()
+  disposeStemAssets()
   scatterCache.clear()
 })
 </script>

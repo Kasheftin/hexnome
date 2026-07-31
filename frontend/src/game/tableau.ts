@@ -16,6 +16,9 @@
  * **Three places an item can be**, and they behave differently: your own board and drawer, and the
  * **shared source** — the pick-from column everyone drafts out of. Source plates lie face down, and
  * a lot's loose tiles are heaped *on* its plate without belonging to it. See `TileLocation`.
+ *
+ * A third kind of object, the **stem**, lives only in the drawer and shares its slots with tiles — see
+ * `Stem`. Occupancy for both runs through one index, so a slot can never hold two things.
  */
 import { axialKey, type Axial } from './hex'
 import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
@@ -93,6 +96,25 @@ export interface Tile extends TileSpec {
   readonly fixed: boolean
 }
 
+/**
+ * A **stem** — the game's joker, a stem cell.
+ *
+ * Lives only in the player's drawer, in an ordinary **tile slot**: a stem in your drawer is one fewer
+ * place to put a drafted tile, which is what makes carrying them a real cost.
+ *
+ * It is deliberately *not* a `Tile`. A stem has no colour and no symbol, so it cannot be drafted,
+ * matched, scored or placed — and modelling it as a tile with null fields would put those questions
+ * into every piece of code that handles tiles. It shares only the thing it genuinely shares: the slot.
+ *
+ * Stems can never reach the board. They are spent when placing tiles — how, exactly, is undesigned
+ * (docs/game-design.md, open questions).
+ */
+export interface Stem {
+  readonly id: string
+  /** Always a drawer slot. Stems have nowhere else to be. */
+  readonly slot: number
+}
+
 /** What a plate puts on a board cell. `petal` is null for the hole. */
 export interface Coverage {
   readonly plateId: string
@@ -134,6 +156,23 @@ export interface Tableau {
   tilesInSourceLot(lot: number): readonly Tile[]
   /** A plate's own tile — the one it arrived with. Absent while the plate is face down. */
   plateToken(plateId: string): Tile | undefined
+
+  stems(): readonly Stem[]
+  /**
+   * Put a stem in a drawer slot.
+   *
+   * Shares the slot index with tiles, so a stem and a tile can never occupy the same slot and
+   * `freeDrawerSlots` counts stems as taken without knowing what they are.
+   */
+  addStem(slot: number): Stem | undefined
+  /**
+   * Move a stem to another drawer slot.
+   *
+   * There is no other destination, and that is the rule rather than an omission: a stem cannot go to
+   * the board. Expressing it as "the only move takes a slot number" makes the illegal move
+   * unrepresentable instead of merely rejected.
+   */
+  moveStem(id: string, slot: number): boolean
 
   /** Which plate, if any, covers this board cell, and as what. */
   coverageAt(cell: Axial): Coverage | undefined
@@ -188,6 +227,20 @@ export interface Tableau {
   moveTile(id: string, location: TileLocation): boolean
 
   /**
+   * Remove a tile, plate or stem from the game entirely.
+   *
+   * Spending something to pay for a placement is not moving it anywhere — there is no discard pile, and
+   * inventing a location for one would put a place in the model that the rules do not have.
+   *
+   * Takes an id of any kind so a caller settling a mixed payment does not have to sort tiles from plates
+   * from stems first. Discarding a plate takes its tiles with it, since a tile addressed by petal cannot
+   * outlive the plate it is addressed against.
+   *
+   * Returns false if nothing by that id exists.
+   */
+  discard(id: string): boolean
+
+  /**
    * The tile-location a board cell corresponds to — an empty-or-not petal of whichever
    * plate covers it. Null for the hole or an uncovered cell, which is what makes
    * "tiles only go on plates" fall out of target resolution.
@@ -215,6 +268,7 @@ export function createTableau({
   const boardCells = new Set(cells.map(axialKey))
   const platesById = new Map<string, Plate>()
   const tilesById = new Map<string, Tile>()
+  const stemsById = new Map<string, Stem>()
   /** locationKey → id, for both kinds. Occupancy lives here and nowhere else. */
   const occupants = new Map<string, string>()
   /** cellKey → coverage. Derived from the plates; rebuilt whenever they change. */
@@ -326,6 +380,31 @@ export function createTableau({
       return found
     },
 
+    stems: () => [...stemsById.values()],
+
+    addStem(slot) {
+      if (!inRange(slot, drawerSlots)) return undefined
+      // The same key a tile would use, so the slot cannot hold both.
+      const key = tileLocationKey({ kind: 'drawer', slot })
+      if (occupants.has(key)) return undefined
+      const stem: Stem = { id: `s${nextId++}`, slot }
+      stemsById.set(stem.id, stem)
+      occupants.set(key, stem.id)
+      return stem
+    },
+
+    moveStem(id, slot) {
+      const stem = stemsById.get(id)
+      if (!stem || !inRange(slot, drawerSlots)) return false
+      const key = tileLocationKey({ kind: 'drawer', slot })
+      const occupant = occupants.get(key)
+      if (occupant !== undefined && occupant !== id) return false
+      occupants.delete(tileLocationKey({ kind: 'drawer', slot: stem.slot }))
+      stemsById.set(id, { id, slot })
+      occupants.set(key, id)
+      return true
+    },
+
     plateToken(plateId) {
       for (const tile of tilesById.values()) {
         if (tile.fixed && tile.location.kind === 'onPlate' && tile.location.plateId === plateId) {
@@ -425,6 +504,38 @@ export function createTableau({
       tilesById.set(id, moved)
       occupants.set(tileLocationKey(location), id)
       return true
+    },
+
+    discard(id) {
+      const stem = stemsById.get(id)
+      if (stem) {
+        occupants.delete(tileLocationKey({ kind: 'drawer', slot: stem.slot }))
+        stemsById.delete(id)
+        return true
+      }
+
+      const tile = tilesById.get(id)
+      if (tile) {
+        occupants.delete(tileLocationKey(tile.location))
+        tilesById.delete(id)
+        return true
+      }
+
+      const plate = platesById.get(id)
+      if (plate) {
+        // Its tiles are addressed as (plate, petal), so they cannot outlive it.
+        for (const carried of [...tilesById.values()]) {
+          if (carried.location.kind === 'onPlate' && carried.location.plateId === id) {
+            occupants.delete(tileLocationKey(carried.location))
+            tilesById.delete(carried.id)
+          }
+        }
+        occupants.delete(plateLocationKey(plate.location))
+        platesById.delete(id)
+        reindexCoverage()
+        return true
+      }
+      return false
     },
 
     petalAt(cell) {
