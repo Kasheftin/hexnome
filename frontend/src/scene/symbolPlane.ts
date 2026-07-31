@@ -17,10 +17,14 @@ import {
  *
  * Unlit, so the symbol's painted gold gradients survive as authored instead of
  * being multiplied by scene lighting.
+ *
+ * The plane is centred on the tile's origin and grows about it, so `fitRadius` can never move a symbol
+ * off centre. `offsetUp` is the deliberate exception, for motifs whose optical centre is not their
+ * bounding-box centre.
  */
 export function createSymbolPlane(
   texture: Texture,
-  { fitRadius, y }: { fitRadius: number, y: number },
+  { fitRadius, y, offsetUp = 0 }: { fitRadius: number, y: number, offsetUp?: number },
 ): Mesh {
   texture.colorSpace = SRGBColorSpace
   texture.anisotropy = 8
@@ -49,6 +53,15 @@ export function createSymbolPlane(
     }),
   )
   mesh.position.y = y
+  /*
+   * The vertical nudge, converted from screen-up to world once and only here.
+   *
+   * The board lies in the XZ plane and screen-up is −Z (BoardCamera's up vector is `(0, 0, −1)` at zero
+   * tilt), so raising a symbol means *decreasing* z. Flipping the sign at this one point lets every
+   * caller — and the tuning table in constants.ts — speak in "up is positive", which is the only way
+   * anyone will get it right by eye.
+   */
+  mesh.position.z = -offsetUp
   mesh.renderOrder = 1
   return mesh
 }

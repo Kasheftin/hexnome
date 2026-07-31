@@ -40,7 +40,7 @@ function signedArea(polygon: readonly Point[]): number {
  * constant distance keeps every socket concentric with its lobe — measured rim spread across
  * the six petals is 0.
  */
-function insetPolygon(polygon: readonly Point[], margin: number): Point[] {
+export function insetPolygon(polygon: readonly Point[], margin: number): Point[] {
   const n = polygon.length
   if (n < 3 || margin === 0) return [...polygon]
   const sign = signedArea(polygon) > 0 ? 1 : -1
@@ -71,7 +71,7 @@ function insetPolygon(polygon: readonly Point[], margin: number): Point[] {
 }
 
 /** The boundary of the seven-hex union, in world-plane (x, z), ordered around the loop. */
-function flowerOutline(size: number): Point[] {
+export function flowerOutline(size: number): Point[] {
   const centres = plateCells({ q: 0, r: 0 }).map(cell => axialToWorld(cell, size))
   const corners: Point[] = Array.from({ length: 6 }, (_, k) => {
     const angle = (Math.PI / 180) * (90 + k * 60)

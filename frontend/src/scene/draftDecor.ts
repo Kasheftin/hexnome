@@ -2,11 +2,22 @@ import {
   DoubleSide,
   Mesh,
   MeshBasicMaterial,
+  Path,
   RingGeometry,
+  Shape,
+  ShapeGeometry,
   type BufferGeometry,
 } from 'three'
-import { HIGHLIGHT_COLORS, TILE_SIZE, TILE_THICKNESS } from './constants'
+import {
+  HEX_SIZE,
+  HIGHLIGHT_COLORS,
+  PLATE_BASE_MARGIN,
+  PLATE_BASE_THICKNESS,
+  TILE_SIZE,
+  TILE_THICKNESS,
+} from './constants'
 import { createHexPlateGeometry } from './hexPlateGeometry'
+import { flowerOutline, insetPolygon } from './plateBaseGeometry'
 
 /**
  * The three drafting states, drawn as decorations *on* a tile rather than as changes *to* it.
@@ -31,16 +42,24 @@ import { createHexPlateGeometry } from './hexPlateGeometry'
  */
 
 /**
- * Slightly larger than the tile so the overlay's edge lands just outside the bevel's outer edge
- * rather than on it, where a coincident silhouette would shimmer.
+ * Larger than the tile, by enough to clear its **antialiased** edge.
+ *
+ * A coincident silhouette does not just shimmer — it leaves the tile's lit rim showing through as a
+ * bright hairline, which reads as a deliberate border rather than as a dimmed tile. Antialiasing blends
+ * the tile edge over about a pixel, so the overlay has to finish outside that blend, not merely outside
+ * the geometry: 1.005 overshot by 0.19px at drawer size and was invisibly short. 1.04 gives ~1.5px.
+ *
+ * Expressed as a fraction, so the overshoot stays proportional as a tile is drawn at drawer, lot or
+ * board scale. What it spills onto is the plate or the tray beneath, where a slightly darkened hairline
+ * is unnoticeable.
  */
-const OVERLAY_R = TILE_SIZE * 1.005
+const OVERLAY_R = TILE_SIZE * 1.04
 
 const overlayGeometry: BufferGeometry = createHexPlateGeometry(OVERLAY_R)
 const ringGeometry = new RingGeometry(TILE_SIZE * 0.99, TILE_SIZE * 1.2, 6, 1, Math.PI / 2)
 
-/** Above the top face and above the symbol plane, which sits at `TILE_THICKNESS / 2 + 0.008`. */
-const DECOR_Y = TILE_THICKNESS / 2 + 0.014
+/** Clearance above a tile's face, and above the symbol plane which sits `0.008` up. */
+const DECOR_CLEARANCE = 0.014
 
 export interface DraftDecor {
   readonly dim: Mesh
@@ -48,12 +67,30 @@ export interface DraftDecor {
 }
 
 /**
+ * Take a decoration out of picking entirely.
+ *
+ * **Not optional.** These planes float above the object they decorate, and a *plate's* overlay spans the
+ * whole flower — so it hangs over the loose tiles heaped on that plate. Left raycastable it swallows
+ * every click aimed at those tiles: the hit walks up to the plate, the plate is face down and refuses,
+ * and the tiles silently stop responding. Decor is something you look at, never something you hit.
+ */
+function unpickable(mesh: Mesh): Mesh {
+  mesh.raycast = () => {}
+  return mesh
+}
+
+/**
  * Add both decorations to a tile mesh, hidden.
  *
  * Materials are per-tile — they are the only thing here that gets mutated — while the geometry is
  * shared. Two tiny `MeshBasicMaterial`s per tile is nothing next to a stuck-looking tile.
+ *
+ * @param faceY the tile's top face in its own local space: `TILE_THICKNESS / 2` for a normal tile, `0`
+ * for a plate's token, which is drawn flat. Passed in rather than assumed, because a marker sunk inside
+ * its tile is invisible and one floating above it looks detached.
  */
-export function attachDraftDecor(tile: Mesh): DraftDecor {
+export function attachDraftDecor(tile: Mesh, faceY: number): DraftDecor {
+  const decorY = faceY + DECOR_CLEARANCE
   const dim = new Mesh(overlayGeometry, new MeshBasicMaterial({
     color: '#05070a',
     transparent: true,
@@ -63,10 +100,10 @@ export function attachDraftDecor(tile: Mesh): DraftDecor {
     // tile that happens to overlap it in the heap.
     depthWrite: false,
   }))
-  dim.position.y = DECOR_Y
+  dim.position.y = decorY
   dim.renderOrder = 6
   dim.visible = false
-  tile.add(dim)
+  tile.add(unpickable(dim))
 
   const ring = new Mesh(ringGeometry, new MeshBasicMaterial({
     color: HIGHLIGHT_COLORS.valid,
@@ -89,11 +126,11 @@ export function attachDraftDecor(tile: Mesh): DraftDecor {
     depthTest: false,
   }))
   ring.rotation.x = -Math.PI / 2
-  ring.position.y = DECOR_Y
+  ring.position.y = decorY
   // Above every other transparent thing, since it ignores depth and must still sort last.
   ring.renderOrder = 30
   ring.visible = false
-  tile.add(ring)
+  tile.add(unpickable(ring))
 
   return { dim, ring }
 }
@@ -112,4 +149,116 @@ export function disposeDraftDecor(decor: DraftDecor): void {
 export function disposeDraftDecorAssets(): void {
   overlayGeometry.dispose()
   ringGeometry.dispose()
+}
+
+
+/* ── the same three states, for a whole plate ─────────────────────────────────── */
+
+/**
+ * A plate is drafted **as a whole object**, so its marker has to cover the whole object.
+ *
+ * Putting the marker on the plate's token was the first attempt and it was misleading: taking a plate
+ * takes the plate, not the tile printed on it, and a ring around the token said the opposite. It also
+ * made a plate look like just another tile in a draft, when it costs a bay rather than a tile slot.
+ *
+ * The shapes follow the flower silhouette rather than a bounding hexagon, reusing the same
+ * `flowerOutline` the slab itself is built from — so the outline traces the plate's real edge, lobes and
+ * all, and cannot drift from it.
+ */
+
+/** Build the flower as a flat `Shape`, offset by `inset`. Negative outsets. */
+function flowerShape(inset: number): Shape {
+  const shape = new Shape()
+  // Built in XY and rotated into XZ below, negating z so the rotation lands it unmirrored — the same
+  // convention plateBaseGeometry uses, and for the same reason.
+  insetPolygon(flowerOutline(HEX_SIZE), inset).forEach(([x, z], index) => {
+    if (index === 0) shape.moveTo(x, -z)
+    else shape.lineTo(x, -z)
+  })
+  shape.closePath()
+  return shape
+}
+
+function flowerPath(inset: number): Path {
+  const path = new Path()
+  insetPolygon(flowerOutline(HEX_SIZE), inset).forEach(([x, z], index) => {
+    if (index === 0) path.moveTo(x, -z)
+    else path.lineTo(x, -z)
+  })
+  path.closePath()
+  return path
+}
+
+function flatten(geometry: BufferGeometry): BufferGeometry {
+  geometry.rotateX(-Math.PI / 2)
+  return geometry
+}
+
+/**
+ * The slab's silhouette, pushed out past its antialiased edge.
+ *
+ * Same reasoning as the tile overlay above: sitting exactly on `PLATE_BASE_MARGIN` left the slab's lit
+ * edge showing as a hairline around a dimmed plate. 0.035 beyond it is ~1px at the sizes plates are
+ * drawn, and spills only onto the lot behind.
+ */
+const PLATE_DIM_OVERSHOOT = 0.035
+const plateDimGeometry = flatten(
+  new ShapeGeometry(flowerShape(PLATE_BASE_MARGIN - PLATE_DIM_OVERSHOOT)),
+)
+
+/**
+ * An outline straddling the slab's edge, like the tile ring straddles a tile's.
+ *
+ * The slab edge sits at `PLATE_BASE_MARGIN` (0.03) in, so spanning 0.06 out to 0.09 in puts roughly half
+ * the band beyond the plate — enough to read as an outline around it rather than a stripe painted on it.
+ */
+const plateRingGeometry = flatten(new ShapeGeometry((() => {
+  const ring = flowerShape(-0.06)
+  ring.holes.push(flowerPath(0.09))
+  return ring
+})()))
+
+/**
+ * Clear of everything the plate carries.
+ *
+ * A tile seated in a petal reaches `PLATE_TILE_LIFT + TILE_THICKNESS / 2`; the marker has to sit above
+ * that or a plate with tiles on it would show a marker cut into pieces by them.
+ */
+const PLATE_DECOR_Y = PLATE_BASE_THICKNESS + TILE_THICKNESS + 0.06
+
+export function attachPlateDraftDecor(plate: Mesh | { add(o: Mesh): unknown }): DraftDecor {
+  const dim = new Mesh(plateDimGeometry, new MeshBasicMaterial({
+    color: '#05070a',
+    transparent: true,
+    opacity: 0.55,
+    side: DoubleSide,
+    depthWrite: false,
+  }))
+  dim.position.y = PLATE_DECOR_Y
+  dim.renderOrder = 6
+  dim.visible = false
+  plate.add(unpickable(dim))
+
+  const ring = new Mesh(plateRingGeometry, new MeshBasicMaterial({
+    color: HIGHLIGHT_COLORS.valid,
+    transparent: true,
+    opacity: 0.95,
+    side: DoubleSide,
+    depthWrite: false,
+    // Never occluded, for the same reason as the tile ring: a marker another object can slice through
+    // is not a marker.
+    depthTest: false,
+  }))
+  ring.position.y = PLATE_DECOR_Y + 0.01
+  ring.renderOrder = 30
+  ring.visible = false
+  plate.add(unpickable(ring))
+
+  return { dim, ring }
+}
+
+/** Shared plate geometry — call once, when no plates remain. */
+export function disposePlateDraftDecorAssets(): void {
+  plateDimGeometry.dispose()
+  plateRingGeometry.dispose()
 }

@@ -92,6 +92,29 @@ export const TILE_BEVEL = 0.15
  */
 export const TILE_ENV_INTENSITY = 1
 
+/**
+ * The six tile colours, in palette order — a tile's `color` is an index into this list.
+ *
+ * `name` is user-facing: the action bar prints it when it names a draft ("all chromosome blue"), so it
+ * reads as prose rather than as a swatch label.
+ *
+ * The hexes are sRGB and the tiles are **lit**, so what lands on screen is not the swatch. Teal
+ * `#2C8C86` measures around RGB(44, 140, 134) in place. Tune against the render, not the value.
+ *
+ * The rules never see any of this: `game/` knows a colour only as an index (docs/tech-spec.md, "The one
+ * hard architectural rule"). The list length is pinned to `TILE_COLOR_COUNT` by an assertion in
+ * scene/tileMaterials.ts — adding or removing an entry here is a typecheck error until both agree.
+ */
+export const TILE_COLORS = [
+  { name: 'Orange', hex: '#b06127' },
+  { name: 'Lime', hex: '#6a8f00' },
+  { name: 'Green', hex: '#00994b' },
+  { name: 'Blue', hex: '#0f81af' },
+  { name: 'Indigo', hex: '#613ECC' },
+  { name: 'Magenta', hex: '#CC3E9C' },
+] as const
+
+
 /* ── Drawer ──────────────────────────────────────────────────────────────────── */
 
 export const DRAWER_COLS = 8
@@ -197,15 +220,19 @@ export const PLATE_WORLD_HEIGHT = 5
 export const PLATE_BASE_Y = 0.03
 
 /**
- * The plate palette, shared by **both faces**.
+ * The plate palette. Both faces are the same brown cardboard.
  *
- * A brown slab carrying inset dark-brown hexes with a concentric outline around each. The reverse side
- * wears the same treatment on its single centre mark; the face-up side wears it on all seven cells. They
- * read as one object seen from two sides, which only holds if the tones come from one place — hence this
- * table rather than a literal in each module.
+ * A slab carrying seven inset cell marks, each an inset hex with a concentric outline. The two faces
+ * differ in **exactly one thing**: the centre mark's colour.
  *
- * The hole is deliberately darker than a socket. It can never be filled, and a plate that appears to
- * offer seven usable spaces instead of six is misleading in a way no amount of prettiness makes up for.
+ * - Face **down**: all seven the same. Nothing can be placed on a face-down plate, so singling out a
+ *   cell would imply a structure that is not there.
+ * - Face **up**: the centre takes `hole` instead. That cell is the plate's hole — never fillable — and a
+ *   plate that appears to offer seven usable spaces instead of six misleads about the rules. It is also
+ *   where a token symbol will go.
+ *
+ * One difference, one tone. Anything more and the two faces stop reading as one object seen from two
+ * sides, which a painted front and a plain back demonstrated: it looked like two kinds of piece.
  */
 export const PLATE_TONES = {
   slab: '#6d5636',
@@ -215,10 +242,6 @@ export const PLATE_TONES = {
 
 /**
  * The cell mark, in units of HEX_SIZE: an inset hex, a gap of bare slab, then a thin outline.
- *
- * These are the reverse side's own numbers, reused unchanged. That is not laziness — the reverse's mark
- * already sits in one plate *cell*, so its proportions are cell proportions and transfer directly to all
- * seven. Copying them is what makes the two faces match rather than merely resemble each other.
  *
  * The outline stops at 0.95 because neighbouring cells are only `√3` apart: at 1.0 the outlines of
  * adjacent cells would touch.
@@ -253,6 +276,15 @@ export const PLATE_RIM_Y = PLATE_BASE_THICKNESS + 0.012
  * rather than hovering over it.
  */
 export const PLATE_TILE_LIFT = PLATE_SOCKET_Y + TILE_THICKNESS / 2 - 0.03
+
+/**
+ * Where a plate's **own** tile sits — its token, which is drawn flat.
+ *
+ * A token has no thickness, so its origin *is* its face and it needs no half-thickness lift: it rests
+ * just clear of the socket mark beneath it. The gap is small but far above the depth buffer's
+ * resolution over this camera's range, so nothing z-fights.
+ */
+export const PLATE_TOKEN_LIFT = PLATE_SOCKET_Y + 0.012
 
 /**
  * Height of the drop-target ring.
@@ -341,12 +373,72 @@ export const SYMBOL_TEXTURE_URLS = [
 ]
 
 /**
- * Art for a plate's petal sockets: a full-bleed pointy-top hexagon with transparent corners,
- * drawn to a `√3 : 2` bounding box.
+ * How much of a tile a symbol fills, as a fraction of the tile's **apothem**.
  *
- * This used to texture every board cell. It now dresses the six petals instead, which is where
- * a tile actually goes — the board itself is only a honeycomb on dark slate.
+ * The apothem, not the circumradius: it is the tile's narrow half-width, so fitting to it keeps a symbol
+ * clear of the flats as well as the points. This is the knob that moves all six together.
  */
+export const SYMBOL_FIT = 0.84
+
+/**
+ * Per-symbol size multiplier, indexed by value **1–6** (so `[0]` is the DNA helix, value 1).
+ *
+ * A single fit cannot serve all six. `createSymbolPlane` normalises each image by its bounding-box
+ * diagonal, which equalises *area* rather than apparent weight — so an open motif like the pentose ring
+ * reads smaller than a dense one like the chromosome pair at the identical fit. These are the per-motif
+ * corrections, and they are meant to be eyeballed against the screen rather than derived.
+ *
+ * All 1 means "no correction yet". Raise one to grow that symbol; nothing else is affected, and centring
+ * is unaffected at any value — the plane is built centred on the tile's origin.
+ */
+export const SYMBOL_SCALE: readonly number[] = [
+  1.1, // 1 · DNA helix
+  1.15, // 2 · chromosome pair
+  1.4, // 3 · codon
+  1.52, // 4 · DNA bases
+  1.4, // 5 · pentose sugar
+  1.4, // 6 · benzene ring
+]
+
+/**
+ * Per-symbol vertical nudge, indexed by value **1–6**, in fractions of `HEX_SIZE`.
+ *
+ * **Positive moves the symbol up the screen.** (In world terms that is −Z: the board lies in the XZ
+ * plane and the camera's up vector is `(0, 0, −1)` at zero tilt. The sign is flipped once, in
+ * `createSymbolPlane`, so this table stays in the units a person actually thinks in.)
+ *
+ * The motifs are symmetric left-to-right but several are not top-to-bottom, so their *optical* centre
+ * sits off their bounding-box centre — and it is the bounding box that gets centred on the tile. No
+ * amount of scaling fixes that; it needs a nudge.
+ *
+ * Measured against `HEX_SIZE` rather than against the symbol, as asked. That makes a nudge predictable —
+ * "a twentieth of a cell down" means the same thing whatever else changes — but it does mean a nudge and
+ * a `SYMBOL_SCALE` change are independent: grow a symbol a lot and its nudge may want revisiting.
+ */
+export const SYMBOL_OFFSET_UP: readonly number[] = [
+  0, // 1 · DNA helix
+  0, // 2 · chromosome pair
+  0.07, // 3 · codon
+  0, // 4 · DNA bases
+  0.07, // 5 · pentose sugar
+  0, // 6 · benzene ring
+]
+
+/**
+ * The multiplier for a tile value, tolerating anything out of range.
+ *
+ * Values are 1-based and arrive from the deck, so a stray 0 or 7 would otherwise silently render a
+ * zero-sized symbol — an invisible tile is much harder to diagnose than a wrongly-sized one.
+ */
+export function symbolScaleFor(value: number): number {
+  return SYMBOL_SCALE[value - 1] ?? 1
+}
+
+/** The vertical nudge for a tile value, in `HEX_SIZE` fractions. Positive is up the screen. */
+export function symbolOffsetUpFor(value: number): number {
+  return SYMBOL_OFFSET_UP[value - 1] ?? 0
+}
+
 export const COLORS = {
   /**
    * The board: dark slate with a faint honeycomb, and nothing else.

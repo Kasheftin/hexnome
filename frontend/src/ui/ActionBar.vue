@@ -19,8 +19,7 @@
  */
 import { computed } from 'vue'
 import type { TurnOptions, TurnPhase } from '@/game/turn'
-import { TILE_COLORS } from '@/scene/tileMaterials'
-import { SYMBOL_TEXTURE_URLS } from '@/scene/constants'
+import { SYMBOL_TEXTURE_URLS, TILE_COLORS } from '@/scene/constants'
 
 const props = defineProps<{
   phase: TurnPhase

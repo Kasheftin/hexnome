@@ -7,6 +7,8 @@ import {
   RingGeometry,
   type BufferGeometry,
 } from 'three'
+import { axialToWorld } from '@/game/hex'
+import { PETAL_DIRS } from '@/game/plate'
 import {
   HEX_SIZE,
   PLATE_BASE_BEVEL,
@@ -20,17 +22,19 @@ import {
 import { createPlateBaseGeometry } from './plateBaseGeometry'
 
 /**
- * A plate seen from the back: the same flower slab and the same cell mark, but only one of them.
+ * A plate seen from the back: a brown flower slab carrying seven identical cell marks.
  *
  * Plates in the shared source lie face down, so which tile a plate carries is hidden until it is
- * drafted. The back therefore has one job — say clearly "there is a plate here and you cannot see what
- * is on it" — and it does that by being conspicuously *bare* where the front is busy: one mark in the
- * centre instead of seven cells. A player should never have to look twice to tell which way up a plate
- * is, and the count of marks is the tell.
+ * drafted. The back's job is to say "there is a plate here and you cannot see what is on it", and it
+ * does that by being uniform where the front is ornate — seven plain repeating marks against the front's
+ * painted brass sockets. A player should never have to look twice to tell which way up a plate is.
  *
- * Built from the same slab geometry as the front plus a single centred mark. Sharing
- * `createPlateBaseGeometry` matters for more than reuse: the silhouette is identical to a face-up plate,
- * so a plate flipping over will not change shape.
+ * **All seven marks are the same**, the centre included. The front singles its centre out because that
+ * cell is a hole nothing can ever fill; the back has no such structure — nothing can be placed on a
+ * face-down plate at all — so distinguishing one cell would imply a distinction that is not there.
+ *
+ * Built from the same slab geometry as the front. Sharing `createPlateBaseGeometry` matters for more than
+ * reuse: the silhouette is identical to a face-up plate, so a plate flipping over will not change shape.
  *
  * Built at board scale (`HEX_SIZE`) with its local origin at the slab's underside, exactly like
  * `createPlateVisual` — so the same positioning and scaling code drops either one into a lot.
@@ -44,11 +48,10 @@ const baseGeometry: BufferGeometry = createPlateBaseGeometry({
 })
 
 /**
- * The same slab as the face-up side, from the shared palette.
+ * Warm brown, and deliberately unlike the face-up side's dark slate.
  *
- * The two faces are deliberately one material and one set of tones: a plate is one object, and the only
- * thing that should distinguish its reverse is what is *marked* on it — a single centre seal rather than
- * seven cells. Anything else and a face-down plate reads as a different kind of piece.
+ * The two faces are meant to be told apart instantly, so they do not share a palette: the front is dark
+ * so its painted sockets sit *on* it, while the back has nothing to carry and can hold the colour itself.
  */
 const backMaterial = new MeshStandardMaterial({
   color: PLATE_TONES.slab,
@@ -59,12 +62,7 @@ const backMaterial = new MeshStandardMaterial({
   metalness: 0.2,
 })
 
-/**
- * The seal: a hexagonal disc and a concentric outline, sitting in the plate's centre cell.
- *
- * The same mark, at the same radii, that the face-up side puts in all seven cells — shared through
- * `PLATE_CELL_*` so the two faces cannot drift apart.
- */
+/** One cell's mark: a hexagonal disc with a concentric outline around it. */
 const sealGeometry = new CircleGeometry(HEX_SIZE * PLATE_CELL_MARK_R, 6, Math.PI / 2)
 const sealRingGeometry = new RingGeometry(
   HEX_SIZE * PLATE_CELL_RING_R[0],
@@ -77,12 +75,9 @@ const sealRingGeometry = new RingGeometry(
 /**
  * Darker than the slab, not brighter — an emboss rather than an inlay.
  *
- * A bright seal was the first attempt and it looked like a fault: the tiles heaped on a lot cover most
- * of the centre, so all that showed was a pale sliver between them, reading as a gap in the plate
- * rather than a mark on it. Close to the slab's own colour, it stays a detail at any coverage.
- *
- * Deliberately the *socket* tone, not the front's darker hole tone. The back has no hole, and hinting at
- * one where a plate is solid would be misleading.
+ * A bright mark was the first attempt and it looked like a fault: the tiles heaped on a lot cover most of
+ * the plate, so all that showed was a pale sliver between them, reading as a gap rather than a marking.
+ * Close to the slab's own colour, it stays a detail at any coverage.
  */
 const sealMaterial = new MeshStandardMaterial({
   color: PLATE_TONES.socket,
@@ -93,17 +88,22 @@ const sealMaterial = new MeshStandardMaterial({
 
 const FLAT_X = -Math.PI / 2
 
+/** The seven cell centres: the hole first, then the six petals. */
+const CELL_OFFSETS = [{ x: 0, z: 0 }, ...PETAL_DIRS.map(dir => axialToWorld(dir, HEX_SIZE))]
+
 export function createPlateBackVisual(): Group {
   const group = new Group()
 
   // The slab. Its local origin is its underside, so everything else stacks above it.
   group.add(new Mesh(baseGeometry, backMaterial))
 
-  for (const geometry of [sealGeometry, sealRingGeometry]) {
-    const mesh = new Mesh(geometry, sealMaterial)
-    mesh.rotation.x = FLAT_X
-    mesh.position.y = PLATE_SOCKET_Y
-    group.add(mesh)
+  for (const offset of CELL_OFFSETS) {
+    for (const geometry of [sealGeometry, sealRingGeometry]) {
+      const mesh = new Mesh(geometry, sealMaterial)
+      mesh.rotation.x = FLAT_X
+      mesh.position.set(offset.x, PLATE_SOCKET_Y, offset.z)
+      group.add(mesh)
+    }
   }
 
   return group

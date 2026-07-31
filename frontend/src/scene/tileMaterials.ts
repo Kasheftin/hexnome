@@ -1,21 +1,14 @@
 import { Color, MeshStandardMaterial } from 'three'
 import { TILE_COLOR_COUNT } from '@/game/deck'
+import { TILE_COLORS } from './constants'
 
 /**
- * The six tile colours, and the material they share.
+ * The tile material, and the guard tying it to the palette.
  *
- * Colour lives here, not in `src/game/**`. The rules know a tile's colour as an enum
- * member; only the renderer knows what green looks like.
+ * The palette itself lives in `constants.ts` with the other things worth tuning. It stays out of
+ * `src/game/**` either way: the rules know a tile's colour as an index, and only the renderer knows what
+ * green looks like.
  */
-
-export const TILE_COLORS = [
-  { name: 'helix green', hex: '#2F7D52' },
-  { name: 'chromosome blue', hex: '#3D6AA8' },
-  { name: 'base lilac', hex: '#8B63B5' },
-  { name: 'amber', hex: '#D9A32B' },
-  { name: 'coral', hex: '#C2543E' },
-  { name: 'teal', hex: '#2C8C86' },
-] as const
 
 export type TileColorIndex = 0 | 1 | 2 | 3 | 4 | 5
 

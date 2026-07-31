@@ -664,26 +664,54 @@ lights a button leading to a move that would then have to be refused.
 
 ### The plate's two faces
 
-Both faces come from one palette and one set of radii — `PLATE_TONES` and `PLATE_CELL_*` in
-`scene/constants.ts`. A brown slab carrying an inset dark-brown hex, a gap of bare slab, then a thin
-outline: the reverse wears one of these in its centre, the face-up side wears seven, and the only
-difference between the two is how many marks there are.
+Both are the same brown cardboard: a slab carrying **seven** inset cell marks, each an inset hex, a gap
+of bare slab, then a thin outline. One palette, one set of radii (`PLATE_TONES`, `PLATE_CELL_*`).
 
-The radii transfer without adjustment because the reverse's mark already sits in a single plate *cell*,
-so its proportions are cell proportions. The outline stops at 0.95 of a cell because neighbouring cells
-are only `√3` apart and at 1.0 adjacent outlines would touch.
+**They differ in exactly one thing — the colour of the centre mark.**
 
-Two things worth keeping straight:
+- Face **down**: all seven identical. Nothing can be placed on a face-down plate, so singling out a cell
+  would imply a structure that is not there.
+- Face **up**: the centre takes the darker `hole` tone. That cell is the plate's hole, never fillable, and
+  a plate that appears to offer seven usable spaces instead of six misleads about the rules. A token
+  symbol will sit in it later.
 
-- **The centre hole is darker than the six sockets** (`PLATE_TONES.hole`). It can never be filled, and a
-  plate that appears to offer seven usable spaces instead of six misleads about the rules. It keeps the
-  outline so it stays in the family; only the fill drops.
-- **Low metalness on both.** A metal is lit almost entirely by what it reflects and this scene's studio
-  environment is deliberately dark, so a shinier slab is a *darker* slab here. The reverse rendered
-  near-black at metalness 0.55 before this was pinned down.
+The outline stops at 0.95 of a cell because neighbouring cells are only `√3` apart; at 1.0 adjacent
+outlines would touch.
 
-This replaced the painted socket texture (`plate-full.png`, art-spec Asset 0). Procedural geometry is
-what makes the treatment provably identical on both sides rather than merely similar.
+**Low metalness on both.** A metal is lit almost entirely by what it reflects and this scene's studio
+environment is deliberately dark, so a shinier slab is a *darker* slab here — the reverse rendered
+near-black at metalness 0.55 before this was pinned down.
+
+Both faces share `createPlateBaseGeometry`, so the silhouette is identical and a plate turning over does
+not change shape. The face is baked into the mesh at creation, so a flip rebuilds the view rather than
+restyling it (see `reconcileViews`).
+
+A painted socket texture was tried on the face-up side twice and dropped twice (art-spec Asset 0): ornate
+art on one face and plain cardboard on the other reads as two kinds of piece rather than two sides of
+one. If it returns, the reverse needs a matching treatment at the same time.
+
+### A plate's own tile is drawn flat
+
+Every loose tile is a thick bevelled prism whose rim catches the key light — that rim is the only part
+of a tile that can hold a highlight under a top-down camera, and it is what makes a tile read as a
+physical piece. A plate's **own** tile is drawn with no thickness and no bevel at all, so it reads as
+*printed on* the plate rather than *set into* it.
+
+Purely a visual signal. The rule was already in the model — `Tile.fixed` makes the token indivisible
+from its plate and undraggable, while keeping it a full tile for scoring. This only makes it legible
+without a label.
+
+Three things move together, and missing any one of them looks broken rather than flat:
+
+- **Geometry** — `createHexPlateGeometry` instead of `createTileGeometry`.
+- **Face height** — a flat token's origin *is* its face, so the symbol plane and the draft decor take
+  `faceY = 0` rather than `TILE_THICKNESS / 2`. `attachDraftDecor` takes it as a parameter for exactly
+  this reason: a marker sunk inside its tile is invisible, one floating above it looks detached.
+- **Seating** — `PLATE_TOKEN_LIFT` rather than `PLATE_TILE_LIFT`. A token needs no half-thickness lift;
+  it rests just clear of the socket mark beneath it.
+
+Measured against a loose tile in the neighbouring petal: the loose tile's rim ramps 72 → 160 in
+luminance across its bevel, while the token is a uniform 131 edge to edge.
 
 ### Revealing a plate, and drafting it
 
@@ -715,9 +743,16 @@ incomplete sweep and a sweep that will not fit are different problems. "Out of s
 naming the sweep, because a finished-looking selection beside a dead button with no explanation is the
 worst of the three states.
 
-**A plate's draft state is drawn on its token**, not on the slab: the token is what the player is matching
-colours and symbols against, so that is where the eye already is, and it reuses the tile decor. Clicking
-anywhere on a revealed plate — slab or token — selects the plate.
+**A plate's draft state is drawn over the whole plate**, not on its token. Marking the token was the
+first attempt and it misled: taking a plate takes the plate, not the tile printed on it, and it made a
+plate look like just another tile in a draft when it costs a bay rather than a tile slot. The overlay and
+outline follow the flower silhouette, built from the same `flowerOutline` as the slab so they trace its
+real edge and cannot drift from it. Clicking anywhere on a revealed plate — slab or token — selects it.
+
+**Decor is never a pick target** (`unpickable` in draftDecor.ts). Not a nicety: a plate's overlay spans
+the whole flower and therefore hangs above the loose tiles heaped on that plate, so while it was
+raycastable it swallowed every click aimed at them — the hit walked up to the plate, the plate was face
+down and refused, and the tiles silently stopped responding. Hidden objects are still raycast.
 
 **A flip rebuilds the plate's view.** The face is baked into the mesh at creation, so `reconcileViews`
 compares the view's `faceDown` against the model and replaces the view when they disagree.

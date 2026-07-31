@@ -25,22 +25,21 @@ import { createPlateBaseGeometry } from './plateBaseGeometry'
  * A plate, face up: a brown flower slab carrying seven inset dark-brown cells.
  *
  * Each cell wears the same mark as the **reverse side** — an inset hex, a gap of bare slab, then a thin
- * outline (scene/plateBackVisual.ts). Both faces draw from `PLATE_TONES` and the same radii, so the two
- * read as one object seen from two sides rather than two objects that happen to resemble each other.
- *
- * The reverse's mark already sits in a single plate *cell*, so its proportions are cell proportions and
- * transferred to all seven unchanged.
+ * outline (scene/plateBackVisual.ts). Both faces draw from `PLATE_TONES` and the same radii, and the
+ * reverse carries seven of them too, so **the only difference between the two faces is the colour of the
+ * centre mark**. One object seen from two sides, not two objects that resemble each other.
  *
  * The slab is what makes it read as **one physical piece**. Without it a plate is seven unconnected
  * hexes floating over the board. Being a real solid rather than a decal, its bevelled edge catches the
  * key light, which is what conveys thickness under a camera that only ever sees the top.
  *
- * The centre **hole is darker than the six sockets**. It can never be filled, and that has to be legible
- * at a glance — a plate that appears to offer seven usable spaces instead of six misleads in a way no
- * amount of prettiness makes up for. It keeps the outline so it stays in the family; only its fill drops.
+ * The centre **hole is darker than the six sockets**, and that one tone is the whole difference. It can
+ * never be filled, which has to be legible at a glance — a plate that appears to offer seven usable
+ * spaces instead of six misleads in a way no amount of prettiness makes up for. It keeps the outline, so
+ * it stays in the family; only its fill changes. A token symbol will sit in it later.
  *
- * This replaced a painted socket texture (`plate-full.png`). The procedural version is what makes the two
- * faces provably identical in treatment, and it is one fewer asset to load and colour-manage.
+ * A painted socket texture (`plate-full.png`) was tried here twice and dropped twice: the ornate art did
+ * not sit with the plain cardboard slab the reverse established. See docs/art-spec.md, Asset 0.
  *
  * Built at board scale (`HEX_SIZE`), so one uniform scale on the group drops the same plate into a
  * drawer bay or a source lot.

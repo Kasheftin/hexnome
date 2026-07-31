@@ -19,17 +19,49 @@ highlight sits still while the real one moves with the camera and the tile.
 The tint-a-grayscale-master principle still applies, just not to the tile body. It is the right
 approach for **symbols** and **frames**.
 
-## Asset 0 — Plate socket art (in hand, **no longer used**)
+## Tuning symbol size
+
+`SYMBOL_FIT` in `scene/constants.ts` sets how much of a tile every symbol fills, as a fraction of the
+tile's **apothem** — its narrow half-width, so a symbol stays clear of the flats as well as the points.
+`SYMBOL_SCALE` then corrects each value 1–6 individually.
+
+Both are meant to be eyeballed against the screen. A single fit cannot serve all six, because
+`createSymbolPlane` normalises each image by its bounding-box diagonal — that equalises area, not
+apparent weight, so an open motif reads smaller than a dense one at the identical fit.
+
+`SYMBOL_OFFSET_UP` nudges each symbol vertically, in fractions of `HEX_SIZE`, **positive being up the
+screen**. The motifs are symmetric left-to-right but several are not top-to-bottom, so their *optical*
+centre sits off their bounding-box centre — and it is the bounding box that gets centred. Scaling cannot
+fix that; it needs a nudge. As a feel for the units, `0.12` moves a symbol about 4px on a drawer-sized
+tile.
+
+Scaling never moves a symbol off centre by itself: the plane is built centred on the tile's origin and
+grows about it. Worth knowing, though, that the **source art** is not perfectly centred — ink centres sit up to 2.1%
+off canvas centre (worst: `3.png`, the codon). That is under a pixel at present sizes and grows with
+scale, so if a symbol is pushed much larger and starts to look off, the fix is re-cropping the PNG rather
+than anything in code.
+
+| Value | Canvas | Ink centre offset |
+|------:|--------|-------------------|
+| 1 | 178×448 | centred |
+| 2 | 302×448 | −0.7% x, −1.7% y |
+| 3 | 448×435 | **+2.1% x**, −1.4% y |
+| 4 | 448×442 | centred |
+| 5 | 448×409 | +0.7% x, +0.2% y |
+| 6 | 400×448 | +0.1% x, +0.1% y |
+
+## Asset 0 — Plate socket art (in hand, **not used**)
 
 **File:** `frontend/public/textures/plate-full.png` — currently one tile, from
 `external assets/fullTile200x230.png`.
 
-> **Superseded.** Plates now draw their cells procedurally: a brown slab with an inset dark-brown hex
-> and a concentric outline per cell, from `PLATE_TONES` and `PLATE_CELL_*` in `scene/constants.ts`. That
-> was asked for so the face-up and face-down sides match exactly, which a painted texture on one side
-> and procedural geometry on the other cannot guarantee. The file is still in the repo and nothing else
-> claims those constants, so restoring the painted look means reinstating the socket mesh in
-> `scene/plateVisual.ts` — but the two faces would then need a matching painted reverse.
+> **Tried twice on the plate's face, dropped twice.** The ornate brass-and-green art does not sit with
+> the plain brown-cardboard slab the reverse established — it reads as a different material, not a
+> different side of one piece. Plates now draw their cells procedurally on both faces
+> (`PLATE_TONES`, `PLATE_CELL_*` in `scene/constants.ts`), differing only in the centre mark's colour.
+>
+> Kept in the repo. If ornate sockets come back, the reverse needs a matching treatment at the same
+> time, or the two faces will diverge again in exactly this way.
 
 A full-bleed pointy-top hexagon: brass ornate frame, dark mottled green face, fully transparent
 corners. It dresses a plate's six **petal sockets** — the places a tile actually goes.

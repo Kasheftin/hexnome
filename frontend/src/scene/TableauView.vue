@@ -64,16 +64,22 @@ import {
   PLATE_SLOT_PX,
   PLATE_SPIN_EASE,
   PLATE_TILE_LIFT,
+  PLATE_TOKEN_LIFT,
   PLATE_WORLD_WIDTH,
+  SYMBOL_FIT,
   SYMBOL_TEXTURE_URLS,
+  symbolOffsetUpFor,
+  symbolScaleFor,
   TILE_BEVEL,
   TILE_SIZE,
   TILE_THICKNESS,
 } from './constants'
 import {
   attachDraftDecor,
+  attachPlateDraftDecor,
   disposeDraftDecor,
   disposeDraftDecorAssets,
+  disposePlateDraftDecorAssets,
   showDraftState,
   type DraftDecor,
 } from './draftDecor'
@@ -81,6 +87,7 @@ import { registerGrabbable } from './grabbables'
 import { createPlateBackVisual, disposePlateBackAssets } from './plateBackVisual'
 import { createPlateVisual, disposePlateVisualAssets, petalOffset } from './plateVisual'
 import { boardToScreen, screenToBoard, unitsPerPixel } from './screenProjection'
+import { createHexPlateGeometry } from './hexPlateGeometry'
 import { createSymbolPlane } from './symbolPlane'
 import { createTileGeometry, hexApothemOf } from './tileGeometry'
 import { SOURCE_HEAP_SPAN, sourceScatter, type ScatterOffset } from './sourceScatter'
@@ -140,6 +147,24 @@ const tileGeometry: BufferGeometry = createTileGeometry({
   thickness: TILE_THICKNESS,
   bevel: TILE_BEVEL,
 })
+
+/**
+ * A plate's **own** tile is drawn flat — no thickness, no bevel.
+ *
+ * Purely a visual signal, and a strong one: every loose tile is a thick bevelled piece that catches the
+ * key light on its rim, so a token with no rim at all reads as *printed on* the plate rather than *set
+ * into* it. That is exactly what it is — a plate and its token are one indivisible object, and the flat
+ * face says so without a label.
+ *
+ * The rule itself is unchanged and lives in the model (`Tile.fixed`): the token is still a full tile for
+ * scoring, and it was already undraggable. This only makes that legible.
+ */
+const tokenGeometry: BufferGeometry = createHexPlateGeometry(TILE_SIZE)
+
+/** A tile's top face in its own local space. A flat token's origin *is* its face. */
+function tileFaceY(fixed: boolean): number {
+  return fixed ? 0 : TILE_THICKNESS / 2
+}
 const tileMaterials = new Map<number, Material>()
 
 interface View {
@@ -724,6 +749,9 @@ onBeforeRender(({ delta }) => {
     const plate = props.tableau.plate(id)
     if (!plate) continue
 
+    // A plate is drafted as a whole object, so the marker covers the whole plate.
+    if (view.decor) showDraftState(view.decor, props.draftStates?.get(id) ?? 'active')
+
     if (current?.kind === 'plate' && current.id === id) {
       setRegime(view, 'held')
       const at = heldPoint()
@@ -783,7 +811,7 @@ onBeforeRender(({ delta }) => {
      * map is null when not drafting, which reads as "no state, show none".
      */
     if (view.decor) {
-      showDraftState(view.decor, props.draftStates?.get(draftKeyOfTile(tile)) ?? 'active')
+      showDraftState(view.decor, props.draftStates?.get(id) ?? 'active')
     }
 
     if (current?.kind === 'tile' && current.id === id) {
@@ -856,7 +884,7 @@ onBeforeRender(({ delta }) => {
       setRegime(view, tile.location.plateId)
       reparent(view.object, plateView.object)
       const offset = petalOffset(tile.location.petal)
-      desired.set(offset.x, PLATE_TILE_LIFT, offset.z)
+      desired.set(offset.x, tile.fixed ? PLATE_TOKEN_LIFT : PLATE_TILE_LIFT, offset.z)
       // Ease into the petal, then sit exactly in it. A lerp only ever converges
       // asymptotically, and "almost rigid" is what the lag looked like in the first place.
       if (view.fresh || view.object.position.distanceToSquared(desired) < 1e-6) {
@@ -910,6 +938,7 @@ function reconcileViews(): void {
     if (existing) {
       // A plate that turned over: its face is baked into the mesh, so rebuild rather than restyle.
       if (existing.faceDown === plate.faceDown) continue
+      if (existing.decor) disposeDraftDecor(existing.decor)
       scene.value?.remove(existing.object)
       owners.delete(existing.object)
       plateViews.delete(plate.id)
@@ -918,6 +947,7 @@ function reconcileViews(): void {
     // flips a plate yet, and revealing one will need to rebuild its view regardless.
     const group: Group = plate.faceDown ? createPlateBackVisual() : createPlateVisual()
     group.renderOrder = 1
+    const plateDecor = attachPlateDraftDecor(group)
     plateViews.set(plate.id, {
       object: group,
       world: new Vector3(),
@@ -929,6 +959,7 @@ function reconcileViews(): void {
       settled: false,
       fresh: true,
       faceDown: plate.faceDown,
+      decor: plateDecor,
     })
     group.rotation.y = -plate.rotation * (Math.PI / 3)
     owners.set(group, { kind: 'plate', id: plate.id })
@@ -938,15 +969,17 @@ function reconcileViews(): void {
 
   for (const tile of props.tableau.tiles()) {
     if (tileViews.has(tile.id)) continue
-    const mesh = new Mesh(tileGeometry, tileMaterialFor(tile.color))
+    const faceY = tileFaceY(tile.fixed)
+    const mesh = new Mesh(tile.fixed ? tokenGeometry : tileGeometry, tileMaterialFor(tile.color))
     mesh.renderOrder = 4
     const texture = symbolTextures[
       Math.min(symbolTextures.length, Math.max(1, tile.value)) - 1
     ]
     if (texture) {
       mesh.add(createSymbolPlane(texture, {
-        fitRadius: hexApothemOf(TILE_SIZE) * 0.84,
-        y: TILE_THICKNESS / 2 + 0.008,
+        fitRadius: hexApothemOf(TILE_SIZE) * SYMBOL_FIT * symbolScaleFor(tile.value),
+        offsetUp: HEX_SIZE * symbolOffsetUpFor(tile.value),
+        y: faceY + 0.008,
       }))
     }
     tileViews.set(tile.id, {
@@ -959,7 +992,7 @@ function reconcileViews(): void {
       regime: '',
       settled: false,
       fresh: true,
-      decor: attachDraftDecor(mesh),
+      decor: attachDraftDecor(mesh, faceY),
     })
     owners.set(mesh, { kind: 'tile', id: tile.id })
     scene.value.add(mesh)
@@ -970,6 +1003,7 @@ function reconcileViews(): void {
   // branch out would mean the first thing that does silently leaks a mesh into the scene.
   for (const [id, view] of [...plateViews]) {
     if (props.tableau.plate(id)) continue
+    if (view.decor) disposeDraftDecor(view.decor)
     scene.value?.remove(view.object)
     owners.delete(view.object)
     plateViews.delete(id)
@@ -1032,7 +1066,10 @@ onBeforeUnmount(() => {
       ;(mesh.material as Material | undefined)?.dispose()
     }
   }
-  for (const view of plateViews.values()) scene.value?.remove(view.object)
+  for (const view of plateViews.values()) {
+    if (view.decor) disposeDraftDecor(view.decor)
+    scene.value?.remove(view.object)
+  }
   tileViews.clear()
   plateViews.clear()
   owners.clear()
@@ -1042,9 +1079,11 @@ onBeforeUnmount(() => {
   for (const texture of symbolTextures) texture.dispose()
   symbolTextures.length = 0
   tileGeometry.dispose()
+  tokenGeometry.dispose()
   disposePlateVisualAssets()
   disposePlateBackAssets()
   disposeDraftDecorAssets()
+  disposePlateDraftDecorAssets()
   scatterCache.clear()
 })
 </script>
