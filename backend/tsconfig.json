@@ -18,7 +18,11 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "sourceMap": true,
-    "incremental": true
+    "incremental": true,
+    // Inside dist, so `nest build`'s deleteOutDir invalidates it too. Left at the default, tsc keeps
+    // a build-info file that outlives the output it describes and then emits nothing into an empty
+    // directory — a silent no-op build.
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules"]

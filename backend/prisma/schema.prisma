@@ -9,6 +9,11 @@
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
+
+  // Stated rather than inferred. Left to itself the generator emits ESM, which compiles to a file
+  // holding both `exports.` and `import.meta.url` — and Node, seeing the latter, loads it as ESM and
+  // dies on the former. The generated code carries `@ts-nocheck`, so tsc never warns.
+  moduleFormat = "cjs"
 }
 
 // Prisma 7 keeps the connection out of the schema: the CLI reads it from prisma.config.ts and the
