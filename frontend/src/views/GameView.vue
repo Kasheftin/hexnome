@@ -63,6 +63,7 @@ import {
   type DiscardReceipt,
   type PlateLocation,
   type PlateSpec,
+  type Tile,
   type TileLocation,
   type TileSpec,
 } from '@/game/tableau'
@@ -78,6 +79,7 @@ import {
   type TurnPhase,
 } from '@/game/turn'
 import type { Axial } from '@/game/hex'
+import { describeBoard, tilesInReadingOrder, type BoardDiagram } from '@/scene/boardDiagram'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
 import DrawerChrome from '@/scene/DrawerChrome.vue'
@@ -96,6 +98,7 @@ import {
   COLORS,
   DRAWER_COLS,
   DRAWER_ROWS,
+  HEX_SIZE,
   PLATE_SLOTS,
   SOURCE_TILES_PER_LOT,
 } from '@/scene/constants'
@@ -495,16 +498,25 @@ function chooseAction(action: TurnAction): void {
  */
 function endRoundByPassing(): void {
   phase.value = IDLE
+  /*
+   * Tiles go in in reading order, and the tally's filter preserves it — so every row of the reveal
+   * sweeps down the board instead of hopping about in the order things happened to be placed.
+   */
   roundOver.value = tallyRound(
     roundAgenda(agenda, count.value.round) ?? [],
-    tableau.tilesOnBoard(),
+    tilesInReadingOrder(tableau),
   )
+  // Snapshotted, not passed live: the panel should show the board as it was scored.
+  roundBoard.value = describeBoard(tableau, HEX_SIZE)
 }
 
 /* ── the end of a round ───────────────────────────────────────────────────────── */
 
 /** The round's result while it is being shown, or null during play. */
-const roundOver = shallowRef<RoundTally | null>(null)
+const roundOver = shallowRef<RoundTally<Tile> | null>(null)
+
+/** The board the round was scored against, frozen at the moment it ended. */
+const roundBoard = shallowRef<BoardDiagram | null>(null)
 
 /** What each finished round scored, in order. The game's total is their sum. */
 const banked = shallowRef<readonly number[]>([])
@@ -1282,9 +1294,10 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     </Transition>
 
     <RoundResults
-      v-if="roundOver"
+      v-if="roundOver && roundBoard"
       :round="count.round"
       :tally="roundOver"
+      :board="roundBoard"
       :final="isFinalRound"
       :over="gameOver"
       :total="totalScore"

@@ -12,6 +12,9 @@ import {
   worldToAxialFraction,
   type Axial,
   type Point2,
+  boundsOfCells,
+  compareCellsInReadingOrder,
+  hexRectangle,
 } from './hex'
 
 /** Deterministic PRNG, so a failure is always reproducible. */
@@ -192,5 +195,58 @@ describe('distanceToCellEdge', () => {
       expect(d).toBeGreaterThanOrEqual(-1e-9)
       expect(d).toBeLessThanOrEqual(a + 1e-9)
     }
+  })
+})
+
+describe('boundsOfCells', () => {
+  it('is a degenerate box for no cells at all', () => {
+    expect(boundsOfCells([], 1)).toEqual({ minX: 0, maxX: 0, minZ: 0, maxZ: 0 })
+  })
+
+  /* Whole hexagons, not centres — a frame drawn to the centres would clip every edge cell in half. */
+  it('covers a single cell\'s full extent, not just its centre', () => {
+    const size = 2
+    const bounds = boundsOfCells([{ q: 0, r: 0 }], size)
+    expect(bounds.maxX - bounds.minX).toBeCloseTo(hexApothem(size) * 2)
+    expect(bounds.maxZ - bounds.minZ).toBeCloseTo(size * 2)
+  })
+
+  it('encloses every cell it is given', () => {
+    const cells = hexRectangle(2, 2)
+    const bounds = boundsOfCells(cells, 1)
+    for (const cell of cells) {
+      const { x, z } = axialToWorld(cell, 1)
+      expect(x).toBeGreaterThanOrEqual(bounds.minX)
+      expect(x).toBeLessThanOrEqual(bounds.maxX)
+      expect(z).toBeGreaterThanOrEqual(bounds.minZ)
+      expect(z).toBeLessThanOrEqual(bounds.maxZ)
+    }
+  })
+
+  it('grows when a cell is added outside it', () => {
+    const one = boundsOfCells([{ q: 0, r: 0 }], 1)
+    const two = boundsOfCells([{ q: 0, r: 0 }, { q: 3, r: 0 }], 1)
+    expect(two.maxX).toBeGreaterThan(one.maxX)
+    expect(two.minX).toBeCloseTo(one.minX)
+  })
+})
+
+describe('compareCellsInReadingOrder', () => {
+  it('puts an earlier row first, whatever the column', () => {
+    expect(compareCellsInReadingOrder({ q: 9, r: 0 }, { q: 0, r: 1 })).toBeLessThan(0)
+  })
+
+  it('orders left to right within a row', () => {
+    expect(compareCellsInReadingOrder({ q: 0, r: 2 }, { q: 1, r: 2 })).toBeLessThan(0)
+  })
+
+  it('is zero for the same cell, so a sort using it is stable', () => {
+    expect(compareCellsInReadingOrder({ q: 1, r: 2 }, { q: 1, r: 2 })).toBe(0)
+  })
+
+  it('sorts a scrambled set into rows', () => {
+    const sorted = [{ q: 1, r: 1 }, { q: 0, r: 0 }, { q: 0, r: 1 }, { q: 2, r: 0 }]
+      .sort(compareCellsInReadingOrder)
+    expect(sorted).toEqual([{ q: 0, r: 0 }, { q: 2, r: 0 }, { q: 0, r: 1 }, { q: 1, r: 1 }])
   })
 })

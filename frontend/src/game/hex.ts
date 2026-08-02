@@ -138,6 +138,46 @@ export function insetBounds(
   }
 }
 
+/**
+ * World extent of a specific set of cells, covering each hexagon's whole area rather than its centre.
+ *
+ * Unlike {@link hexRectangleBounds}, which describes the whole playfield, this describes *what is
+ * actually there* — which is what a view has to frame when it draws a tableau rather than a board.
+ *
+ * Empty input gives a degenerate zero-area box at the origin. A caller framing nothing has nothing to
+ * frame, and returning null would push that same decision onto every one of them.
+ */
+export function boundsOfCells(cells: readonly Axial[], size: number): WorldBounds {
+  if (cells.length === 0) return { minX: 0, maxX: 0, minZ: 0, maxZ: 0 }
+
+  const apothem = hexApothem(size)
+  let minX = Infinity
+  let maxX = -Infinity
+  let minZ = Infinity
+  let maxZ = -Infinity
+
+  for (const cell of cells) {
+    const { x, z } = axialToWorld(cell, size)
+    // Half-width is the apothem; half-height is the full size, a pointy-top hex being taller than wide.
+    minX = Math.min(minX, x - apothem)
+    maxX = Math.max(maxX, x + apothem)
+    minZ = Math.min(minZ, z - size)
+    maxZ = Math.max(maxZ, z + size)
+  }
+  return { minX, maxX, minZ, maxZ }
+}
+
+/**
+ * Reading order: top to bottom, then left to right.
+ *
+ * For anything that visits cells in front of the player and wants to look deliberate. Row first,
+ * because a sweep down the board reads as a sweep; ordering by column first reads as hopping.
+ */
+export function compareCellsInReadingOrder(a: Axial, b: Axial): number {
+  // Row is `r` alone — `axialToWorld` puts z on r only — and within a row, x rises with q.
+  return a.r - b.r || a.q - b.q
+}
+
 /** Cell centre in world coordinates. */
 export function axialToWorld(h: Axial, size: number): Point2 {
   return {

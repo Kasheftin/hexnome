@@ -168,16 +168,23 @@ function matches(target: ScoringTarget, tile: TileSpec): boolean {
   return target.kind === 'value' ? tile.value === target.value : tile.color === target.color
 }
 
-/** One target's contribution: what it matched, and what that came to. */
-export interface TargetTally {
+/**
+ * One target's contribution: what it matched, and what that came to.
+ *
+ * Generic in the tile so **identity survives the tally**. The board hands in real `Tile`s, and a panel
+ * that wants to point at the tile it just counted needs the id back; narrowing to `TileSpec` on the way
+ * out would throw that away and leave the caller re-deriving which tile was which. The default keeps
+ * `TargetTally` meaning what it always did for callers that only need colour and value.
+ */
+export interface TargetTally<T extends TileSpec = TileSpec> {
   readonly target: ScoringTarget
   /** The matching tiles themselves, so a results panel can show what was counted. */
-  readonly tiles: readonly TileSpec[]
+  readonly tiles: readonly T[]
   readonly points: number
 }
 
-export interface RoundTally {
-  readonly rows: readonly TargetTally[]
+export interface RoundTally<T extends TileSpec = TileSpec> {
+  readonly rows: readonly TargetTally<T>[]
   readonly total: number
 }
 
@@ -192,8 +199,11 @@ export interface RoundTally {
  * Returning the tiles and not merely the counts is what lets the round-end panel show its working.
  * A total with no visible arithmetic is a number the player has to trust.
  */
-export function tallyRound(targets: RoundAgenda, tiles: readonly TileSpec[]): RoundTally {
-  const rows = targets.map((target): TargetTally => {
+export function tallyRound<T extends TileSpec>(
+  targets: RoundAgenda,
+  tiles: readonly T[],
+): RoundTally<T> {
+  const rows = targets.map((target): TargetTally<T> => {
     const matched = tiles.filter(tile => matches(target, tile))
     return { target, tiles: matched, points: matched.length * target.points }
   })

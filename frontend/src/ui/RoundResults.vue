@@ -1,24 +1,33 @@
 <script setup lang="ts">
 /**
- * What a round came to, shown when it ends.
+ * What a round came to — the modal that holds the reveal.
  *
- * **It shows its working.** Every target gets a row listing the tiles it actually matched, so the
- * arithmetic is visible: these tiles, times this much, equals that. A round that simply announced a
- * number would be asking the player to trust it, and would teach them nothing about which targets are
- * worth chasing — which is the whole decision the agenda panel exists to inform.
+ * A shell: the scrim, the frame, the title and the way onward. The counting itself is `ScoringReveal`,
+ * which takes one player's board and tally, so a multiplayer round becomes a queue over seats rather
+ * than a rewrite of this file.
  *
- * A modal, unlike the turn card: it waits rather than passing, because it ends with a choice. The board
- * stays visible behind it, since the tiles being counted are on it.
+ * **It shows its working.** A round that announced only a number would ask to be trusted, and would
+ * teach nothing about which targets are worth chasing — which is the whole decision the agenda panel
+ * exists to inform. So the score is counted out, tile by tile, from the board it came from.
+ *
+ * A modal, unlike the turn card: it waits rather than passing, because it ends with a choice.
+ *
+ * **Skip and advance are never the same pixel.** While the reveal plays the footer offers *Skip*; only
+ * once it has finished does *Next round* take that place. Sharing one button would let a second click
+ * land on a round the player had not seen yet.
  */
-import { computed } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { RoundTally } from '@/game/agenda'
-import { TILE_COLORS } from '@/scene/constants'
-import TileChip from './TileChip.vue'
+import type { Tile } from '@/game/tableau'
+import type { BoardDiagram } from '@/scene/boardDiagram'
+import ScoringReveal from './ScoringReveal.vue'
 
 const props = defineProps<{
   round: number
-  tally: RoundTally
+  tally: RoundTally<Tile>
+  /** The board as it stood when the round ended, snapshotted so it cannot go stale behind the panel. */
+  board: BoardDiagram
   /** True on the last round of the game, which changes what the button offers. */
   final: boolean
   /**
@@ -34,14 +43,16 @@ const props = defineProps<{
 
 defineEmits<{ next: [] }>()
 
-/** "all 3s" / "all indigo" — the same phrasing the action bar uses when it names a draft. */
-function nameOf(row: RoundTally['rows'][number]): string {
-  return row.target.kind === 'value'
-    ? `all ${row.target.value}s`
-    : `all ${TILE_COLORS[row.target.color]?.name.toLowerCase() ?? 'tiles'}`
-}
+const reveal = shallowRef<InstanceType<typeof ScoringReveal> | null>(null)
+const done = shallowRef(false)
 
-const empty = computed(() => props.tally.total === 0)
+/*
+ * Keyed on the round, not on `over`.
+ *
+ * On the final round `startNextRound` leaves this panel mounted and only flips `over`, so anything that
+ * re-ran on that change would replay the whole reveal underneath the "Final score" footer.
+ */
+const revealKey = computed(() => props.round)
 </script>
 
 <template>
@@ -56,42 +67,13 @@ const empty = computed(() => props.tally.total === 0)
         Round {{ props.round }} results
       </h2>
 
-      <ol class="rows">
-        <li
-          v-for="(row, index) in props.tally.rows"
-          :key="index"
-          class="row"
-        >
-          <span class="what">{{ nameOf(row) }}</span>
-          <span class="tiles">
-            <TileChip
-              v-for="(tile, at) in row.tiles"
-              :key="at"
-              :color="tile.color"
-              :value="tile.value"
-            />
-            <span
-              v-if="row.tiles.length === 0"
-              class="none"
-            >none</span>
-          </span>
-          <span class="sum">
-            <span class="each">{{ row.tiles.length }} × {{ row.target.points }}</span>
-            <strong>{{ row.points }}</strong>
-          </span>
-        </li>
-      </ol>
-
-      <p class="total">
-        <span>Round total</span>
-        <strong>{{ props.tally.total }}</strong>
-      </p>
-      <p
-        v-if="empty"
-        class="note"
-      >
-        Nothing on the board matched this round's targets.
-      </p>
+      <ScoringReveal
+        :key="revealKey"
+        ref="reveal"
+        :tally="props.tally"
+        :board="props.board"
+        @done="done = true"
+      />
 
       <template v-if="props.over">
         <p class="grand">
@@ -110,12 +92,20 @@ const empty = computed(() => props.tally.total === 0)
         </RouterLink>
       </template>
       <button
-        v-else
+        v-else-if="done"
         type="button"
         class="action next"
         @click="$emit('next')"
       >
         {{ props.final ? 'Finish the game' : 'Next round' }}
+      </button>
+      <button
+        v-else
+        type="button"
+        class="action skip"
+        @click="reveal?.skip()"
+      >
+        Skip
       </button>
     </section>
   </div>
@@ -132,94 +122,21 @@ const empty = computed(() => props.tally.total === 0)
   inset: 0;
   display: grid;
   place-items: center;
+  padding: 20px;
   background: rgb(4 5 8 / 55%);
   z-index: 50;
 }
 
+/*
+ * Much wider than a list of rows needs, because it now holds a board as well. At 36 plates the diagram
+ * is the constraint: any narrower and the tiles stop being legible as tiles.
+ */
 .results {
-  min-width: 380px;
-  max-width: min(680px, 90vw);
-  max-height: 86vh;
+  width: min(1100px, 94vw);
+  max-height: 90vh;
   padding: 18px 20px;
   overflow-y: auto;
   font-size: 12px;
-}
-
-.rows {
-  margin: 14px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.row {
-  display: grid;
-  grid-template-columns: 92px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 8px 0;
-  border-top: 1px solid #2a2c33;
-}
-
-.what {
-  color: #79808f;
-  letter-spacing: 0.04em;
-}
-
-/* Wraps, because a colour target late in a game can match a great many tiles. */
-.tiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  align-items: center;
-}
-
-.none {
-  color: #4d535e;
-  font-style: italic;
-}
-
-.sum {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  justify-content: flex-end;
-}
-
-.each {
-  color: #6b7382;
-  font-variant-numeric: tabular-nums;
-}
-
-.sum strong {
-  min-width: 28px;
-  color: #cfd4de;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.total {
-  display: flex;
-  justify-content: space-between;
-  margin: 0;
-  padding-top: 12px;
-  border-top: 1px solid #3a3222;
-  color: #79808f;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.total strong {
-  color: #e8c878;
-  font-size: 18px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.note {
-  margin: 8px 0 0;
-  color: #6b7382;
-  font-size: 11px;
 }
 
 .grand {
@@ -240,7 +157,13 @@ const empty = computed(() => props.tally.total === 0)
   font-variant-numeric: tabular-nums;
 }
 
-.next {
+.note {
+  margin: 8px 0 0;
+  color: #6b7382;
+  font-size: 11px;
+}
+
+.action {
   display: block;
   margin-top: 16px;
   text-align: center;
@@ -258,18 +181,30 @@ const empty = computed(() => props.tally.total === 0)
   transition: border-color 140ms, background-color 140ms;
 }
 
-.next:hover {
+.action:hover {
   border-color: #8fe6c0;
   background: rgb(143 230 192 / 8%);
 }
 
-.next:focus-visible {
+.action:focus-visible {
   outline: 2px solid #8fe6c0;
   outline-offset: 2px;
 }
 
+/* Quieter than the advance: leaving early is allowed, not encouraged. */
+.skip {
+  border-color: #33383f;
+  color: #79808f;
+}
+
+.skip:hover {
+  border-color: #7d6a41;
+  background: rgb(232 200 120 / 7%);
+  color: #e8c878;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .next {
+  .action {
     transition: none;
   }
 }
