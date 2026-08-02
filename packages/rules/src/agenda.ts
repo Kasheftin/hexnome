@@ -23,12 +23,12 @@
  *
  * ## Frozen contract
  *
- * The agenda is derived from the game id, so it is a second promise attached to a URL, alongside the
+ * The agenda is derived from the game's seed, so it is a second promise attached to it, alongside the
  * deck. Changing the plans, the order the colour deck is built in, or the seed tags silently hands a
  * returning player different targets for an id they already have. `agenda.spec.ts` pins exact output
  * for known ids so that fails a test instead of a game.
  *
- * It is derived and **never stored**. Both inputs already survive a reload — the id is in the URL, the
+ * It is derived and **never stored**. Both inputs already survive a reload — the seed is on the game, the
  * mode in the saved settings — and persisting the result would let an agenda written by an older build
  * outlive the code that produced it.
  */
@@ -136,14 +136,14 @@ function dealColors(plan: readonly RoundPlan[], colors: readonly number[]): Agen
  * The mode is deliberately **not** part of the seed tag. That is what makes "reversed is classic
  * backwards" true of the colours too, and not merely of the running order.
  */
-export function createAgenda(gameId: string, mode: SingleplayerMode): Agenda {
-  const colors = shuffleInPlace(range(TILE_COLOR_COUNT), createRandom(`${gameId}:agenda:colors`))
+export function createAgenda(seed: string, mode: SingleplayerMode): Agenda {
+  const colors = shuffleInPlace(range(TILE_COLOR_COUNT), createRandom(`${seed}:agenda:colors`))
 
   if (mode === 'random') {
     // Two decks zipped, never a shuffle of pairs — that would weld each value to one colour for ever.
     const values = shuffleInPlace(
       range(TILE_VALUE_COUNT).map(index => index + 1),
-      createRandom(`${gameId}:agenda:values`),
+      createRandom(`${seed}:agenda:values`),
     )
     return dealColors(values.map(value => ({ values: [value], colors: 1 })), colors)
   }

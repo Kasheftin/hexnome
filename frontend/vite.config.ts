@@ -26,8 +26,13 @@ export default defineConfig({
     },
   },
   test: {
-    // Scene-layer specs. The rules package runs its own suite — see packages/rules/vitest.config.ts.
-    environment: 'node',
+    /*
+     * App-layer specs. The rules package runs its own suite — see packages/rules/vitest.config.ts.
+     *
+     * `jsdom` only for the handful that touch storage; the scene specs are pure maths and do not care
+     * either way.
+     */
+    environment: 'jsdom',
     include: ['src/**/*.spec.ts'],
   },
 })

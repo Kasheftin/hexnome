@@ -9,9 +9,10 @@
  *
  * ## Frozen contract
  *
- * This is the third promise attached to a game id, after the deck and the agenda — and it is a wider
- * one than either. Those two are pure functions of the id, so "the deck for game X" is a fixed thing a
- * golden test can pin. A reshuffle depends on the id **and on how the game was played**, so what gets
+ * This is the third promise attached to a game's seed, after the deck and the agenda — and it is a
+ * wider one than either. Those two are pure functions of the seed, so "the deck for this seed" is a
+ * fixed thing a golden test can pin. A reshuffle depends on the seed **and on how the game was
+ * played**, so what gets
  * pinned here is the *mechanism*: the encoding, the ordering, the generation counter, and the promise
  * that an identical pile in an identical game gives an identical result.
  *

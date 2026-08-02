@@ -120,7 +120,7 @@ import {
   roundsOf,
   type GameSettings,
 } from '@hexnome/rules/gameSettings'
-import { useSavedGames } from '@/composables/useSavedGames'
+import { useSavedGames, type SavedGame } from '@/composables/useSavedGames'
 
 const route = useRoute()
 const router = useRouter()
@@ -132,7 +132,17 @@ const gameId = computed(() => {
 })
 
 /** Restored from storage on every load, including a refresh. */
-const settings = shallowRef<GameSettings | null>(savedGames.get(gameId.value))
+const saved = shallowRef<SavedGame | null>(savedGames.get(gameId.value))
+const settings = computed<GameSettings | null>(() => saved.value?.settings ?? null)
+
+/**
+ * What generates this game, as distinct from what finds it.
+ *
+ * The deck, the agenda, the reshuffles and the loose-tile scatter all come from the **seed**; the id
+ * only says which game this is. Two games may share a seed — that is how the same board gets played
+ * twice — so anything derived must read this and never `gameId`.
+ */
+const seed = computed(() => saved.value?.seed ?? gameId.value)
 
 const modeLabel = computed(() => {
   const s = settings.value
@@ -188,7 +198,7 @@ const platesPerRound = settings.value?.platesPerRound ?? DEFAULT_PLATES_PER_ROUN
  * Derived once and never stored: both inputs already survive a reload, and a saved agenda could
  * outlive the code that produced it (game/agenda.ts).
  */
-const agenda = createAgenda(gameId.value, settings.value?.mode ?? DEFAULT_SINGLEPLAYER_MODE)
+const agenda = createAgenda(seed.value, settings.value?.mode ?? DEFAULT_SINGLEPLAYER_MODE)
 
 /** Stems paid for enclosing a plate. Fixed for the game, so the tableau can hold it too. */
 const stemsPerInternalAnchor =
@@ -239,7 +249,7 @@ const tableau = recordingTableau(createTableau(tableauOptions), log.append)
  * The *order* is a frozen contract derived from the id (game/deck.ts); the cursor is ordinary play state
  * that resets with the board. A restock draws one plate and a full heap of tiles off the top of each.
  */
-const deck = createDeck(gameId.value)
+const deck = createDeck(seed.value)
 
 /**
  * Each player's opening plate comes out of the bag before anything else.
@@ -265,8 +275,8 @@ const opening = dealStartingPlates(deck.plates, PLAYERS)
  * the bag. Spend it and it enters the *pile*, so it can later be dealt out of a bag it was never in.
  * That is intended — a plate is a plate — and it means conservation is over 36, not 35.
  */
-const plateBag = createRecyclingBag(opening.remaining, { seed: `${gameId.value}:reshuffle:plates` })
-const tileBag = createRecyclingBag(deck.tiles, { seed: `${gameId.value}:reshuffle:tiles` })
+const plateBag = createRecyclingBag(opening.remaining, { seed: `${seed.value}:reshuffle:plates` })
+const tileBag = createRecyclingBag(deck.tiles, { seed: `${seed.value}:reshuffle:tiles` })
 
 /** Plates dealt into the source this round. The round is over as a supply once this reaches its quota. */
 const platesDealt = shallowRef(0)
@@ -1274,7 +1284,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <TableauView
         :tableau="tableau"
         :drawer="drawerShape"
-        :game-id="gameId"
+        :seed="seed"
         :may-place="phase.kind === 'putting' || canStartPut"
         :unaffordable="unaffordable"
         :may-move-placed="phase.kind === 'putting'"

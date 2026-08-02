@@ -108,8 +108,13 @@ const props = defineProps<{
   tableau: Tableau
   /** How many seats the drawer has — a game setting, so the panel's size follows it. */
   drawer: DrawerShape
-  /** Seeds the loose-tile scatter, so a lot looks the same after a refresh. */
-  gameId: string
+  /**
+   * Seeds the loose-tile scatter, so a lot looks the same after a refresh.
+   *
+   * The game's **seed**, not its id: two games sharing a seed are the same deal and should scatter
+   * their heaps identically.
+   */
+  seed: string
   /**
    * Whether an item may leave the drawer for the board.
    *
@@ -421,7 +426,7 @@ const scatterCache = new Map<string, ScatterOffset[]>()
 function scatterFor(heapKey: string): ScatterOffset[] {
   const cached = scatterCache.get(heapKey)
   if (cached) return cached
-  const computed = sourceScatter(props.gameId, heapKey, props.tableau.sourceTilesPerLot)
+  const computed = sourceScatter(props.seed, heapKey, props.tableau.sourceTilesPerLot)
   scatterCache.set(heapKey, computed)
   return computed
 }

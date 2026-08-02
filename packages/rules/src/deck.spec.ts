@@ -184,7 +184,7 @@ describe('the opening plates', () => {
     expect(dealStartingPlates(plates, 0)).toEqual({ starting: [], remaining: [...plates] })
   })
 
-  it('is decided by the game id, like the rest of the deal', () => {
+  it('is decided by the seed, like the rest of the deal', () => {
     const a = dealStartingPlates(createDeck(ID_A).plates, 2).starting
     const b = dealStartingPlates(createDeck(ID_B).plates, 2).starting
     expect(a).toEqual(dealStartingPlates(createDeck(ID_A).plates, 2).starting)

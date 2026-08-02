@@ -1,12 +1,12 @@
 /**
- * The bags: the order plates and tiles come out of, derived from the game's id.
+ * The bags: the order plates and tiles come out of, derived from the game's seed.
  *
  * Pure data and functions. This module must not import from `vue` or `three` —
  * see docs/tech-spec.md, "The one hard architectural rule". ESLint enforces it.
  *
  * A game is minted with a uuid and stored against it, so `/game?id=…` already survives a refresh
  * (composables/useSavedGames.ts). Seeding the bags from that same id makes the deck a property of
- * the id rather than of the moment the page loaded: the same link always deals the same 36 plates
+ * the seed rather than of the moment the page loaded: the same seed always deals the same 36 plates
  * and 108 tiles in the same order. That is what will later let two clients agree on a deck without
  * sending it, and it makes a bug report reproducible from a URL alone.
  *
@@ -14,13 +14,22 @@
  * them; how wide that window is and when it refills is still open (docs/game-design.md, open
  * question 4).
  *
+ * ## The seed is not the game's id
+ *
+ * A game has both, and they do different jobs. The **id** finds a game; the **seed** generates it.
+ * They start out as different values and nothing here ever sees the id.
+ *
+ * Keeping them apart is what makes a deal repeatable: copy a seed into a new game and you get the
+ * same 36 plates, the same agenda and the same scatter under a new id, which is how one board can be
+ * played twice. Many ids may share a seed; the reverse means nothing.
+ *
  * ## This derivation is a frozen contract
  *
  * Changing the hash, the generator, the order the bag is built in, or the direction of the shuffle
- * all silently hand a returning player a different deck for an id they already have. Nothing at
- * runtime can detect that. deck.spec.ts pins the exact output for two known ids so such a change
- * fails a test instead of a game. The hash, generator and shuffle live in game/random.ts, so that
- * file is inside the same contract even though the pins are here.
+ * all silently hand a returning player a different deck for a seed they already have. Nothing at
+ * runtime can detect that. deck.spec.ts pins the exact output for two known seeds so such a change
+ * fails a test instead of a game. The hash, generator and shuffle live in random.ts, so that file is
+ * inside the same contract even though the pins are here.
  *
  * A note on what this does *not* claim: a uuid carries 122 bits of entropy, while the number of
  * possible orders is 36! × 108! — vastly larger. So this picks from a tiny subset of orders rather
@@ -88,16 +97,16 @@ function distinctTiles(): TileSpec[] {
 /**
  * The bags for a game, in draw order.
  *
- * Both are returned whole rather than as something you pull from one at a time: the id defines the
+ * Both are returned whole rather than as something you pull from one at a time: the seed defines the
  * order of all 36 plates and all 108 tiles up front, and play can read as far down each as it
  * needs. Nothing here tracks how far that is — the board resets on reload anyway.
  */
-export function createDeck(gameId: string, options: DeckOptions = {}): Deck {
+export function createDeck(seed: string, options: DeckOptions = {}): Deck {
   const tileCopies = options.tileCopies ?? STANDARD_TILE_COPIES
 
   // One plate per distinct tile: 6 colours × 6 values = 36. The plate's own tile is what it is
   // drafted by, so "36 plates" and "36 distinct tiles" are the same enumeration.
-  const plateRng = createRandom(`${gameId}:plates`)
+  const plateRng = createRandom(`${seed}:plates`)
   const plates: DealtPlate[] = distinctTiles().map(spec => ({
     ...spec,
     // Drawn while building, so the petals are assigned in the fixed pre-shuffle order. Shuffling
@@ -106,7 +115,7 @@ export function createDeck(gameId: string, options: DeckOptions = {}): Deck {
   }))
   shuffleInPlace(plates, plateRng)
 
-  const tileRng = createRandom(`${gameId}:tiles`)
+  const tileRng = createRandom(`${seed}:tiles`)
   const tiles: TileSpec[] = []
   for (let copy = 0; copy < tileCopies; copy++) {
     tiles.push(...distinctTiles())
@@ -145,7 +154,7 @@ export interface StartingDeal {
  *
  * The dealer reads the shuffled bag in **draw order** and takes the first value-1 plate for the first
  * player, the next for the second, and so on. Order matters and is not incidental: the bag's order is
- * derived from the game id, so which player opens with which colour is settled by the id too, the same
+ * derived from the seed, so which player opens with which colour is settled by the seed too, the same
  * way everything else about the deal is.
  *
  * The plates are **removed**, not copied — they are in a player's drawer, so they can never turn up in

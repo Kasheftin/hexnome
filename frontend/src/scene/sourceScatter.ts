@@ -81,12 +81,12 @@ export const MIN_TILE_CLEARANCE = 2
  * heaped over it. Guaranteed clearance is worth more than the scatter.
  */
 export function sourceScatter(
-  gameId: string,
+  seed: string,
   /** Stable identity for the heap — its plate's id. Not the slot, which changes as the stack shifts. */
   heapKey: string,
   count = SOURCE_TILES_PER_LOT,
 ): ScatterOffset[] {
-  const rng = createRandom(`${gameId}:scatter:${heapKey}`)
+  const rng = createRandom(`${seed}:scatter:${heapKey}`)
   const sector = (2 * Math.PI) / count
   // The whole ring is turned once per lot, so the heaps do not all form the same cross.
   const ringRotation = rng() * 2 * Math.PI

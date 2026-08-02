@@ -29,7 +29,7 @@ const colorsOf = (agenda: Agenda) => agenda.flat()
 
 const tile = (color: number, value: number) => ({ color, value })
 
-describe('the agenda a game id deals', () => {
+describe('the agenda a seed deals', () => {
   /*
    * Golden. The agenda is a second promise attached to a URL, like the deck: change the plans, the
    * order the colour deck is built in, or the seed tags, and a returning player gets different targets
