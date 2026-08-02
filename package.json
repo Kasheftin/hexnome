@@ -1,0 +1,21 @@
+{
+  "name": "hexnome",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.6.2",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "build": "pnpm --filter hexnome-frontend build",
+    "dev": "pnpm --filter hexnome-frontend dev"
+  },
+  "devDependencies": {
+    "eslint": "^10.8.0",
+    "eslint-plugin-vue": "^10.10.0",
+    "jiti": "^2.6.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0"
+  }
+}

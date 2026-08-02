@@ -27,7 +27,7 @@ import {
   RingGeometry,
 } from 'three'
 import { onBeforeUnmount, onMounted, watch } from 'vue'
-import { axialToWorld, type Axial } from '@/game/hex'
+import { axialToWorld, type Axial } from '@hexnome/rules/hex'
 import { HEX_SIZE, HIGHLIGHT_COLORS, HIGHLIGHT_Y } from './constants'
 
 const props = defineProps<{

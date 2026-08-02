@@ -18,7 +18,7 @@
  * the local player's turn, so it reads as a status line rather than a wait.
  */
 import { computed } from 'vue'
-import type { TurnOptions, TurnPhase } from '@/game/turn'
+import type { TurnOptions, TurnPhase } from '@hexnome/rules/turn'
 import TileChip from './TileChip.vue'
 import { TILE_COLORS } from '@/scene/constants'
 

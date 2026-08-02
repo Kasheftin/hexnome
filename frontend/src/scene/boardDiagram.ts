@@ -15,10 +15,10 @@
  *   `TableauView` needs only because it watches a mutable model.
  * - In multiplayer an opponent's board arrives as data, and this is already that shape.
  */
-import { axialKey, boundsOfCells, compareCellsInReadingOrder, type Axial, type WorldBounds } from '@/game/hex'
-import type { Leftovers } from '@/game/groups'
-import { plateCells } from '@/game/plate'
-import type { AnchorKind, Tableau, Tile, TileSpec } from '@/game/tableau'
+import { axialKey, boundsOfCells, compareCellsInReadingOrder, type Axial, type WorldBounds } from '@hexnome/rules/hex'
+import type { Leftovers } from '@hexnome/rules/groups'
+import { plateCells } from '@hexnome/rules/plate'
+import type { AnchorKind, Tableau, Tile, TileSpec } from '@hexnome/rules/tableau'
 
 /** A plate's footprint: the hole it sits on, and the seven cells it covers. */
 export interface DiagramPlate {

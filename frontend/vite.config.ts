@@ -17,10 +17,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      /*
+       * Resolved by path rather than left to the workspace link, so Vite treats the rules package as
+       * ordinary source: it is compiled and hot-reloaded like the rest of the app, with no build step
+       * between editing a rule and seeing it.
+       */
+      '@hexnome/rules': fileURLToPath(new URL('../packages/rules/src', import.meta.url)),
     },
   },
   test: {
-    // The rules module is pure maths — no DOM, no WebGL, no component mounting.
+    // Scene-layer specs. The rules package runs its own suite — see packages/rules/vitest.config.ts.
     environment: 'node',
     include: ['src/**/*.spec.ts'],
   },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PLATE_SLOT_CHOICES, TILE_SLOT_CHOICES } from '@/game/gameSettings'
+import { PLATE_SLOT_CHOICES, TILE_SLOT_CHOICES } from '@hexnome/rules/gameSettings'
 import { DRAWER_SIDE_GAP_PX } from './constants'
 import { createDrawerLayout, type DrawerShape } from './drawerLayout'
 

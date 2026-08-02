@@ -10,11 +10,10 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "test:watch": "vitest"
   },
   "dependencies": {
+    "@hexnome/rules": "workspace:*",
     "@mdi/js": "^7.4.47",
     "@tresjs/cientos": "^5.8.1",
     "@tresjs/core": "5.8.3",

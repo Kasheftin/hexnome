@@ -45,10 +45,10 @@ import {
   type Texture,
 } from 'three'
 import { onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import { axialToWorld, worldToAxial, type Axial } from '@/game/hex'
-import { petalCell } from '@/game/plate'
-import type { DraftTileState } from '@/game/draft'
-import type { PlateLocation, Tableau, TileLocation } from '@/game/tableau'
+import { axialToWorld, worldToAxial, type Axial } from '@hexnome/rules/hex'
+import { petalCell } from '@hexnome/rules/plate'
+import type { DraftTileState } from '@hexnome/rules/draft'
+import type { PlateLocation, Tableau, TileLocation } from '@hexnome/rules/tableau'
 import {
   DRAWER_TILE_FILL,
   DRAWER_TILE_Y,

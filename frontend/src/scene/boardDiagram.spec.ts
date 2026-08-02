@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { axialKey, hexRectangle } from '@/game/hex'
-import { plateCells } from '@/game/plate'
-import { createTableau, type PlateLocation, type TileSpec } from '@/game/tableau'
+import { axialKey, hexRectangle } from '@hexnome/rules/hex'
+import { plateCells } from '@hexnome/rules/plate'
+import { createTableau, type PlateLocation, type TileSpec } from '@hexnome/rules/tableau'
 import { describeBoard, tilesInReadingOrder } from './boardDiagram'
 import { HEX_SIZE } from './constants'
 

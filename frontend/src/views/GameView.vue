@@ -28,9 +28,9 @@ import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@/game/agenda'
-import { createDeck, dealStartingPlates, type DealtPlate } from '@/game/deck'
-import { finalTally, NOTHING_LEFT } from '@/game/groups'
+import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@hexnome/rules/agenda'
+import { createDeck, dealStartingPlates, type DealtPlate } from '@hexnome/rules/deck'
+import { finalTally, NOTHING_LEFT } from '@hexnome/rules/groups'
 import {
   canConfirmDraft,
   completedStrategies,
@@ -39,8 +39,8 @@ import {
   draftStates as draftStatesOf,
   toggleDraftSelection,
   type DraftItem,
-} from '@/game/draft'
-import { hexRectangle } from '@/game/hex'
+} from '@hexnome/rules/draft'
+import { hexRectangle } from '@hexnome/rules/hex'
 import {
   canAffordPlacement,
   canConfirmPayment,
@@ -49,16 +49,16 @@ import {
   togglePayment,
   type Payer,
   type PaymentTarget,
-} from '@/game/payment'
+} from '@hexnome/rules/payment'
 import {
   createGameLog,
   entriesThroughRound,
   recordingTableau,
   replayTableau,
-} from '@/game/gameLog'
-import { createRecyclingBag } from '@/game/recycling'
+} from '@hexnome/rules/gameLog'
+import { createRecyclingBag } from '@hexnome/rules/recycling'
 import type { RoundRecord } from '@/ui/roundRecord'
-import { hasRoomToShift, platesToReveal, pushLot, shouldRefill, sourceContents } from '@/game/source'
+import { hasRoomToShift, platesToReveal, pushLot, shouldRefill, sourceContents } from '@hexnome/rules/source'
 import {
   createTableau,
   type Anchor,
@@ -68,8 +68,8 @@ import {
   type TableauOptions,
   type TileLocation,
   type TileSpec,
-} from '@/game/tableau'
-import { DEFAULT_PLACEMENT_RULE } from '@/game/placement'
+} from '@hexnome/rules/tableau'
+import { DEFAULT_PLACEMENT_RULE } from '@hexnome/rules/placement'
 import {
   FIRST_TURN,
   IDLE,
@@ -79,8 +79,8 @@ import {
   turnOptions,
   type TurnAction,
   type TurnPhase,
-} from '@/game/turn'
-import type { Axial } from '@/game/hex'
+} from '@hexnome/rules/turn'
+import type { Axial } from '@hexnome/rules/hex'
 import { describeBoard, describeLeftovers, tilesInReadingOrder } from '@/scene/boardDiagram'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
@@ -119,7 +119,7 @@ import {
   modeInfo,
   roundsOf,
   type GameSettings,
-} from '@/game/gameSettings'
+} from '@hexnome/rules/gameSettings'
 import { useSavedGames } from '@/composables/useSavedGames'
 
 const route = useRoute()

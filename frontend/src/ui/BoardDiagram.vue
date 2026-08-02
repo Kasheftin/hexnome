@@ -24,7 +24,7 @@
  * lift — so the copies share their tuning and only their medium differs. Keep it that way.
  */
 import { computed } from 'vue'
-import { axialToWorld, hexApothem, type Axial } from '@/game/hex'
+import { axialToWorld, hexApothem, type Axial } from '@hexnome/rules/hex'
 import type { BoardDiagram } from '@/scene/boardDiagram'
 import {
   ANCHOR_EXTERNAL_PAD_R,

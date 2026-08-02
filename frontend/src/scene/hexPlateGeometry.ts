@@ -1,5 +1,5 @@
 import { BufferGeometry, Float32BufferAttribute } from 'three'
-import { SQRT3 } from '@/game/hex'
+import { SQRT3 } from '@hexnome/rules/hex'
 
 /**
  * A flat pointy-top hexagon lying in the XZ plane, UV-mapped so a texture's

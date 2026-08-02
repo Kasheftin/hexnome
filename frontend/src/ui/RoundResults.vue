@@ -18,7 +18,7 @@
  */
 import { computed, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
-import type { FinalTally } from '@/game/groups'
+import type { FinalTally } from '@hexnome/rules/groups'
 import FinalScore from './FinalScore.vue'
 import type { RoundRecord } from './roundRecord'
 import ScoringReveal from './ScoringReveal.vue'

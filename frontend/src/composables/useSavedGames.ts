@@ -1,9 +1,6 @@
 import { useLocalStorage } from '@vueuse/core'
-import {
-  createGameId,
-  parseGameSettings,
-  type GameSettings,
-} from '@/game/gameSettings'
+import { parseGameSettings, type GameSettings } from '@hexnome/rules/gameSettings'
+import { createGameId } from './createGameId'
 
 /**
  * Settings for started games, keyed by game id and kept in localStorage.

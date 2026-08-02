@@ -1,4 +1,4 @@
-import { createRandom } from '@/game/random'
+import { createRandom } from '@hexnome/rules/random'
 import { SOURCE_TILES_PER_LOT } from './constants'
 
 /**

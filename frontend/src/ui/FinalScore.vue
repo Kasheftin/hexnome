@@ -19,13 +19,13 @@
  * count different things, but a tile crossing the screen should look identical in both.
  */
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
-import type { FinalTally } from '@/game/groups'
+import type { FinalTally } from '@hexnome/rules/groups'
 import {
   fitCadence,
   finalTimeline,
   holdOf,
   type ScoringStep,
-} from '@/game/scoringTimeline'
+} from '@hexnome/rules/scoringTimeline'
 import type { BoardDiagram } from '@/scene/boardDiagram'
 import { TILE_COLORS } from '@/scene/constants'
 import BoardDiagramView, { type TileEmphasis } from './BoardDiagram.vue'

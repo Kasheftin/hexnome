@@ -29,14 +29,14 @@
  * than once end up wearing a pip each, and a footnote says so in words.
  */
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
-import type { RoundTally } from '@/game/agenda'
+import type { RoundTally } from '@hexnome/rules/agenda'
 import {
   fitCadence,
   holdOf,
   scoringTimeline,
   type ScoringStep,
-} from '@/game/scoringTimeline'
-import type { Tile } from '@/game/tableau'
+} from '@hexnome/rules/scoringTimeline'
+import type { Tile } from '@hexnome/rules/tableau'
 import type { BoardDiagram } from '@/scene/boardDiagram'
 import { TILE_COLORS } from '@/scene/constants'
 import BoardDiagramView, { type TileEmphasis } from './BoardDiagram.vue'

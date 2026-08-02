@@ -17,8 +17,8 @@
 import { useTresContext } from '@tresjs/core'
 import { CircleGeometry, Group, Mesh, MeshBasicMaterial, type Object3D } from 'three'
 import { onBeforeUnmount, onMounted, watch } from 'vue'
-import { axialToWorld, axialKey, type Axial } from '@/game/hex'
-import type { Tableau } from '@/game/tableau'
+import { axialToWorld, axialKey, type Axial } from '@hexnome/rules/hex'
+import type { Tableau } from '@hexnome/rules/tableau'
 import {
   ANCHOR_EXTERNAL_PAD_COLOR,
   ANCHOR_EXTERNAL_PAD_R,

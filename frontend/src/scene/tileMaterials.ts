@@ -1,5 +1,5 @@
 import { Color, MeshStandardMaterial } from 'three'
-import { TILE_COLOR_COUNT } from '@/game/deck'
+import { TILE_COLOR_COUNT } from '@hexnome/rules/deck'
 import { TILE_COLORS } from './constants'
 
 /**

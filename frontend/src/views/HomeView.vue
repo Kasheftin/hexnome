@@ -47,12 +47,12 @@ import {
   modeInfo,
   type GameKind,
   type SingleplayerMode,
-} from '@/game/gameSettings'
+} from '@hexnome/rules/gameSettings'
 import {
   DEFAULT_PLACEMENT_RULE,
   PLACEMENT_RULES,
   type PlacementRule,
-} from '@/game/placement'
+} from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { useSavedGames } from '@/composables/useSavedGames'
 

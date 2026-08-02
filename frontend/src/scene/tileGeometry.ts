@@ -1,5 +1,5 @@
 import { ExtrudeGeometry, Shape, type BufferGeometry } from 'three'
-import { SQRT3 } from '@/game/hex'
+import { SQRT3 } from '@hexnome/rules/hex'
 
 /**
  * A thick pointy-top hexagonal prism with a rounded top edge — the physical game

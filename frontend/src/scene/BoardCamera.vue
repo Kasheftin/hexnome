@@ -25,7 +25,7 @@ import {
   hexRectangleBounds,
   insetBounds,
   type WorldBounds,
-} from '@/game/hex'
+} from '@hexnome/rules/hex'
 import {
   BOARD_HALF_COLS,
   BOARD_HALF_ROWS,

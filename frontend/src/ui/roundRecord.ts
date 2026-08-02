@@ -5,9 +5,9 @@
  * `game/gameLog.ts`. That is what lets the panel show round 1's board while round 3 is being played:
  * the picture is rebuilt from a prefix of the log, not remembered.
  */
-import type { RoundTally } from '@/game/agenda'
-import type { Leftovers } from '@/game/groups'
-import type { Tile } from '@/game/tableau'
+import type { RoundTally } from '@hexnome/rules/agenda'
+import type { Leftovers } from '@hexnome/rules/groups'
+import type { Tile } from '@hexnome/rules/tableau'
 import type { BoardDiagram } from '@/scene/boardDiagram'
 
 export interface RoundRecord {

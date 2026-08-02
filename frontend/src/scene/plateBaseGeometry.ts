@@ -1,6 +1,6 @@
 import { ExtrudeGeometry, Shape, type BufferGeometry } from 'three'
-import { axialToWorld } from '@/game/hex'
-import { plateCells } from '@/game/plate'
+import { axialToWorld } from '@hexnome/rules/hex'
+import { plateCells } from '@hexnome/rules/plate'
 
 /**
  * The plate's body: a thin slab in the shape of the whole flower, for the seven sockets to

@@ -7,8 +7,8 @@ import {
   RingGeometry,
   type BufferGeometry,
 } from 'three'
-import { axialToWorld } from '@/game/hex'
-import { PETAL_DIRS } from '@/game/plate'
+import { axialToWorld } from '@hexnome/rules/hex'
+import { PETAL_DIRS } from '@hexnome/rules/plate'
 import {
   HEX_SIZE,
   PLATE_BASE_BEVEL,

@@ -1,0 +1,19 @@
+{
+  "name": "@hexnome/rules",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "//": "TypeScript source is the entry point. Both consumers compile it themselves \u2014 the frontend through Vite, the backend through its own tsconfig \u2014 so there is no build step to forget and no dist to go stale.",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

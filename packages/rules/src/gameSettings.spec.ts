@@ -12,7 +12,6 @@ import {
   DEFAULT_STRICT_ENCLOSURE_BONUS,
   SINGLEPLAYER_MODES,
   effectiveGroupBonuses,
-  createGameId,
   defaultGameSettings,
   parseGameSettings,
   roundsOf,
@@ -111,16 +110,6 @@ describe('rounds', () => {
     for (const mode of SINGLEPLAYER_MODES) {
       expect(roundsOf(mode.id)).toBe(mode.rounds)
       expect(mode.rounds).toBeGreaterThan(0)
-    }
-  })
-})
-
-describe('game ids', () => {
-  it('look like uuids and do not repeat', () => {
-    const ids = new Set(Array.from({ length: 500 }, () => createGameId()))
-    expect(ids.size).toBe(500)
-    for (const id of ids) {
-      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     }
   })
 })
