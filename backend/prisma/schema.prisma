@@ -1,0 +1,77 @@
+// The game as the server keeps it: what it is, and everything that has happened to it.
+//
+// There are only two tables, because there is only one kind of state. A game is its journal — see
+// packages/rules/src/gameLog.ts — so the board, the drawer, the source and the score are all derived
+// by replaying entries rather than stored anywhere.
+
+// Prisma 7 generates into the project rather than into node_modules, so the client is ordinary
+// source the compiler can see.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Prisma 7 keeps the connection out of the schema: the CLI reads it from prisma.config.ts and the
+// running server passes a driver adapter. The schema describes shape only.
+datasource db {
+  provider = "mysql"
+}
+
+model Game {
+  /// How the game is found. This is the id in /game?id=…
+  id        String   @id @db.VarChar(64)
+
+  /// How the game is generated: the deck, the agenda, the reshuffles, the scatter.
+  ///
+  /// Deliberately *not* the id. Copying a seed into a new game replays the same deal, which is what
+  /// makes "beat your score on that board" possible. Two ids may share a seed; the reverse is
+  /// meaningless.
+  seed      String   @db.VarChar(64)
+
+  /// GameSettings as chosen at setup. Re-validated by parseGameSettings on the way out — a JSON
+  /// column is editable in the database, and the client already refuses to trust localStorage for
+  /// exactly this reason.
+  settings  Json
+
+  /// running | finished. Derived from the log; denormalised so a future lobby can filter without
+  /// replaying every game.
+  status    String   @default("running") @db.VarChar(16)
+
+  /// The head of the log. Lets a client ask "is there anything new?" by reading one row, and is the
+  /// counter the append transaction increments.
+  lastSeq   Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entries   LogEntry[]
+
+  @@index([status, updatedAt])
+}
+
+model LogEntry {
+  gameId String @db.VarChar(64)
+
+  /// Monotonic within a game, starting at 1.
+  ///
+  /// A sequence rather than a timestamp: two rows can share a millisecond and clocks step backwards,
+  /// so `?since=<time>` would silently skip entries. An integer is exact, and it lets a client notice
+  /// a gap instead of diverging quietly.
+  seq    Int
+
+  /// player | server. Which side appended it — the server deals and reveals, the player moves.
+  origin String @db.VarChar(8)
+
+  /// The LogEntry op from @hexnome/rules, duplicated out of `data` so the table is readable by eye
+  /// and so a query can count deals without parsing JSON.
+  kind   String @db.VarChar(24)
+
+  /// The entry itself, exactly as the rules package defines it.
+  data   Json
+
+  at     DateTime @default(now())
+
+  game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@id([gameId, seq])
+}

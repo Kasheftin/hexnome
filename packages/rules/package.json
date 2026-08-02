@@ -2,12 +2,19 @@
   "name": "@hexnome/rules",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "//": "TypeScript source is the entry point. Both consumers compile it themselves \u2014 the frontend through Vite, the backend through its own tsconfig \u2014 so there is no build step to forget and no dist to go stale.",
+  "//": "Built to CJS for Node consumers. The frontend bypasses this entirely via a Vite alias to src/, so editing a rule still hot-reloads with no build; the backend requires real JavaScript, so dist/ exists for it.",
   "exports": {
-    "./*": "./src/*.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -15,5 +22,10 @@
   "devDependencies": {
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
-  }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ]
 }
