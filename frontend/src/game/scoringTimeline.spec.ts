@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { tallyRound, type RoundAgenda } from './agenda'
+import { finalTally } from './groups'
 import {
   DEFAULT_CADENCE,
   MIN_HOLD_MS,
   REVEAL_BUDGET_MS,
+  finalTimeline,
   fitCadence,
   scoringTimeline,
   stepDelays,
@@ -175,7 +177,7 @@ describe('timing', () => {
 
   it('scales with the cadence it is given', () => {
     const steps = timelineOf([tile('a', BLUE, 1)])
-    const brisk = { row: 1, tile: 1, rowDone: 1, total: 1 }
+    const brisk = { row: 1, tile: 1, group: 1, rowDone: 1, total: 1 }
     expect(timelineDuration(steps, brisk)).toBe(steps.length)
   })
 })
@@ -207,7 +209,7 @@ describe('fitting a budget', () => {
     const steps = bigRound(400)
     const cadence = fitCadence(steps)
     expect(cadence).toEqual({
-      row: MIN_HOLD_MS, tile: MIN_HOLD_MS, rowDone: MIN_HOLD_MS, total: MIN_HOLD_MS,
+      row: MIN_HOLD_MS, tile: MIN_HOLD_MS, group: MIN_HOLD_MS, rowDone: MIN_HOLD_MS, total: MIN_HOLD_MS,
     })
     expect(timelineDuration(steps, cadence)).toBeGreaterThan(REVEAL_BUDGET_MS)
   })
@@ -222,5 +224,75 @@ describe('fitting a budget', () => {
   it('survives a timeline with nothing to pace', () => {
     expect(fitCadence(timelineOf([]), 0)).toBeTruthy()
     expect(fitCadence([], 0)).toEqual(DEFAULT_CADENCE)
+  })
+})
+
+describe('the final scoresheet reveal', () => {
+  let n = 0
+  const at = (q: number, r: number, color: number, value: number) =>
+    ({ id: `f${n++}`, cell: { q, r }, color, value })
+  const strip = (color: number, value: number, r = 0) =>
+    [at(0, r, color, value), at(1, r, color, value), at(2, r, color, value)]
+
+  it('walks all twelve categories, scoring or not', () => {
+    const steps = finalTimeline(finalTally([]))
+    expect(steps.filter(s => s.kind === 'row')).toHaveLength(12)
+    expect(steps.filter(s => s.kind === 'rowDone')).toHaveLength(12)
+    expect(steps.at(-1)).toEqual({ kind: 'total', points: 0 })
+  })
+
+  /*
+   * The unit is the group, not the tile: three touching greens are worth something the same three
+   * scattered are not, so flying them one at a time would be counting the wrong thing.
+   */
+  it('lands a whole group at once, carrying every member', () => {
+    const steps = finalTimeline(finalTally(strip(GREEN, 4)))
+    const groups = steps.filter(s => s.kind === 'group')
+    expect(groups).toHaveLength(2) // the colour run and the value run, same three tiles
+    expect(groups[0]!.kind === 'group' && groups[0]!.tileIds).toHaveLength(3)
+  })
+
+  it('carries what each group alone scored, and the row\'s running subtotal', () => {
+    // Two separate green runs: 1+2+3 = 6, then 4+5+6 = 15.
+    const tiles = [
+      at(0, 0, GREEN, 1), at(1, 0, GREEN, 2), at(2, 0, GREEN, 3),
+      at(0, 5, GREEN, 4), at(1, 5, GREEN, 5), at(2, 5, GREEN, 6),
+    ]
+    const green = finalTimeline(finalTally(tiles))
+      .filter(s => s.kind === 'group' && s.row === GREEN)
+    expect(green.map(s => s.kind === 'group' && s.points)).toEqual([6, 15])
+    expect(green.map(s => s.kind === 'group' && s.running)).toEqual([6, 21])
+  })
+
+  it('numbers groups within their row', () => {
+    const tiles = [
+      at(0, 0, GREEN, 1), at(1, 0, GREEN, 2), at(2, 0, GREEN, 3),
+      at(0, 5, GREEN, 4), at(1, 5, GREEN, 5), at(2, 5, GREEN, 6),
+    ]
+    const green = finalTimeline(finalTally(tiles))
+      .filter(s => s.kind === 'group' && s.row === GREEN)
+    expect(green.map(s => s.kind === 'group' && s.groupIndex)).toEqual([0, 1])
+  })
+
+  it('closes each row on the category\'s own total', () => {
+    const tally = finalTally(strip(GREEN, 4))
+    const steps = finalTimeline(tally)
+    tally.categories.forEach((category, row) => {
+      const done = steps.find(s => s.kind === 'rowDone' && s.row === row)
+      expect(done?.kind === 'rowDone' && done.points).toBe(category.points)
+    })
+  })
+
+  it('ends on a total that agrees with the tally', () => {
+    const tally = finalTally(strip(GREEN, 4))
+    expect(finalTimeline(tally).at(-1)).toEqual({ kind: 'total', points: tally.total })
+  })
+
+  /* Twelve rows of groups is long, so the budget has to reach this timeline too. */
+  it('is paced by the same budget as a round', () => {
+    const tiles = Array.from({ length: 6 }, (_, i) => strip(i, i + 1, i * 5)).flat()
+    const steps = finalTimeline(finalTally(tiles))
+    expect(timelineDuration(steps, fitCadence(steps)))
+      .toBeLessThanOrEqual(REVEAL_BUDGET_MS + steps.length)
   })
 })

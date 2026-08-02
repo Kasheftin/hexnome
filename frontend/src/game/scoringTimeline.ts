@@ -1,5 +1,5 @@
 /**
- * The order a round's score is counted out in.
+ * The order a score is counted out in — a round's targets, or the final board's groups.
  *
  * Pure data and functions. This module must not import from `vue` or `three` —
  * see docs/tech-spec.md, "The one hard architectural rule". ESLint enforces it.
@@ -18,6 +18,7 @@
  * the scoring, which makes it the thing the reveal most needs to show rather than hide.
  */
 import type { RoundTally } from './agenda'
+import type { FinalTally } from './groups'
 import type { TileSpec } from './tableau'
 
 /**
@@ -39,6 +40,23 @@ export type ScoringStep =
     readonly indexInRow: number
     readonly running: number
   }
+  /**
+   * A whole connected group lands at once, and then shows what it scored.
+   *
+   * Final scoring's unit is the group, not the tile: three green tiles touching are worth something
+   * that the same three scattered are not, so a reveal that flew them one at a time would be counting
+   * the wrong thing.
+   */
+  | {
+    readonly kind: 'group'
+    readonly row: number
+    readonly groupIndex: number
+    readonly tileIds: readonly string[]
+    /** What this group alone scored. */
+    readonly points: number
+    /** The row's subtotal after it lands. */
+    readonly running: number
+  }
   /** The row is finished, at `points`. Also fires for a row that matched nothing. */
   | { readonly kind: 'rowDone', readonly row: number, readonly points: number }
   | { readonly kind: 'total', readonly points: number }
@@ -49,13 +67,15 @@ export interface Cadence {
   readonly row: number
   /** Between one tile landing and the next leaving. */
   readonly tile: number
+  /** After a whole group lands, before the next one — longer, there being more to take in. */
+  readonly group: number
   /** After a row's last tile, before the next row. */
   readonly rowDone: number
   /** Before the total is revealed. */
   readonly total: number
 }
 
-export const DEFAULT_CADENCE: Cadence = { row: 420, tile: 260, rowDone: 340, total: 420 }
+export const DEFAULT_CADENCE: Cadence = { row: 420, tile: 260, group: 620, rowDone: 340, total: 420 }
 
 /** A tile with an id, when the tally was built from the board. */
 interface Identifiable extends TileSpec {
@@ -96,6 +116,7 @@ export function holdOf(step: ScoringStep, cadence: Cadence = DEFAULT_CADENCE): n
   switch (step.kind) {
     case 'row': return cadence.row
     case 'tile': return cadence.tile
+    case 'group': return cadence.group
     case 'rowDone': return cadence.rowDone
     case 'total': return cadence.total
   }
@@ -158,7 +179,38 @@ export function fitCadence(
   return {
     row: scale(cadence.row),
     tile: scale(cadence.tile),
+    group: scale(cadence.group),
     rowDone: scale(cadence.rowDone),
     total: scale(cadence.total),
   }
+}
+
+/**
+ * The same walk over the final scoresheet: each of the twelve categories, then its groups.
+ *
+ * Every category appears, scoring or not — a colour that formed no run of three is a fact about the
+ * board, and a sheet that listed only the scoring ones would be a different twelve rows every game.
+ */
+export function finalTimeline(tally: FinalTally): readonly ScoringStep[] {
+  const steps: ScoringStep[] = []
+
+  tally.categories.forEach((category, row) => {
+    steps.push({ kind: 'row', row })
+    let running = 0
+    category.groups.forEach((group, groupIndex) => {
+      running += group.points
+      steps.push({
+        kind: 'group',
+        row,
+        groupIndex,
+        tileIds: group.tiles.map(tile => tile.id),
+        points: group.points,
+        running,
+      })
+    })
+    steps.push({ kind: 'rowDone', row, points: category.points })
+  })
+
+  steps.push({ kind: 'total', points: tally.total })
+  return steps
 }

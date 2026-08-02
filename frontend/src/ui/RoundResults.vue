@@ -19,8 +19,10 @@
 import { computed, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { RoundTally } from '@/game/agenda'
+import type { FinalTally } from '@/game/groups'
 import type { Tile } from '@/game/tableau'
 import type { BoardDiagram } from '@/scene/boardDiagram'
+import FinalScore from './FinalScore.vue'
 import ScoringReveal from './ScoringReveal.vue'
 
 const props = defineProps<{
@@ -37,14 +39,30 @@ const props = defineProps<{
    * the footer changes rather than replacing one panel with another the player has to read afresh.
    */
   over: boolean
-  /** Every round banked so far, for the closing total. */
-  total: number
+  /** What each round scored, in order, for the closing summary. */
+  banked: readonly number[]
+  /** The finished board's groups. Only read once the game is over. */
+  finalTally: FinalTally
 }>()
 
 defineEmits<{ next: [] }>()
 
 const reveal = shallowRef<InstanceType<typeof ScoringReveal> | null>(null)
+const finalReveal = shallowRef<InstanceType<typeof FinalScore> | null>(null)
 const done = shallowRef(false)
+
+/**
+ * The final scoresheet is asked for, not dropped in.
+ *
+ * A player has just watched a round counted out; following it immediately with a second, larger
+ * reckoning would bury it. So the game ends on a button, and the twelve rows then begin from a
+ * standing start rather than halfway down a panel already full of the last round.
+ */
+const showingFinal = shallowRef(false)
+const finalDone = shallowRef(false)
+
+const roundsTotal = computed(() => props.banked.reduce((sum, points) => sum + points, 0))
+const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 
 /*
  * Keyed on the round, not on `over`.
@@ -64,10 +82,18 @@ const revealKey = computed(() => props.round)
       :aria-label="`Round ${props.round} results`"
     >
       <h2 class="chrome-title">
-        Round {{ props.round }} results
+        {{ showingFinal ? 'Final score' : `Round ${props.round} results` }}
       </h2>
 
+      <FinalScore
+        v-if="showingFinal"
+        ref="finalReveal"
+        :tally="props.finalTally"
+        :board="props.board"
+        @done="finalDone = true"
+      />
       <ScoringReveal
+        v-else
         :key="revealKey"
         ref="reveal"
         :tally="props.tally"
@@ -75,14 +101,24 @@ const revealKey = computed(() => props.round)
         @done="done = true"
       />
 
-      <template v-if="props.over">
+      <!-- The closing reckoning: the board's groups, then the rounds, then everything. -->
+      <template v-if="showingFinal && finalDone">
+        <ol class="rounds">
+          <li
+            v-for="(points, index) in props.banked"
+            :key="index"
+          >
+            <span>Round {{ index + 1 }}</span>
+            <strong>{{ points }}</strong>
+          </li>
+          <li class="rounds-total">
+            <span>Rounds</span>
+            <strong>{{ roundsTotal }}</strong>
+          </li>
+        </ol>
         <p class="grand">
-          <span>Final score</span>
-          <strong>{{ props.total }}</strong>
-        </p>
-        <p class="note">
-          Group scoring — connected runs of a colour or a value — is not built yet, so this is the
-          round totals only.
+          <span>Total score</span>
+          <strong>{{ grandTotal }}</strong>
         </p>
         <RouterLink
           to="/"
@@ -91,6 +127,23 @@ const revealKey = computed(() => props.round)
           Back to menu
         </RouterLink>
       </template>
+
+      <button
+        v-else-if="showingFinal"
+        type="button"
+        class="action skip"
+        @click="finalReveal?.skip()"
+      >
+        Skip
+      </button>
+      <button
+        v-else-if="props.over"
+        type="button"
+        class="action next"
+        @click="showingFinal = true"
+      >
+        Final score
+      </button>
       <button
         v-else-if="done"
         type="button"
@@ -137,6 +190,33 @@ const revealKey = computed(() => props.round)
   padding: 18px 20px;
   overflow-y: auto;
   font-size: 12px;
+}
+
+.rounds {
+  display: grid;
+  gap: 2px;
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid #2a2c33;
+  list-style: none;
+}
+
+.rounds li {
+  display: flex;
+  justify-content: space-between;
+  color: #79808f;
+}
+
+.rounds strong {
+  color: #cfd4de;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.rounds-total {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #22252b;
 }
 
 .grand {

@@ -36,6 +36,7 @@ import {
   type RoundTally,
 } from '@/game/agenda'
 import { createDeck, dealStartingPlates, type DealtPlate } from '@/game/deck'
+import { finalTally } from '@/game/groups'
 import {
   canConfirmDraft,
   completedStrategies,
@@ -522,6 +523,14 @@ const roundBoard = shallowRef<BoardDiagram | null>(null)
 const banked = shallowRef<readonly number[]>([])
 
 const totalScore = computed(() => banked.value.reduce((sum, points) => sum + points, 0))
+
+/**
+ * The finished board's connected groups.
+ *
+ * Derived from the same snapshot the panel draws, so the sheet and the picture cannot disagree about
+ * what was on the board. Computed lazily — it is only read once the game is over.
+ */
+const finalGroups = computed(() => finalTally(roundBoard.value?.tiles ?? []))
 
 const isFinalRound = computed(() => count.value.round >= (totalRounds.value || 1))
 
@@ -1300,7 +1309,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       :board="roundBoard"
       :final="isFinalRound"
       :over="gameOver"
-      :total="totalScore"
+      :banked="banked"
+      :final-tally="finalGroups"
       @next="startNextRound"
     />
 

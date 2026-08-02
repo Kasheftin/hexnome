@@ -575,7 +575,15 @@ contain a duplicate by the time it is scored: the placement that would have crea
   values**.
   - *Example:* touching green tiles 1, 2, 4 → **1 + 2 + 4 = 7 points**.
 - **Value group** — connected tiles of the **same value**, size ≥ 3 → scores the **sum of their
-  values** (= value × size). The exact formula is open.
+  values**, which for a value group is the same as `value × size`.
+  - *Example:* three touching 3s → **3 + 3 + 3 = 9 points**.
+
+Both kinds therefore score by one rule — *sum the members' values* — which is why `game/groups.ts`
+implements it once rather than twice.
+
+**How it is shown.** The game ends on a **Final score** button rather than a number: the twelve
+categories are counted out over a picture of the finished board, group by group, each group flying in
+whole and landing beside what it scored. Then the round scores, then the total of both.
 
 ## Anchors, and earning stems
 

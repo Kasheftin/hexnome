@@ -41,6 +41,8 @@ import type { BoardDiagram } from '@/scene/boardDiagram'
 import { TILE_COLORS } from '@/scene/constants'
 import BoardDiagramView, { type TileEmphasis } from './BoardDiagram.vue'
 import TileChip from './TileChip.vue'
+import TileFlights from './TileFlights.vue'
+import { useTileFlights } from './useTileFlights'
 
 const props = defineProps<{
   tally: RoundTally<Tile>
@@ -50,9 +52,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ done: [] }>()
-
-/** How long a tile takes to cross from the board to its row. */
-const FLIGHT_MS = 300
 
 const reduced = typeof window !== 'undefined'
   && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
@@ -123,31 +122,12 @@ const subtotalOf = (index: number): number =>
 const runningTotal = computed(() =>
   props.tally.rows.reduce((sum, _row, index) => sum + subtotalOf(index), 0))
 
-/** Chips waiting for their flyer to arrive, keyed `row:index`. */
-const inFlight = shallowRef<ReadonlySet<string>>(new Set())
-
 const chipVisible = (row: number, index: number): boolean =>
-  index < (landed.value[row] ?? 0) || inFlight.value.has(`${row}:${index}`)
+  index < (landed.value[row] ?? 0) || flights.pending.value.has(`${row}:${index}`)
 
 const chipArrived = (row: number, index: number): boolean =>
   index < (landed.value[row] ?? 0)
 
-interface Flyer {
-  readonly key: number
-  readonly row: number
-  /** `row:index`, matching the chip it is flying to. */
-  readonly chipKey: string
-  readonly color: number
-  readonly value: number
-  readonly from: DOMRect
-  readonly to: DOMRect
-  readonly repeat: boolean
-}
-
-const flyers = shallowRef<readonly Flyer[]>([])
-const launched = new Set<number>()
-const animations = new Set<Animation>()
-let nextKey = 0
 let timer: ReturnType<typeof setTimeout> | null = null
 
 const boardEl = shallowRef<HTMLElement | null>(null)
@@ -164,11 +144,10 @@ function markLanded(row: number): void {
   landed.value = next
 }
 
-function release(key: string): void {
-  const next = new Set(inFlight.value)
-  next.delete(key)
-  inFlight.value = next
-}
+/** A chip arriving is what moves the counter, so the number never precedes its tile. */
+const flights = useTileFlights((key) => {
+  markLanded(Number(key.split(':')[0]))
+})
 
 /**
  * Send a copy of the board tile to its chip.
@@ -188,48 +167,15 @@ function fly(step: Extract<ScoringStep, { kind: 'tile' }>): void {
     return
   }
 
-  const chipKey = `${step.row}:${step.indexInRow}`
-  inFlight.value = new Set(inFlight.value).add(chipKey)
-  flyers.value = [...flyers.value, {
-    key: nextKey++,
-    row: step.row,
-    chipKey,
+  flights.send({
+    key: `${step.row}:${step.indexInRow}`,
     color: tile.color,
     value: tile.value,
     from,
     to,
     // A tile already counted in an earlier row leaves a little larger, so a repeat reads as deliberate.
-    repeat: (counts.value.get(tile.id) ?? 0) > 0,
-  }]
-}
-
-/** Start a flyer once Vue has put it in the document. */
-function launch(el: Element | null, flyer: Flyer): void {
-  if (!(el instanceof HTMLElement) || launched.has(flyer.key)) return
-  launched.add(flyer.key)
-
-  const dx = flyer.from.left - flyer.to.left
-  const dy = flyer.from.top - flyer.to.top
-  const scale = (flyer.to.width > 0 ? flyer.from.width / flyer.to.width : 1) * (flyer.repeat ? 1.15 : 1)
-
-  const animation = el.animate(
-    [
-      { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0.9 },
-      { transform: 'none', opacity: 1 },
-    ],
-    { duration: FLIGHT_MS, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
-  )
-  animations.add(animation)
-
-  const arrive = (): void => {
-    animations.delete(animation)
-    // Count it and reveal the chip, then drop the flyer: the other order costs a frame of nothing.
-    markLanded(flyer.row)
-    release(flyer.chipKey)
-    flyers.value = flyers.value.filter(f => f.key !== flyer.key)
-  }
-  // `finished` rejects with AbortError when an animation is cancelled — which skip does, en masse.
-  animation.finished.then(arrive).catch(() => {})
+    emphasise: (counts.value.get(tile.id) ?? 0) > 0,
+  })
 }
 
 function stopTimer(): void {
@@ -237,17 +183,9 @@ function stopTimer(): void {
   timer = null
 }
 
-/** Cancel every flight and drop the layer. Safe to call twice. */
-function clearFlyers(): void {
-  for (const animation of animations) animation.cancel()
-  animations.clear()
-  flyers.value = []
-  inFlight.value = new Set()
-}
-
 function finish(): void {
   stopTimer()
-  clearFlyers()
+  flights.clear()
   applied.value = timeline.value.length
   landed.value = props.tally.rows.map(row => row.tiles.length)
   finished.value = true
@@ -283,7 +221,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopTimer()
-  clearFlyers()
+  flights.clear()
 })
 
 const nameOf = (row: RoundTally<Tile>['rows'][number]): string =>
@@ -383,32 +321,10 @@ const doubleCounted = computed(() =>
       <li>Round total {{ props.tally.total }}.</li>
     </ul>
 
-    <!-- Outside the panel's containing block and its scroll, or a flight would be clipped. -->
-    <Teleport to="body">
-      <div
-        v-if="flyers.length"
-        class="flyers"
-        aria-hidden="true"
-      >
-        <div
-          v-for="flyer in flyers"
-          :key="flyer.key"
-          :ref="el => launch(el as Element | null, flyer)"
-          class="flyer"
-          :style="{
-            left: `${flyer.to.left}px`,
-            top: `${flyer.to.top}px`,
-            width: `${flyer.to.width}px`,
-            height: `${flyer.to.height}px`,
-          }"
-        >
-          <TileChip
-            :color="flyer.color"
-            :value="flyer.value"
-          />
-        </div>
-      </div>
-    </Teleport>
+    <TileFlights
+      :flyers="flights.flyers.value"
+      :launch="flights.launch"
+    />
   </div>
 </template>
 
@@ -555,22 +471,3 @@ const doubleCounted = computed(() =>
 }
 </style>
 
-<style>
-/*
- * Unscoped: the layer is teleported to `body`, so a scoped attribute would not reach it.
- * `pointer-events: none` is mandatory — the layer covers the viewport, and without it it would swallow
- * the click that skips the reveal.
- */
-.flyers {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  pointer-events: none;
-}
-
-.flyers .flyer {
-  position: fixed;
-  display: grid;
-  place-items: center;
-}
-</style>
