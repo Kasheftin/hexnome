@@ -30,7 +30,7 @@ import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@/game/agenda'
 import { createDeck, dealStartingPlates, type DealtPlate } from '@/game/deck'
-import { finalTally } from '@/game/groups'
+import { finalTally, NOTHING_LEFT } from '@/game/groups'
 import {
   canConfirmDraft,
   completedStrategies,
@@ -81,7 +81,7 @@ import {
   type TurnPhase,
 } from '@/game/turn'
 import type { Axial } from '@/game/hex'
-import { describeBoard, tilesInReadingOrder } from '@/scene/boardDiagram'
+import { describeBoard, describeLeftovers, tilesInReadingOrder } from '@/scene/boardDiagram'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
 import DrawerChrome from '@/scene/DrawerChrome.vue'
@@ -98,18 +98,19 @@ import {
   BOARD_HALF_COLS,
   BOARD_HALF_ROWS,
   COLORS,
-  DRAWER_COLS,
-  DRAWER_ROWS,
   HEX_SIZE,
-  PLATE_SLOTS,
   SOURCE_TILES_PER_LOT,
 } from '@/scene/constants'
-import { createDrawerLayout } from '@/scene/drawerLayout'
+import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
 import {
+  DEFAULT_FINE_UNPLACED,
   DEFAULT_GROUP_BONUSES,
   DEFAULT_MIN_GROUP_SIZE,
+  DEFAULT_REWARD_STEMS,
+  DEFAULT_PLATE_SLOTS,
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
+  DEFAULT_TILE_SLOTS,
   DEFAULT_STEM_COUNT,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
@@ -158,7 +159,16 @@ onMounted(() => {
  * unreachable, which is what makes it read as endless.
  */
 const cells = hexRectangle(BOARD_HALF_COLS, BOARD_HALF_ROWS)
-const DRAWER_SLOTS = DRAWER_COLS * DRAWER_ROWS
+/**
+ * How many seats the drawer has, from the game's settings.
+ *
+ * One object, handed to the tableau *and* to both things that draw the panel, so the model's idea of
+ * how many slots exist and the panel's idea of how wide it is cannot drift apart.
+ */
+const drawerShape: DrawerShape = {
+  tileSlots: settings.value?.tileSlots ?? DEFAULT_TILE_SLOTS,
+  plateSlots: settings.value?.plateSlots ?? DEFAULT_PLATE_SLOTS,
+}
 
 /** Where the player's tableau starts. The board is a rectangle centred here. */
 const BOARD_CENTRE = { q: 0, r: 0 } as const
@@ -200,8 +210,8 @@ const strictEnclosureBonus = settings.value
 
 const tableauOptions: TableauOptions = {
   cells,
-  drawerSlots: DRAWER_SLOTS,
-  plateSlots: PLATE_SLOTS,
+  drawerSlots: drawerShape.tileSlots,
+  plateSlots: drawerShape.plateSlots,
   sourceLots: platesPerRound,
   sourceTilesPerLot: SOURCE_TILES_PER_LOT,
   placementRule: settings.value?.placementRule ?? DEFAULT_PLACEMENT_RULE,
@@ -346,18 +356,18 @@ const roundPoints = computed(() => {
   return scoreTargets(roundAgenda(agenda, count.value.round) ?? [], tableau.tilesOnBoard())
 })
 
-const counts = computed(() => {
-  void revision.value
-  const tiles = tableau.tiles()
-  const plates = tableau.plates()
-  return {
-    drawer: tiles.filter(t => t.location.kind === 'drawer').length,
-    // Only the player's own placements; a plate's own tile is part of the plate.
-    placed: tiles.filter(t => t.location.kind === 'onPlate' && !t.fixed).length,
-    platesOnBoard: plates.filter(p => p.location.kind === 'board').length,
-    platesHeld: plates.filter(p => p.location.kind === 'plateSlot').length,
-  }
-})
+/**
+ * What a round has scored: its banked total once it is over, its live total while it is being played,
+ * and nothing at all before it starts.
+ *
+ * An em dash rather than a zero for a round not yet reached — zero is a result, and a round that has
+ * not happened has not got one.
+ */
+function scoreOf(index: number): string {
+  const finished = banked.value[index]
+  if (finished !== undefined) return String(finished)
+  return index + 1 === count.value.round ? String(roundPoints.value) : '—'
+}
 
 /* ── the turn ──────────────────────────────────────────────────────────────────
  *
@@ -556,6 +566,7 @@ function roundRecord(round: number): RoundRecord {
      * board instead of hopping about in the order things happened to be placed.
      */
     tally: tallyRound(roundAgenda(agenda, round) ?? [], tilesInReadingOrder(asItWas)),
+    leftovers: describeLeftovers(asItWas),
   }
   derived.set(round, record)
   return record
@@ -576,10 +587,19 @@ const totalScore = computed(() => banked.value.reduce((sum, points) => sum + poi
  * Read off the last round's board, so the sheet and the picture beside it cannot disagree about what
  * was there. Only consulted once the game is over.
  */
-const finalGroups = computed(() => finalTally(roundRecords.value.at(-1)?.board.tiles ?? [], {
-  minGroupSize: settings.value?.minGroupSize ?? DEFAULT_MIN_GROUP_SIZE,
-  groupBonuses: settings.value?.groupBonuses ?? DEFAULT_GROUP_BONUSES,
-}))
+const finalGroups = computed(() => {
+  const last = roundRecords.value.at(-1)
+  return finalTally(
+    last?.board.tiles ?? [],
+    {
+      minGroupSize: settings.value?.minGroupSize ?? DEFAULT_MIN_GROUP_SIZE,
+      groupBonuses: settings.value?.groupBonuses ?? DEFAULT_GROUP_BONUSES,
+      fineUnplaced: settings.value?.fineUnplaced ?? DEFAULT_FINE_UNPLACED,
+      rewardStems: settings.value?.rewardStems ?? DEFAULT_REWARD_STEMS,
+    },
+    last?.leftovers ?? NOTHING_LEFT,
+  )
+})
 
 const isFinalRound = computed(() => count.value.round >= (totalRounds.value || 1))
 
@@ -1163,7 +1183,8 @@ function onResize(): void {
 onMounted(() => window.addEventListener('resize', onResize))
 onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
-const drawerLayout = computed(() => createDrawerLayout(viewport.value.w, viewport.value.h))
+const drawerLayout = computed(() =>
+  createDrawerLayout(viewport.value.w, viewport.value.h, drawerShape))
 
 /** Bay whose plate is hovered in the 3D scene. */
 const hoveredPlateSlot = shallowRef<number | null>(null)
@@ -1239,10 +1260,12 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :revision="revision"
       />
       <SourceChrome
+        :drawer="drawerShape"
         :lots="platesPerRound"
         :live="phase.kind === 'taking' || canStartTake"
       />
       <DrawerChrome
+        :drawer="drawerShape"
         :target-slot="targetTileSlot"
         :target-plate-slot="targetPlateSlot"
         :target-valid="targetValid"
@@ -1250,6 +1273,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
       <TableauView
         :tableau="tableau"
+        :drawer="drawerShape"
         :game-id="gameId"
         :may-place="phase.kind === 'putting' || canStartPut"
         :unaffordable="unaffordable"
@@ -1393,6 +1417,14 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       </dl>
     </header>
 
+    <!--
+      The plan for the whole game, and what it has been worth so far.
+
+      Top right, where the drag hints used to be. Those had become scenery for anyone past their first
+      game; this has to be read every round. It cannot go under the title, where it belongs by subject:
+      the shared source is a column down the left edge starting just below the header, and a panel
+      there would sit on the one part of the screen you draft from.
+    -->
     <section class="chrome-panel agenda">
       <h2 class="chrome-title">
         Scoring
@@ -1417,42 +1449,22 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
               <span class="per">{{ target.points }}</span>
             </span>
           </span>
+          <!--
+            A finished round shows what it banked; the round in progress shows what it is worth *right
+            now* — which is what the old "points this round" readout said in a panel of its own. On its
+            own row it needs no label.
+          -->
+          <span
+            class="earned"
+            :class="{ live: index + 1 === count.round && banked[index] === undefined }"
+          >{{ scoreOf(index) }}</span>
         </li>
       </ol>
-    </section>
-
-    <aside class="chrome-panel help">
-      <dl>
-        <dt>Drag a plate out</dt>
-        <dd>needs all 7 cells free</dd>
-        <dt>Drag a tile</dt>
-        <dd>only into an empty petal</dd>
-        <dt>Rotate a plate</dt>
-        <dd>arrows in the bay · Q / E while dragging</dd>
-        <dt>Drag empty board</dt>
-        <dd>scroll · wheel zooms</dd>
-      </dl>
-      <p class="readout">
-        <span>tiles in drawer</span>
-        <strong>{{ counts.drawer }} / {{ DRAWER_SLOTS }}</strong>
-      </p>
-      <p class="readout">
-        <span>tiles on plates</span>
-        <strong>{{ counts.placed }}</strong>
-      </p>
-      <p class="readout">
-        <span>points this round</span>
-        <strong>{{ roundPoints }}</strong>
-      </p>
-      <p class="readout">
-        <span>score</span>
+      <p class="so-far">
+        <span>banked</span>
         <strong>{{ totalScore }}</strong>
       </p>
-      <p class="readout">
-        <span>plates</span>
-        <strong>{{ counts.platesOnBoard }} placed · {{ counts.platesHeld }} held</strong>
-      </p>
-    </aside>
+    </section>
   </div>
 </template>
 
@@ -1510,8 +1522,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 }
 
 /*
- * Live figures, so they get the label-over-value treatment the help panel's readouts use rather than
- * being folded into the settings line beside them. That line is fixed for the whole game; these move.
+ * Live figures, so they get their own group rather than being folded into the settings line beside
+ * them. That line is fixed for the whole game; these move.
  */
 .counters {
   display: flex;
@@ -1541,30 +1553,16 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #6b7382;
 }
 
-.help {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  min-width: 240px;
-  padding: 12px 14px;
-  font-size: 11px;
-}
-
 /*
  * The plan for the whole game, not just the round in progress: the targets are worth playing toward
  * several rounds early, and a panel showing only the current one would hide that.
  *
- * **On the right, under the help card, and not under the title** — which is where it belongs by
- * subject but not by geometry. The shared source is a column down the left edge starting just below
- * the header, so a panel there sits on top of the one part of the screen you draft from. Measured:
- * the header ends at y=49 and the source column runs from y≈68 to the drawer.
- *
- * `top` clears the help card, whose height depends on its own content. Measured, not guessed —
- * eyeballing offsets off a screenshot has been wrong here before.
+ * Top right, in the corner the drag hints used to hold — so it no longer needs an offset measured
+ * against a card above it, which was the fragile part of the old arrangement.
  */
 .agenda {
   position: absolute;
-  top: 270px;
+  top: 14px;
   right: 14px;
   min-width: 247px;
   padding: 10px 12px;
@@ -1598,8 +1596,41 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
 .targets {
   display: flex;
+  flex: 1;
   gap: 10px;
   align-items: center;
+}
+
+/* What the round actually scored, or is scoring. Right-aligned so the column reads as a column. */
+.earned {
+  min-width: 22px;
+  color: #cfd4de;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Still moving, so it is stated more quietly than a figure that has been banked. */
+.earned.live {
+  color: #8fe6c0;
+}
+
+.so-far {
+  display: flex;
+  justify-content: space-between;
+  margin: 7px 0 0;
+  padding-top: 7px;
+  border-top: 1px solid #2a2c33;
+  color: #6b7382;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.so-far strong {
+  color: #e8c878;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .target {
@@ -1612,36 +1643,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .per {
   color: #6b7382;
   font-variant-numeric: tabular-nums;
-}
-
-dl {
-  margin: 0;
-}
-
-dt {
-  color: #e8c878;
-  letter-spacing: 0.06em;
-}
-
-dd {
-  margin: 0 0 8px;
-  color: #79808f;
-}
-
-.readout {
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  margin: 0;
-  padding-top: 7px;
-  border-top: 1px solid #2a2c33;
-  color: #79808f;
-  font-variant-numeric: tabular-nums;
-}
-
-.readout strong {
-  color: #cfd4de;
-  font-weight: 500;
 }
 
 .rotate-controls {

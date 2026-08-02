@@ -28,7 +28,6 @@ import {
   DRAWER_SLOT_PX,
   DRAWER_TILE_FILL,
   HIGHLIGHT_COLORS,
-  PLATE_SLOT_PX,
 } from './constants'
 import {
   createChromePanelMaterial,
@@ -38,9 +37,12 @@ import {
 } from './chromePanel'
 import { registerGrabbable } from './grabbables'
 import { screenToBoard, unitsPerPixel } from './screenProjection'
+import type { DrawerShape } from './drawerLayout'
 import { useDrawerLayout } from './useDrawerLayout'
 
 const props = defineProps<{
+  /** How many seats the drawer has — a game setting, so the panel's size follows it. */
+  drawer: DrawerShape
   /** Tile slot the held tile would drop into, or null. */
   targetSlot: number | null
   /** Plate slot the held plate would drop into, or null. */
@@ -52,11 +54,17 @@ const props = defineProps<{
 
 const { scene, camera, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
-const layout = useDrawerLayout()
+const layout = useDrawerLayout(() => props.drawer)
 
 const FLAT = new Euler(-Math.PI / 2, 0, 0)
 
-/** Slot ring radius in pixels — the same fraction of a slot the tiles use. */
+/**
+ * Slot ring radius in pixels — the same fraction of a slot the tiles use.
+ *
+ * A *nominal* size: the geometry is built once at this radius and scaled to world units every frame,
+ * so the drawer's fit factor rides on that existing multiply rather than needing the rings rebuilt
+ * whenever the window changes.
+ */
 const RING_PX = (DRAWER_SLOT_PX / 2) * DRAWER_TILE_FILL
 
 /**
@@ -167,14 +175,15 @@ onBeforeRender(() => {
     const c = l.slotCentre(slot)
     const p = screenToBoard(cam, w, h, c.x, c.y)
     ring.position.set(p.x, DRAWER_CHROME_Y + 0.01, p.z)
-    // Rings are built at pixel scale, so one uniform scale converts them to world.
-    ring.scale.setScalar(upp)
+    // Built at nominal pixel scale, so one uniform scale carries both the world conversion and the
+    // panel's fit factor — a shrunken drawer needs shrunken rings or they spill their slots.
+    ring.scale.setScalar(upp * l.scale)
   }
 
   // Every bay is the same size, so they share one material and one pixel size. Only their centres
   // differ, and each is snapped independently — rounding the shared size once would still leave
   // individual bays off the grid.
-  const bayWPx = Math.round(PLATE_SLOT_PX - 6)
+  const bayWPx = Math.round(l.plateSlotWidth - 6 * l.scale)
   const bayHPx = Math.round(l.plateSlotHeight - 4)
   setChromePanelSize(bayMaterial, bayWPx, bayHPx)
   const bayW = bayWPx * upp

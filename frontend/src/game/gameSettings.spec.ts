@@ -6,6 +6,9 @@ import {
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
   DEFAULT_GROUP_BONUSES,
   DEFAULT_MIN_GROUP_SIZE,
+  DEFAULT_PLATE_SLOTS,
+  DEFAULT_TILE_SLOTS,
+  TILE_SLOT_CHOICES,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
   SINGLEPLAYER_MODES,
   effectiveGroupBonuses,
@@ -20,6 +23,8 @@ const valid = {
   kind: 'singleplayer',
   mode: 'classic',
   platesPerRound: 5,
+  tileSlots: 18,
+  plateSlots: 1,
   initialStems: 2,
   stemsPerInternalAnchor: 4,
   stemsPerExternalAnchor: 1,
@@ -28,6 +33,8 @@ const valid = {
   minGroupSize: 4,
   // Indexed by group size, and zeroed at or below the minimum — hence the leading run of noughts.
   groupBonuses: [0, 0, 0, 0, 0, 5, 7],
+  fineUnplaced: false,
+  rewardStems: true,
   createdAt: 1_700_000_000_000,
 }
 
@@ -238,5 +245,60 @@ describe('effectiveGroupBonuses', () => {
 
   it('clears the minimum itself, which is the baseline rather than an achievement', () => {
     expect(effectiveGroupBonuses(4, [0, 0, 0, 0, 3, 5, 7])).toEqual([0, 0, 0, 0, 0, 5, 7])
+  })
+})
+
+describe('the end-of-game switches', () => {
+  /*
+   * Both are on by default, so anything that is not an explicit `false` leaves them on — a blob
+   * written before they existed should play the way a new game does rather than quietly lose them.
+   */
+  it('stays on for a record that predates them', () => {
+    const older: Record<string, unknown> = { ...valid }
+    delete older.fineUnplaced
+    delete older.rewardStems
+    const parsed = parseGameSettings(older)
+    expect(parsed?.fineUnplaced).toBe(true)
+    expect(parsed?.rewardStems).toBe(true)
+  })
+
+  it('honours an explicit false', () => {
+    const parsed = parseGameSettings({ ...valid, fineUnplaced: false, rewardStems: false })
+    expect([parsed?.fineUnplaced, parsed?.rewardStems]).toEqual([false, false])
+  })
+
+  it('treats junk as on rather than discarding the game', () => {
+    for (const junk of [0, 'no', null, undefined, NaN]) {
+      expect(parseGameSettings({ ...valid, rewardStems: junk })?.rewardStems).toBe(true)
+    }
+  })
+
+  it('defaults both on for a fresh game', () => {
+    const fresh = defaultGameSettings(0)
+    expect([fresh.fineUnplaced, fresh.rewardStems]).toEqual([true, true])
+  })
+})
+
+describe('the drawer\'s size', () => {
+  it('falls back rather than failing on a bad count', () => {
+    for (const bad of [0, 13, 24, 16.5, '16', null, undefined, NaN]) {
+      expect(parseGameSettings({ ...valid, tileSlots: bad })?.tileSlots).toBe(DEFAULT_TILE_SLOTS)
+      expect(parseGameSettings({ ...valid, plateSlots: bad })?.plateSlots).toBe(DEFAULT_PLATE_SLOTS)
+    }
+  })
+
+  it('keeps an offered count', () => {
+    expect(parseGameSettings({ ...valid, tileSlots: 12 })?.tileSlots).toBe(12)
+    expect(parseGameSettings({ ...valid, plateSlots: 3 })?.plateSlots).toBe(3)
+  })
+
+  it('defaults to the drawer the game shipped with', () => {
+    const fresh = defaultGameSettings(0)
+    expect([fresh.tileSlots, fresh.plateSlots]).toEqual([16, 2])
+  })
+
+  /* Two rows deep, so every offered count has to divide into whole columns. */
+  it('offers only even tile counts', () => {
+    expect(TILE_SLOT_CHOICES.every(count => count % 2 === 0)).toBe(true)
   })
 })

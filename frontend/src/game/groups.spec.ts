@@ -9,8 +9,13 @@ import {
   type ScoringRules,
 } from './groups'
 
-/** Scoring with no size bonuses at all, so the base rule can be tested on its own. */
-const PLAIN: ScoringRules = { minGroupSize: DEFAULT_MIN_GROUP_SIZE, groupBonuses: [] }
+/** Scoring with nothing on top: no size bonuses, no end-of-game settlement. */
+const PLAIN: ScoringRules = {
+  minGroupSize: DEFAULT_MIN_GROUP_SIZE,
+  groupBonuses: [],
+  fineUnplaced: false,
+  rewardStems: false,
+}
 
 const GREEN = 2
 const BLUE = 3
@@ -165,7 +170,7 @@ describe('the final scoresheet', () => {
 })
 
 describe('the scoring minimum', () => {
-  const withMin = (minGroupSize: number): ScoringRules => ({ minGroupSize, groupBonuses: [] })
+  const withMin = (minGroupSize: number): ScoringRules => ({ ...PLAIN, minGroupSize })
 
   it('lets pairs score when it is 2', () => {
     expect(findGroups(run(2, GREEN, 3), 'color', withMin(2))).toHaveLength(1)
@@ -186,9 +191,9 @@ describe('the scoring minimum', () => {
 
 describe('the size bonus', () => {
   /** Nothing extra until six, which is worth six — the default shape. */
-  const FULL_ONLY: ScoringRules = { minGroupSize: 3, groupBonuses: [0, 0, 0, 0, 0, 0, 6] }
+  const FULL_ONLY: ScoringRules = { ...PLAIN, minGroupSize: 3, groupBonuses: [0, 0, 0, 0, 0, 0, 6] }
   /** Rewarding every step up, the other common shape. */
-  const LADDER: ScoringRules = { minGroupSize: 3, groupBonuses: [0, 0, 0, 0, 3, 5, 7] }
+  const LADDER: ScoringRules = { ...PLAIN, minGroupSize: 3, groupBonuses: [0, 0, 0, 0, 3, 5, 7] }
 
   it('pays nothing at the minimum', () => {
     expect(groupBonus(3, FULL_ONLY)).toBe(0)
@@ -231,12 +236,80 @@ describe('the size bonus', () => {
   })
 
   it('treats a missing entry as no bonus rather than as an error', () => {
-    expect(groupBonus(6, { minGroupSize: 3, groupBonuses: [] })).toBe(0)
+    expect(groupBonus(6, PLAIN)).toBe(0)
   })
 
   it('reaches the sheet total', () => {
     const tiles = [1, 2, 3, 4, 5, 6].map((value, i) => at(i, 0, GREEN, value))
     // One colour group of six: 21 base + 6 bonus. No value group — every value differs.
     expect(finalTally(tiles, FULL_ONLY).total).toBe(27)
+  })
+})
+
+describe('what is left in the drawer', () => {
+  const spec = (color: number, value: number) => ({ color, value })
+  const settling = (over: Partial<ScoringRules> = {}): ScoringRules =>
+    ({ ...PLAIN, fineUnplaced: true, rewardStems: true, ...over })
+
+  it('charges each unplaced tile its face value', () => {
+    const tally = finalTally([], settling(), { unplaced: [spec(0, 6), spec(1, 2)], stems: 0 })
+    expect(tally.penalty).toBe(8)
+    expect(tally.total).toBe(-8)
+  })
+
+  /* The point of charging by value: the tiles hardest to place cost the most to hoard. */
+  it('makes a hoarded six hurt six times as much as a one', () => {
+    const one = finalTally([], settling(), { unplaced: [spec(0, 1)], stems: 0 })
+    const six = finalTally([], settling(), { unplaced: [spec(0, 6)], stems: 0 })
+    expect(six.penalty).toBe(one.penalty * 6)
+  })
+
+  it('pays a point per stem', () => {
+    const tally = finalTally([], settling(), { unplaced: [], stems: 3 })
+    expect(tally.stemBonus).toBe(3)
+    expect(tally.total).toBe(3)
+  })
+
+  it('settles both against the groups', () => {
+    // A run of three 4s: 12 from the group, minus a held 5, plus two stems.
+    const tally = finalTally(run(3, GREEN, 4), settling(), { unplaced: [spec(1, 5)], stems: 2 })
+    expect(tally.groupPoints).toBe(24)
+    expect(tally.total).toBe(24 - 5 + 2)
+  })
+
+  it('charges nothing when the fine is off', () => {
+    const tally = finalTally([], settling({ fineUnplaced: false }), { unplaced: [spec(0, 6)], stems: 0 })
+    expect(tally.penalty).toBe(0)
+    expect(tally.total).toBe(0)
+  })
+
+  it('pays nothing when the stem bonus is off', () => {
+    const tally = finalTally([], settling({ rewardStems: false }), { unplaced: [], stems: 4 })
+    expect(tally.stemBonus).toBe(0)
+  })
+
+  /* The two switches are independent — one on and one off has to work. */
+  it('applies each switch on its own', () => {
+    const held = { unplaced: [spec(0, 3)], stems: 2 }
+    expect(finalTally([], settling({ rewardStems: false }), held).total).toBe(-3)
+    expect(finalTally([], settling({ fineUnplaced: false }), held).total).toBe(2)
+  })
+
+  /* A view shows the rows from the settings, so what was held is reported even when it is not charged. */
+  it('reports what was held even when neither switch is on', () => {
+    const held = { unplaced: [spec(0, 3)], stems: 2 }
+    const tally = finalTally([], PLAIN, held)
+    expect(tally.leftovers).toEqual(held)
+    expect([tally.penalty, tally.stemBonus]).toEqual([0, 0])
+  })
+
+  it('defaults to holding nothing, so an existing caller is unaffected', () => {
+    const tally = finalTally(run(3, GREEN, 4), settling())
+    expect(tally.total).toBe(tally.groupPoints)
+  })
+
+  it('can drive a total below zero', () => {
+    const tally = finalTally([], settling(), { unplaced: [spec(0, 6), spec(0, 6)], stems: 1 })
+    expect(tally.total).toBe(-11)
   })
 })

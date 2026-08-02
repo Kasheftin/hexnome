@@ -92,8 +92,26 @@ const subtotalOf = (row: number): number =>
   (props.tally.categories[row]?.groups ?? [])
     .reduce((sum, group, index) => sum + (groupLanded(row, index) ? group.points : 0), 0)
 
-const endScore = computed(() =>
-  props.tally.categories.reduce((sum, _category, row) => sum + subtotalOf(row), 0))
+/**
+ * The end score as it stands.
+ *
+ * The settlement for what was left in the drawer is added only once the categories have finished
+ * counting. Those tiles are not on the board, so they have nothing to fly from and no row of their own
+ * to climb — they arrive together with the rows that report them, which reads as "and then these"
+ * rather than as a number jumping for no visible reason.
+ */
+const endScore = computed(() => {
+  const groups = props.tally.categories.reduce((sum, _category, row) => sum + subtotalOf(row), 0)
+  if (!finished.value) return groups
+  return groups + props.tally.stemBonus - props.tally.penalty
+})
+
+/*
+ * Shown from the rules, not from what happens to be held. A game with the fine switched off has no
+ * such row; a game with it on and an empty drawer has one reading zero, which says something else.
+ */
+const showsFine = computed(() => props.tally.rules.fineUnplaced)
+const showsStems = computed(() => props.tally.rules.rewardStems)
 
 /** Times each tile has been paid for so far — at most twice, once per attribute. */
 const counts = computed(() => {
@@ -324,6 +342,59 @@ const doubleCounted = computed(() =>
         </li>
       </ol>
 
+      <!--
+        The end-of-game settlement. Not groups, so it sits below the twelve and appears once they have
+        been counted — and only when there was something to settle.
+      -->
+      <ol
+        v-if="finished && (showsFine || showsStems)"
+        class="rows settle"
+      >
+        <li
+          v-if="showsFine"
+          class="row"
+        >
+          <span class="what"><span class="name">left unplaced</span></span>
+          <span class="groups">
+            <span
+              v-for="(tile, at) in props.tally.leftovers.unplaced"
+              :key="at"
+              class="slot shown"
+            >
+              <TileChip
+                :color="tile.color"
+                :value="tile.value"
+              />
+            </span>
+            <span
+              v-if="props.tally.leftovers.unplaced.length === 0"
+              class="none"
+            >none</span>
+          </span>
+          <span class="sum"><strong class="debit">−{{ props.tally.penalty }}</strong></span>
+        </li>
+        <li
+          v-if="showsStems"
+          class="row"
+        >
+          <span class="what"><span class="name">stems held</span></span>
+          <span class="groups">
+            <span
+              v-for="n in props.tally.leftovers.stems"
+              :key="n"
+              class="slot shown"
+            >
+              <TileChip stem />
+            </span>
+            <span
+              v-if="props.tally.leftovers.stems === 0"
+              class="none"
+            >none</span>
+          </span>
+          <span class="sum"><strong>+{{ props.tally.stemBonus }}</strong></span>
+        </li>
+      </ol>
+
       <p class="total">
         <span>End score</span>
         <strong>{{ endScore }}</strong>
@@ -482,6 +553,17 @@ const doubleCounted = computed(() =>
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* Set apart from the twelve above it: this settles the game rather than scoring the board. */
+.settle {
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #3a3222;
+}
+
+.debit {
+  color: #d98c6a;
 }
 
 .total {

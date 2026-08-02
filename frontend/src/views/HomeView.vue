@@ -21,6 +21,10 @@ import {
   DEFAULT_SINGLEPLAYER_MODE,
   GAME_KINDS,
   PLATES_PER_ROUND_CHOICES,
+  PLATE_SLOT_CHOICES,
+  TILE_SLOT_CHOICES,
+  DEFAULT_PLATE_SLOTS,
+  DEFAULT_TILE_SLOTS,
   SINGLEPLAYER_MODES,
   STEM_COUNT_CHOICES,
   STEMS_PER_ANCHOR_CHOICES,
@@ -32,8 +36,10 @@ import {
   GROUP_BONUS_CHOICES,
   MAX_GROUP_SIZE,
   MIN_GROUP_SIZE_CHOICES,
+  DEFAULT_FINE_UNPLACED,
   DEFAULT_GROUP_BONUSES,
   DEFAULT_MIN_GROUP_SIZE,
+  DEFAULT_REWARD_STEMS,
   effectiveGroupBonuses,
   effectiveStrictBonus,
   PLACEMENT_RULE_HINTS,
@@ -52,6 +58,10 @@ import { useSavedGames } from '@/composables/useSavedGames'
 
 type Step = 'title' | 'kind' | 'singleplayer'
 
+/** A yes/no dial, as the numbers the dial machinery expects and the words a player should read. */
+const SWITCH_CHOICES: readonly number[] = [0, 1]
+const SWITCH_LABELS: readonly string[] = ['No', 'Yes']
+
 const router = useRouter()
 const savedGames = useSavedGames()
 
@@ -59,6 +69,8 @@ const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
+const tileSlots = ref<number>(DEFAULT_TILE_SLOTS)
+const plateSlots = ref<number>(DEFAULT_PLATE_SLOTS)
 const initialStems = ref<number>(DEFAULT_STEM_COUNT)
 const stemsPerInternalAnchor = ref<number>(DEFAULT_STEMS_PER_INTERNAL_ANCHOR)
 const stemsPerExternalAnchor = ref<number>(DEFAULT_STEMS_PER_EXTERNAL_ANCHOR)
@@ -67,6 +79,13 @@ const strictEnclosureBonus = ref<number>(DEFAULT_STRICT_ENCLOSURE_BONUS)
 const placementRule = ref<PlacementRule>(DEFAULT_PLACEMENT_RULE)
 
 const minGroupSize = ref<number>(DEFAULT_MIN_GROUP_SIZE)
+
+/*
+ * Switches, held as 0/1 so they can share the dial machinery with everything else, and rendered as
+ * No/Yes rather than as bare digits.
+ */
+const fineUnplaced = ref<number>(DEFAULT_FINE_UNPLACED ? 1 : 0)
+const rewardStems = ref<number>(DEFAULT_REWARD_STEMS ? 1 : 0)
 
 /**
  * One ref per group size, rather than one ref holding the table.
@@ -103,6 +122,8 @@ interface Dial {
   /** Two or three words for the summary, where there is not. */
   readonly short: string
   readonly choices: readonly number[]
+  /** Shown instead of the raw numbers, positionally. Used by the yes/no switches. */
+  readonly labels?: readonly string[]
   readonly model: Ref<number>
   readonly hint?: string
   /** False hides the dial entirely — see the strict bonus. */
@@ -111,7 +132,7 @@ interface Dial {
   readonly minor?: boolean
 }
 
-const DIALS: readonly Dial[] = [
+const SUPPLY_DIALS: readonly Dial[] = [
   {
     key: 'platesPerRound',
     legend: 'Plates per round',
@@ -119,6 +140,29 @@ const DIALS: readonly Dial[] = [
     choices: PLATES_PER_ROUND_CHOICES,
     model: platesPerRound,
   },
+]
+
+const DRAWER_DIALS: readonly Dial[] = [
+  {
+    key: 'tileSlots',
+    legend: 'Tile slots in your drawer',
+    short: 'tile slots',
+    choices: TILE_SLOT_CHOICES,
+    model: tileSlots,
+    hint: 'Room to hold tiles you cannot place yet — and stems take these slots too, so a large '
+      + 'opening allowance eats into it.',
+  },
+  {
+    key: 'plateSlots',
+    legend: 'Plate bays in your drawer',
+    short: 'plate bays',
+    choices: PLATE_SLOT_CHOICES,
+    model: plateSlots,
+    hint: 'How many plates you can hold before committing one to the board.',
+  },
+]
+
+const STEM_DIALS: readonly Dial[] = [
   {
     key: 'initialStems',
     legend: 'Initial stems on game start',
@@ -158,12 +202,6 @@ const DIALS: readonly Dial[] = [
   },
 ]
 
-/**
- * The final-score dials, kept apart because they answer a different question.
- *
- * The dials above shape the game being played; these two shape only how the finished board is added
- * up, and mixing them into one list of nine made neither legible.
- */
 const FINAL_DIALS: readonly Dial[] = [
   {
     key: 'minGroupSize',
@@ -187,19 +225,78 @@ const FINAL_DIALS: readonly Dial[] = [
       applies: () => size > minGroupSize.value,
     }
   }),
+  {
+    key: 'fineUnplaced',
+    legend: 'Fine for tiles left unplaced',
+    short: 'fine unplaced',
+    choices: SWITCH_CHOICES,
+    labels: SWITCH_LABELS,
+    model: fineUnplaced,
+    hint: 'At the very end, everything still in your drawer is charged at its face value — a plate '
+      + 'through its own tile. Tiles carry between rounds freely; this settles once, for the whole '
+      + 'game, so a six you never placed is an expensive thing to have hoarded.',
+  },
+  {
+    key: 'rewardStems',
+    legend: 'Bonus for stems left over',
+    short: 'stem bonus',
+    choices: SWITCH_CHOICES,
+    labels: SWITCH_LABELS,
+    model: rewardStems,
+    hint: 'A point for each stem still held when the game ends — the mirror of the fine, so spending '
+      + 'a stem you did not need is a real choice.',
+  },
 ]
 
-const visibleDials = computed(() => DIALS.filter(dial => dial.applies?.() ?? true))
-const visibleFinalDials = computed(() => FINAL_DIALS.filter(dial => dial.applies?.() ?? true))
+/**
+ * The dials in bands, each under its own heading.
+ *
+ * Thirteen dials in one list is a wall. Grouping them by the question they answer — how the supply
+ * behaves, how big your drawer is, how stems are come by, how the finished board is added up — is what
+ * makes the panel scannable, and it gives a new dial an obvious home.
+ *
+ * The first band has no heading: it sits directly under the panel's own title, which serves.
+ */
+interface DialSection {
+  readonly key: string
+  readonly title?: string
+  readonly dials: readonly Dial[]
+  /** A closing note under the band. */
+  readonly note?: string
+}
+
+const SECTIONS: readonly DialSection[] = [
+  { key: 'supply', dials: SUPPLY_DIALS },
+  { key: 'drawer', title: 'Drawer', dials: DRAWER_DIALS },
+  { key: 'stems', title: 'Receiving stems', dials: STEM_DIALS },
+  {
+    key: 'final',
+    title: 'Final score',
+    dials: FINAL_DIALS,
+    note: 'A group scores the sum of its tiles\' values, and a bonus for its size on top. Six is as '
+      + 'large as a group can get — no group may repeat a tile, and there are only six values and six '
+      + 'colours.',
+  },
+]
+
+/** Bands with anything left to show, their hidden dials already dropped. */
+const visibleSections = computed(() => SECTIONS
+  .map(section => ({ ...section, dials: section.dials.filter(dial => dial.applies?.() ?? true) }))
+  .filter(section => section.dials.length > 0))
+
+const visibleDials = computed(() => visibleSections.value.flatMap(section => section.dials))
 
 /** Every bonus still in reach, as one pill — a dozen of them would swamp the strip. */
-const bonusSummary = computed(() => visibleFinalDials.value
+const bonusSummary = computed(() => visibleDials.value
   .filter(dial => dial.minor)
   .map(dial => dial.model.value)
   .join(' · '))
 
-const summaryDials = computed(() =>
-  [...visibleDials.value, ...visibleFinalDials.value].filter(dial => !dial.minor))
+const summaryDials = computed(() => visibleDials.value.filter(dial => !dial.minor))
+
+/** Switches read as words in the strip too; a bare 1 beside "fine unplaced" says nothing. */
+const pillValue = (dial: Dial): string =>
+  dial.labels?.[dial.choices.indexOf(dial.model.value)] ?? String(dial.model.value)
 
 const settingsOpen = ref(false)
 const gear = ref<HTMLButtonElement | null>(null)
@@ -242,6 +339,8 @@ function startGame(): void {
     kind: 'singleplayer',
     mode: mode.value,
     platesPerRound: platesPerRound.value,
+    tileSlots: tileSlots.value,
+    plateSlots: plateSlots.value,
     initialStems: initialStems.value,
     stemsPerInternalAnchor: stemsPerInternalAnchor.value,
     stemsPerExternalAnchor: stemsPerExternalAnchor.value,
@@ -252,6 +351,8 @@ function startGame(): void {
     placementRule: placementRule.value,
     minGroupSize: minGroupSize.value,
     groupBonuses: groupBonuses.value,
+    fineUnplaced: fineUnplaced.value === 1,
+    rewardStems: rewardStems.value === 1,
   })
   void router.push({ path: '/game', query: { id } })
 }
@@ -390,7 +491,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
               class="pill"
             >
               <span class="pill-label">{{ dial.short }}</span>
-              <span class="pill-value">{{ dial.model.value }}</span>
+              <span class="pill-value">{{ pillValue(dial) }}</span>
             </span>
             <span
               v-if="bonusSummary"
@@ -433,77 +534,54 @@ const selectedMode = computed(() => modeInfo(mode.value))
       title="Game settings"
       @close="closeSettings"
     >
-      <div class="dials">
-        <fieldset
-          v-for="dial in visibleDials"
-          :key="dial.key"
-          class="group"
+      <template
+        v-for="section in visibleSections"
+        :key="section.key"
+      >
+        <h3
+          v-if="section.title"
+          class="section"
         >
-          <legend>{{ dial.legend }}</legend>
-          <div class="counts">
-            <button
-              v-for="count in dial.choices"
-              :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: dial.model.value === count }"
-              :aria-pressed="dial.model.value === count"
-              @click="dial.model.value = count"
-            >
-              {{ count }}
-            </button>
-          </div>
-          <p
-            v-if="dial.hint"
-            class="description"
+          {{ section.title }}
+        </h3>
+        <div class="dials">
+          <fieldset
+            v-for="dial in section.dials"
+            :key="dial.key"
+            class="group"
           >
-            {{ dial.hint }}
-          </p>
-        </fieldset>
-      </div>
-
-      <!--
-        Kept apart under its own heading: these shape how the finished board is added up, not how the
-        game is played, and the bonus rows only exist above whatever minimum is chosen.
-      -->
-      <h3 class="section">
-        Final score
-      </h3>
-      <div class="dials">
-        <fieldset
-          v-for="dial in visibleFinalDials"
-          :key="dial.key"
-          class="group"
+            <legend>{{ dial.legend }}</legend>
+            <div
+              class="counts"
+              :class="{ wide: dial.choices.length > 4 }"
+            >
+              <button
+                v-for="(count, index) in dial.choices"
+                :key="count"
+                type="button"
+                class="count"
+                :class="{ chosen: dial.model.value === count }"
+                :aria-pressed="dial.model.value === count"
+                @click="dial.model.value = count"
+              >
+                {{ dial.labels?.[index] ?? count }}
+              </button>
+            </div>
+            <p
+              v-if="dial.hint"
+              class="description"
+            >
+              {{ dial.hint }}
+            </p>
+          </fieldset>
+        </div>
+        <p
+          v-if="section.note"
+          class="description"
         >
-          <legend>{{ dial.legend }}</legend>
-          <div
-            class="counts"
-            :class="{ wide: dial.choices.length > 4 }"
-          >
-            <button
-              v-for="count in dial.choices"
-              :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: dial.model.value === count }"
-              :aria-pressed="dial.model.value === count"
-              @click="dial.model.value = count"
-            >
-              {{ count }}
-            </button>
-          </div>
-          <p
-            v-if="dial.hint"
-            class="description"
-          >
-            {{ dial.hint }}
-          </p>
-        </fieldset>
-      </div>
-      <p class="description">
-        A group scores the sum of its tiles' values, and a bonus for its size on top. Six is as large
-        as a group can get — no group may repeat a tile, and there are only six values and six colours.
-      </p>
+          {{ section.note }}
+        </p>
+      </template>
     </SettingsFlyout>
   </main>
 </template>

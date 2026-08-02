@@ -202,6 +202,23 @@ It happens **once**, at the start of the game — not once per round.
 The centre plate is what makes the board playable at all: a plate must connect to an existing plate, and
 a tile may only go into an empty petal of a placed plate. Without it there is nowhere to put anything.
 
+### Drawer size
+
+Both halves of the drawer are game settings.
+
+| | Choices | Default |
+|---|---|---|
+| **Tile slots** | 12, 14, 16, 18 | 16 |
+| **Plate bays** | 1, 2, 3 | 2 |
+
+Both are difficulty dials in disguise. Tile slots are the room to hold tiles you cannot place yet — and
+stems occupy them too, so a large opening allowance eats into it. Bays are how many plates you can keep
+in hand before committing one to the board. Fewer of either forces earlier decisions.
+
+The tile counts are all **even** because the grid is two rows deep, so each divides exactly into
+columns. A wider drawer makes the panel physically wider; what happens when it outgrows a small screen
+is not yet decided.
+
 ## Stems (the jokers)
 
 **Stems** — stem cells — are the game's wild card, and they behave unlike anything else on the table.
@@ -590,6 +607,21 @@ connected 1s are worth 5, and the sixth turns that into 6 + 6 = **12**. The othe
 every step up — **+3 / +5 / +7** — which is why this is a table rather than one "full group" number.
 
 Exact size, never cumulative: under +3/+5/+7 a full group is worth 7 extra, not 15.
+
+### Settling the drawer
+
+Two more dials, both **on** by default, applied **once** when the game ends — never between rounds,
+where tiles carry over freely.
+
+**Fine for tiles left unplaced** — everything still in your drawer is charged at its **face value**, a
+plate through its own tile. A hoarded 6 costs six times what a 1 does, which is the point: the tiles
+hardest to place are the most expensive to keep, and a tile you cannot use becomes a real cost rather
+than merely a wasted slot.
+
+**Bonus for stems left over** — a point for each stem still held. The mirror of the fine, so spending a
+stem you did not need is a real choice.
+
+The end score is therefore `groups + stems held − left unplaced`, and it can go **negative**.
 
 **Six is as large as a group can get.** No group may repeat a tile, and there are only six values and
 six colours — so a full colour group is one tile of every value, and a full value group one of every

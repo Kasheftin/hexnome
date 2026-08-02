@@ -16,8 +16,9 @@
  * - In multiplayer an opponent's board arrives as data, and this is already that shape.
  */
 import { axialKey, boundsOfCells, compareCellsInReadingOrder, type Axial, type WorldBounds } from '@/game/hex'
+import type { Leftovers } from '@/game/groups'
 import { plateCells } from '@/game/plate'
-import type { AnchorKind, Tableau, Tile } from '@/game/tableau'
+import type { AnchorKind, Tableau, Tile, TileSpec } from '@/game/tableau'
 
 /** A plate's footprint: the hole it sits on, and the seven cells it covers. */
 export interface DiagramPlate {
@@ -117,4 +118,28 @@ export function describeBoard(tableau: Tableau, size: number): BoardDiagram {
   })
 
   return { plates, tiles, anchors, bounds: boundsOfCells(unique, size) }
+}
+
+/**
+ * What the player is still holding: loose drawer tiles, and the token of every plate left in a bay.
+ *
+ * A plate is charged for through its own tile, since that is the only value it has. Its token lives at
+ * an `onPlate` location rather than in the drawer, so it has to be gathered separately — reading only
+ * `kind: 'drawer'` would quietly let a hoarded plate off.
+ *
+ * Stems are counted rather than listed: they are interchangeable, and only how many survives.
+ */
+export function describeLeftovers(tableau: Tableau): Leftovers {
+  const unplaced: TileSpec[] = []
+
+  for (const tile of tableau.tiles()) {
+    if (tile.location.kind === 'drawer') unplaced.push({ color: tile.color, value: tile.value })
+  }
+  for (const plate of tableau.plates()) {
+    if (plate.location.kind !== 'plateSlot') continue
+    const token = tableau.plateToken(plate.id)
+    if (token) unplaced.push({ color: token.color, value: token.value })
+  }
+
+  return { unplaced, stems: tableau.stems().length }
 }

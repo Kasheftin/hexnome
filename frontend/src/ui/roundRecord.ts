@@ -6,6 +6,7 @@
  * the picture is rebuilt from a prefix of the log, not remembered.
  */
 import type { RoundTally } from '@/game/agenda'
+import type { Leftovers } from '@/game/groups'
 import type { Tile } from '@/game/tableau'
 import type { BoardDiagram } from '@/scene/boardDiagram'
 
@@ -15,4 +16,6 @@ export interface RoundRecord {
   /** The board as it stood when this round ended. */
   readonly board: BoardDiagram
   readonly tally: RoundTally<Tile>
+  /** Still in the drawer at that point. Only the last round's is ever settled — see `game/groups.ts`. */
+  readonly leftovers: Leftovers
 }

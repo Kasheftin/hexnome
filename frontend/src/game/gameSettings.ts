@@ -62,6 +62,22 @@ export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6]
 export const DEFAULT_PLATES_PER_ROUND = 4
 
 /**
+ * How big the player's drawer is.
+ *
+ * Both are a difficulty dial in disguise. Tile slots are the room to hold tiles you cannot place yet,
+ * and stems occupy them too; bays are how many plates you can keep in hand before committing one to
+ * the board. Fewer of either forces earlier decisions.
+ *
+ * The tile counts are all **even** because the grid is two rows deep, so each divides exactly into
+ * columns — see `scene/drawerLayout.ts`.
+ */
+export const TILE_SLOT_CHOICES: readonly number[] = [12, 14, 16, 18]
+export const DEFAULT_TILE_SLOTS = 16
+
+export const PLATE_SLOT_CHOICES: readonly number[] = [1, 2, 3]
+export const DEFAULT_PLATE_SLOTS = 2
+
+/**
  * Stems each player starts with — the jokers, dealt into the drawer before the first turn.
  *
  * They occupy ordinary tile slots, so this is also a handicap dial in disguise: every stem is one
@@ -127,12 +143,28 @@ export const DEFAULT_MIN_GROUP_SIZE = 3
  */
 export const GROUP_BONUS_CHOICES: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 export const DEFAULT_GROUP_BONUSES: readonly number[] = [0, 0, 0, 0, 0, 0, 6]
+
+/**
+ * Charge for everything still in the drawer when the game ends, at its face value.
+ *
+ * **Once, at the very end.** Tiles cross between rounds freely — that is most of why a drawer
+ * accumulates awkward ones — so this is a reckoning for hoarding across the whole game rather than a
+ * per-round tax, and it makes a tile you cannot place a real cost rather than merely a wasted slot.
+ */
+export const DEFAULT_FINE_UNPLACED = true
+
+/** A point for each stem still held at the end: the mirror of the fine, rewarding what was saved. */
+export const DEFAULT_REWARD_STEMS = true
 export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 
 export interface GameSettings {
   readonly kind: GameKind
   readonly mode: SingleplayerMode
   readonly platesPerRound: number
+  /** Tile slots in the player's drawer. Stems share them. */
+  readonly tileSlots: number
+  /** Plate bays in the player's drawer. */
+  readonly plateSlots: number
   /** Stems each player is dealt at the start of the game. */
   readonly initialStems: number
   /** Stems awarded for enclosing an internal anchor. */
@@ -147,6 +179,10 @@ export interface GameSettings {
   readonly minGroupSize: number
   /** Extra points by exact group size, indexed by size. See {@link DEFAULT_GROUP_BONUSES}. */
   readonly groupBonuses: readonly number[]
+  /** Charge the value of every tile and plate left unplaced when the game ends. */
+  readonly fineUnplaced: boolean
+  /** Pay a point for each stem still in the drawer when the game ends. */
+  readonly rewardStems: boolean
   /** Epoch milliseconds. Supplied by the caller so this module never reads the clock. */
   readonly createdAt: number
 }
@@ -169,6 +205,14 @@ export function isGameKind(value: unknown): value is GameKind {
 
 export function isPlatesPerRound(value: unknown): boolean {
   return typeof value === 'number' && PLATES_PER_ROUND_CHOICES.includes(value)
+}
+
+export function isTileSlots(value: unknown): boolean {
+  return typeof value === 'number' && TILE_SLOT_CHOICES.includes(value)
+}
+
+export function isPlateSlots(value: unknown): boolean {
+  return typeof value === 'number' && PLATE_SLOT_CHOICES.includes(value)
 }
 
 export function isStemCount(value: unknown): boolean {
@@ -246,6 +290,8 @@ export function defaultGameSettings(createdAt: number): GameSettings {
     kind: 'singleplayer',
     mode: DEFAULT_SINGLEPLAYER_MODE,
     platesPerRound: DEFAULT_PLATES_PER_ROUND,
+    tileSlots: DEFAULT_TILE_SLOTS,
+    plateSlots: DEFAULT_PLATE_SLOTS,
     initialStems: DEFAULT_STEM_COUNT,
     stemsPerInternalAnchor: DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
     stemsPerExternalAnchor: DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
@@ -253,6 +299,8 @@ export function defaultGameSettings(createdAt: number): GameSettings {
     placementRule: DEFAULT_PLACEMENT_RULE,
     minGroupSize: DEFAULT_MIN_GROUP_SIZE,
     groupBonuses: DEFAULT_GROUP_BONUSES,
+    fineUnplaced: DEFAULT_FINE_UNPLACED,
+    rewardStems: DEFAULT_REWARD_STEMS,
     createdAt,
   }
 }
@@ -287,6 +335,8 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     platesPerRound: isPlatesPerRound(raw.platesPerRound)
       ? (raw.platesPerRound as number)
       : DEFAULT_PLATES_PER_ROUND,
+    tileSlots: isTileSlots(raw.tileSlots) ? (raw.tileSlots as number) : DEFAULT_TILE_SLOTS,
+    plateSlots: isPlateSlots(raw.plateSlots) ? (raw.plateSlots as number) : DEFAULT_PLATE_SLOTS,
     initialStems: isStemCount(raw.initialStems)
       ? (raw.initialStems as number)
       : DEFAULT_STEM_COUNT,
@@ -300,6 +350,10 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     minGroupSize,
     // Normalised on the way in, so nothing downstream has to remember the pairing.
     groupBonuses: effectiveGroupBonuses(minGroupSize, parseGroupBonuses(raw.groupBonuses)),
+    // A switch that is anything but `false` stays on: these are on by default, and a blob written
+    // before they existed should play the way a new game does rather than quietly lose them.
+    fineUnplaced: raw.fineUnplaced !== false,
+    rewardStems: raw.rewardStems !== false,
     // Normalised on the way in, so nothing downstream has to remember the pairing.
     strictEnclosureBonus: effectiveStrictBonus({
       placementRule,

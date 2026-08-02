@@ -39,6 +39,7 @@ import {
 } from './constants'
 import { registerGrabbable } from './grabbables'
 import { screenToBoard, unitsPerPixel } from './screenProjection'
+import type { DrawerShape } from './drawerLayout'
 import { useSourceLayout } from './useSourceLayout'
 
 /**
@@ -46,6 +47,8 @@ import { useSourceLayout } from './useSourceLayout'
  * mid-game — so the bays are built once in `onMounted` rather than watched.
  */
 const props = defineProps<{
+  /** The drawer's seats: the source column stops above the panel, whose width follows them. */
+  drawer: DrawerShape
   lots: number
   /** Is the source draftable right now? Only during a `taking` turn. */
   live: boolean
@@ -53,7 +56,7 @@ const props = defineProps<{
 
 const { scene, camera, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
-const layout = useSourceLayout(() => props.lots)
+const layout = useSourceLayout(() => props.lots, () => props.drawer)
 
 const FLAT = new Euler(-Math.PI / 2, 0, 0)
 

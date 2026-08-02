@@ -158,7 +158,6 @@ export const TILE_COLORS = [
 
 /* ── Drawer ──────────────────────────────────────────────────────────────────── */
 
-export const DRAWER_COLS = 8
 export const DRAWER_ROWS = 2
 
 /**
@@ -172,6 +171,17 @@ export const DRAWER_SLOT_PX = 83
 export const DRAWER_PADDING_PX = 13
 /** Gap between the drawer and the bottom of the canvas. */
 export const DRAWER_BOTTOM_PX = 22
+
+/**
+ * Breathing room either side of the drawer, and the most of the window's height it may take.
+ *
+ * Both feed the fit factor in `drawerLayout.ts`. The sizes above are what the drawer *wants* to be;
+ * these two decide when it has to settle for less. The height cap is nearly a no-op at 720px tall —
+ * deliberately, since it exists only to stop a wide, short window handing the whole screen to a panel
+ * that is meant to sit under the board.
+ */
+export const DRAWER_SIDE_GAP_PX = 16
+export const DRAWER_MAX_HEIGHT_FRACTION = 0.32
 
 /** Tile width as a fraction of its slot, leaving the slot outline visible around it. */
 export const DRAWER_TILE_FILL = 0.9
@@ -188,7 +198,6 @@ export const DRAWER_TILE_FILL = 0.9
  * wider than tall, and two rows of 83px slots make the bay 192px tall — so 198 keeps the plate
  * filling its bay rather than floating in a portrait box with slack above and below.
  */
-export const PLATE_SLOTS = 2
 export const PLATE_SLOT_PX = 198
 /** Gap between the plate slots and the tile grid. */
 export const DRAWER_GROUP_GAP_PX = 16
@@ -230,7 +239,6 @@ export const SOURCE_BOTTOM_GAP_PX = 12
  * four drawer-sized tiles legibly, which is ~172px. Capping below that would make parity unreachable
  * at *any* viewport size, so the cap sits just above it — see sourceTileScale in TableauView.vue.
  */
-export const SOURCE_LOT_MIN_PX = 54
 export const SOURCE_LOT_MAX_PX = 176
 /**
  * Plate width as a fraction of its lot.

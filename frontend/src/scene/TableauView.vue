@@ -50,7 +50,6 @@ import { petalCell } from '@/game/plate'
 import type { DraftTileState } from '@/game/draft'
 import type { PlateLocation, Tableau, TileLocation } from '@/game/tableau'
 import {
-  DRAWER_SLOT_PX,
   DRAWER_TILE_FILL,
   DRAWER_TILE_Y,
   SOURCE_PLATE_Y,
@@ -61,7 +60,6 @@ import {
   HEX_SIZE,
   PLATE_BASE_Y,
   PLATE_SLOT_FILL,
-  PLATE_SLOT_PX,
   PLATE_SPIN_EASE,
   PLATE_TILE_LIFT,
   PLATE_TOKEN_LIFT,
@@ -102,11 +100,14 @@ import { createSymbolPlane } from './symbolPlane'
 import { createTileGeometry, hexApothemOf } from './tileGeometry'
 import { SOURCE_HEAP_SPAN, sourceScatter, type ScatterOffset } from './sourceScatter'
 import { createTileMaterial, type TileColorIndex } from './tileMaterials'
+import type { DrawerShape } from './drawerLayout'
 import { useDrawerLayout } from './useDrawerLayout'
 import { useSourceLayout } from './useSourceLayout'
 
 const props = defineProps<{
   tableau: Tableau
+  /** How many seats the drawer has — a game setting, so the panel's size follows it. */
+  drawer: DrawerShape
   /** Seeds the loose-tile scatter, so a lot looks the same after a refresh. */
   gameId: string
   /**
@@ -183,8 +184,8 @@ const emit = defineEmits<{
 
 const { scene, camera, renderer, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
-const layout = useDrawerLayout()
-const sourceLayout = useSourceLayout(() => props.tableau.sourceLots)
+const layout = useDrawerLayout(() => props.drawer)
+const sourceLayout = useSourceLayout(() => props.tableau.sourceLots, () => props.drawer)
 
 const tileGeometry: BufferGeometry = createTileGeometry({
   circumradius: TILE_SIZE,
@@ -334,14 +335,22 @@ function canvasEl(): HTMLCanvasElement | null {
   return renderer.instance?.domElement ?? null
 }
 
+/*
+ * Both read their slot size from the **layout**, not from the constants.
+ *
+ * The panel shrinks to fit a narrow window, and a tile sized from the unscaled constant would then
+ * overflow the socket it is sitting in. The layout is the one description of the drawer's geometry;
+ * anything that bypasses it drifts the moment the fit factor is not 1.
+ */
+
 /** Tile radius in world units when sitting in a drawer tile slot. */
 function drawerTileScale(upp: number): number {
-  return (((DRAWER_SLOT_PX / 2) * DRAWER_TILE_FILL) * upp) / TILE_SIZE
+  return (((layout.value.slotSize / 2) * DRAWER_TILE_FILL) * upp) / TILE_SIZE
 }
 
 /** Plate scale when sitting in a drawer plate slot. */
 function drawerPlateScale(upp: number): number {
-  return (PLATE_SLOT_PX * PLATE_SLOT_FILL * upp) / PLATE_WORLD_WIDTH
+  return (layout.value.plateSlotWidth * PLATE_SLOT_FILL * upp) / PLATE_WORLD_WIDTH
 }
 
 /**

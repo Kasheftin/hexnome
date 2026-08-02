@@ -466,6 +466,22 @@ Consequences, all of them deliberate:
 - The drawer is drawn **in the canvas, not as DOM**. Its slots hold live 3D tiles and DOM sits above
   the canvas, so an opaque DOM drawer would cover its own contents.
 - A drawer tile is scaled by `unitsPerPixel` each frame, so zooming the board does not resize the UI.
+- **The panel scales to fit the window.** Its size is a game setting now — a 3-bay, 18-tile drawer wants
+  1383px, wider than a 1366 laptop — so `createDrawerLayout` computes one fit factor and applies it to
+  every pixel dimension. Capped at 1, because the constants are the intended size rather than a
+  minimum; no lower cap, because a panel that always fits is worth more than tiles that never shrink.
+
+  Scrollbars were the obvious alternative and are not available: the drawer is *in the canvas*, so
+  there is no element to scroll. Building one would mean a custom gesture, clipping, and offsetting
+  every hit-test — and a slot you cannot see is a slot you cannot drop on.
+
+  Anything sizing drawer contents must read `layout.slotSize` / `layout.plateSlotWidth` rather than the
+  raw constants, or the tiles keep their full size inside shrunken sockets. Four places did exactly
+  that and were converted; `drawerLayout.spec.ts` pins `slotAt(slotCentre(n)) === n` at several scales,
+  which is the property that keeps the picture and the drop targets the same rectangles.
+
+  The source column reads the drawer's top to know where to stop, so a scaled-down drawer hands it more
+  room. That coupling is one-way and must stay so: the drawer's factor depends only on the canvas.
 - **That scale must be assigned, never eased.** It is a zoom-compensation factor, not an animation: when
   zoom changes the correct value changes instantly, and easing toward it renders a knowingly wrong size
   for several frames — which looked like the drawer contents resizing and springing back. Each view

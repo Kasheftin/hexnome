@@ -5,12 +5,11 @@ import {
   SOURCE_LEFT_PX,
   SOURCE_LOT_GAP_PX,
   SOURCE_LOT_MAX_PX,
-  SOURCE_LOT_MIN_PX,
   SOURCE_PADDING_PX,
   SOURCE_PLATE_FILL,
   SOURCE_TOP_PX,
 } from './constants'
-import { createDrawerLayout } from './drawerLayout'
+import { createDrawerLayout, type DrawerShape } from './drawerLayout'
 
 /**
  * The shared source's geometry, in **screen pixels**.
@@ -52,10 +51,6 @@ export interface SourceLayout {
  */
 const LOT_ASPECT = PLATE_WORLD_HEIGHT / PLATE_WORLD_WIDTH
 
-function clamp(n: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, n))
-}
-
 /**
  * @param lots how many slots the column shows — one per plate the round deals, so it varies with the
  * `platesPerRound` setting rather than being fixed. Fewer slots means taller lots and bigger tiles.
@@ -64,6 +59,7 @@ export function createSourceLayout(
   canvasWidth: number,
   canvasHeight: number,
   lots: number,
+  drawerShape: DrawerShape,
 ): SourceLayout {
   const lotCount = Math.max(1, Math.floor(lots))
   /**
@@ -75,7 +71,8 @@ export function createSourceLayout(
    * rather than its actual width, because the actual width depends on the height this decides —
    * using it would be circular.
    */
-  const drawer = createDrawerLayout(canvasWidth, canvasHeight)
+  // The drawer's real shape, not a default: a twenty-slot panel is wider and meets the column sooner.
+  const drawer = createDrawerLayout(canvasWidth, canvasHeight, drawerShape)
   const widestPanel = SOURCE_LOT_MAX_PX + SOURCE_PADDING_PX * 2
   const meetsDrawer = SOURCE_LEFT_PX + widestPanel + SOURCE_BOTTOM_GAP_PX > drawer.left
   const bottomLimit = meetsDrawer
@@ -85,8 +82,18 @@ export function createSourceLayout(
   // Fit the lots to what is left, then let the panel hug them.
   const available = Math.max(0, bottomLimit - SOURCE_TOP_PX)
   const forLots = available - SOURCE_PADDING_PX * 2 - SOURCE_LOT_GAP_PX * (lotCount - 1)
-  // Clamp the *width* and re-derive the height from it, so clamping never distorts the aspect.
-  const lotWidth = clamp(forLots / lotCount / LOT_ASPECT, SOURCE_LOT_MIN_PX, SOURCE_LOT_MAX_PX)
+  /*
+   * Clamp the *width* and re-derive the height from it, so clamping never distorts the aspect.
+   *
+   * There is a ceiling but **no floor**. A floor used to hold the lots at a readable size, and the
+   * column then ran on past the drawer and was overlapped by it — which is worse than small lots,
+   * because the two panels then fight over the same pixels. Fitting wins; below a certain window the
+   * lots are simply tiny.
+   *
+   * The `max(1, …)` is not decoration: on a very short window `forLots` goes negative, and a negative
+   * width would give inverted geometry rather than a small column.
+   */
+  const lotWidth = Math.min(SOURCE_LOT_MAX_PX, Math.max(1, forLots / lotCount / LOT_ASPECT))
   const lotHeight = lotWidth * LOT_ASPECT
 
   const width = lotWidth + SOURCE_PADDING_PX * 2
