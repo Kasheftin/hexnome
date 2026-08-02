@@ -1,8 +1,11 @@
+import 'dotenv/config'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
     environment: 'node',
+    /* The service specs talk to the real database; two suites sharing one would fight over rows. */
+    fileParallelism: false,
     include: ['src/**/*.spec.ts'],
   },
   resolve: {
