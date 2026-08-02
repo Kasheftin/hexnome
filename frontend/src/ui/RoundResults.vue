@@ -69,14 +69,27 @@ const open = shallowRef<Section>(props.rounds.at(-1)?.round ?? 1)
  * turns a one-off explanation into a recurring toll.
  */
 const revealSpent = shallowRef(false)
+const finalSpent = shallowRef(false)
 
 function spendReveal(): void {
-  if (revealSpent.value) return
-  reveal.value?.skip()
-  revealSpent.value = true
-  // Set directly rather than waiting for the reveal's own event: it may not be mounted to fire one,
-  // and the footer must not be left offering Skip with nothing to skip.
-  done.value = true
+  if (!revealSpent.value) {
+    reveal.value?.skip()
+    revealSpent.value = true
+    // Set directly rather than waiting for the reveal's own event: it may not be mounted to fire one,
+    // and the footer must not be left offering Skip with nothing to skip.
+    done.value = true
+  }
+
+  /*
+   * The final sheet counts once too — but only mark it spent while leaving it, never before it has
+   * been opened. Setting `finalDone` early would print the closing total the instant the sheet
+   * appeared, and the twelve categories would never be counted at all.
+   */
+  if (open.value === 'final' && !finalSpent.value) {
+    finalReveal.value?.skip()
+    finalSpent.value = true
+    finalDone.value = true
+  }
 }
 
 /**
@@ -217,6 +230,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
             ref="finalReveal"
             :tally="props.finalTally"
             :board="latest?.board ?? props.rounds[0]!.board"
+            :instant="finalSpent"
             @done="finalDone = true"
           />
         </div>

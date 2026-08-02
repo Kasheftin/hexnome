@@ -36,6 +36,14 @@ import { GROUP_STAGGER_MS, useTileFlights } from './useTileFlights'
 const props = defineProps<{
   tally: FinalTally
   board: BoardDiagram
+  /**
+   * Show the finished sheet at once, with no counting.
+   *
+   * Set when the sheet has already been watched. The accordion unmounts a section it closes, so
+   * without this, leaving the final score to glance at a round and coming back would replay all twelve
+   * categories from zero — with the closing total already printed underneath.
+   */
+  instant?: boolean
 }>()
 
 const emit = defineEmits<{ done: [] }>()
@@ -211,8 +219,8 @@ function step(): void {
 defineExpose({ skip: finish })
 
 onMounted(() => {
-  // Nothing formed a group: there is no counting to watch, only a sheet of noughts.
-  if (props.tally.categories.every(category => category.groups.length === 0)) {
+  // Already seen, or nothing formed a group: either way there is no counting to watch.
+  if (props.instant || props.tally.categories.every(category => category.groups.length === 0)) {
     finish()
     return
   }
