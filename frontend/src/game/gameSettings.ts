@@ -92,6 +92,41 @@ export const DEFAULT_STEMS_PER_EXTERNAL_ANCHOR = 2
  */
 export const STRICT_BONUS_CHOICES: readonly number[] = [0, 1]
 export const DEFAULT_STRICT_ENCLOSURE_BONUS = 1
+
+/**
+ * The largest a group can ever be.
+ *
+ * Not a limit anyone imposed — it falls out of the rules. A group holds no duplicates, and there are
+ * six values and six colours, so a colour group runs out at one tile per value and a value group at
+ * one per colour. "Full group" and "six tiles" are therefore the same thing.
+ */
+export const MAX_GROUP_SIZE = 6
+
+/**
+ * How many connected tiles it takes to score at all.
+ *
+ * The biggest single lever on the endgame: at 2 almost anything pays and the board fills with short
+ * runs, at 4 only deliberate building does.
+ */
+export const MIN_GROUP_SIZE_CHOICES: readonly number[] = [2, 3, 4]
+export const DEFAULT_MIN_GROUP_SIZE = 3
+
+/**
+ * Extra points for a group of a given size, on top of the sum of its values.
+ *
+ * Indexed **by group size**, so `groupBonuses[6]` is what a full group pays. Sizes below the scoring
+ * minimum are simply never consulted; the array covers 0–6 so the lookup is the size itself and no
+ * caller has to remember an offset.
+ *
+ * The default pays for finishing and nothing else — a full group is worth six, a four or a five worth
+ * nothing extra. The other common shape, rewarding every step up, is `+3 / +5 / +7`, which is why this
+ * is a table rather than a single "full group bonus".
+ *
+ * **By exact size, not cumulative.** A six-tile group is paid `groupBonuses[6]`, not the sum of the
+ * bonuses beneath it — otherwise `+3 / +5 / +7` would quietly mean +15 for a full group.
+ */
+export const GROUP_BONUS_CHOICES: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+export const DEFAULT_GROUP_BONUSES: readonly number[] = [0, 0, 0, 0, 0, 0, 6]
 export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 
 export interface GameSettings {
@@ -108,6 +143,10 @@ export interface GameSettings {
   readonly strictEnclosureBonus: number
   /** How strictly a placed tile must agree with its neighbours. See game/placement.ts. */
   readonly placementRule: PlacementRule
+  /** Connected tiles needed before a group scores at all. */
+  readonly minGroupSize: number
+  /** Extra points by exact group size, indexed by size. See {@link DEFAULT_GROUP_BONUSES}. */
+  readonly groupBonuses: readonly number[]
   /** Epoch milliseconds. Supplied by the caller so this module never reads the clock. */
   readonly createdAt: number
 }
@@ -144,6 +183,24 @@ export function isStrictBonus(value: unknown): boolean {
   return typeof value === 'number' && STRICT_BONUS_CHOICES.includes(value)
 }
 
+export function isMinGroupSize(value: unknown): boolean {
+  return typeof value === 'number' && MIN_GROUP_SIZE_CHOICES.includes(value)
+}
+
+/**
+ * A bonus table from storage, or the default.
+ *
+ * All or nothing: a table that is the wrong length or holds an unoffered value is replaced entirely
+ * rather than patched entry by entry. A half-repaired table is a scoring rule nobody chose, and the
+ * player would have no way to see which entries had been quietly rewritten.
+ */
+export function parseGroupBonuses(value: unknown): readonly number[] {
+  if (!Array.isArray(value)) return DEFAULT_GROUP_BONUSES
+  if (value.length !== MAX_GROUP_SIZE + 1) return DEFAULT_GROUP_BONUSES
+  if (!value.every(entry => GROUP_BONUS_CHOICES.includes(entry as number))) return DEFAULT_GROUP_BONUSES
+  return value as readonly number[]
+}
+
 /**
  * The bonus a game actually runs with.
  *
@@ -156,6 +213,21 @@ export function effectiveStrictBonus(settings: {
   strictEnclosureBonus: number
 }): number {
   return settings.placementRule === 'strict' ? 0 : settings.strictEnclosureBonus
+}
+
+/**
+ * The bonus table a game actually runs with: nothing is paid at or below the scoring minimum.
+ *
+ * A group smaller than the minimum never scores at all, and one *at* the minimum is the baseline the
+ * bonuses are a reward above — so an entry there would be a flat rise dressed up as a bonus. The menu
+ * hides those inputs; this makes the same true of a stored blob written by an older build or edited by
+ * hand, exactly as `effectiveStrictBonus` does for its pairing.
+ */
+export function effectiveGroupBonuses(
+  minGroupSize: number,
+  bonuses: readonly number[],
+): readonly number[] {
+  return bonuses.map((bonus, size) => (size <= minGroupSize ? 0 : bonus))
 }
 
 export const PLACEMENT_RULE_LABELS: Readonly<Record<PlacementRule, string>> = {
@@ -179,6 +251,8 @@ export function defaultGameSettings(createdAt: number): GameSettings {
     stemsPerExternalAnchor: DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
     strictEnclosureBonus: DEFAULT_STRICT_ENCLOSURE_BONUS,
     placementRule: DEFAULT_PLACEMENT_RULE,
+    minGroupSize: DEFAULT_MIN_GROUP_SIZE,
+    groupBonuses: DEFAULT_GROUP_BONUSES,
     createdAt,
   }
 }
@@ -203,6 +277,10 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     ? raw.placementRule
     : DEFAULT_PLACEMENT_RULE
 
+  const minGroupSize = isMinGroupSize(raw.minGroupSize)
+    ? (raw.minGroupSize as number)
+    : DEFAULT_MIN_GROUP_SIZE
+
   return {
     kind: raw.kind,
     mode: raw.mode,
@@ -219,6 +297,9 @@ export function parseGameSettings(value: unknown): GameSettings | null {
       ? (raw.stemsPerExternalAnchor as number)
       : DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
     placementRule,
+    minGroupSize,
+    // Normalised on the way in, so nothing downstream has to remember the pairing.
+    groupBonuses: effectiveGroupBonuses(minGroupSize, parseGroupBonuses(raw.groupBonuses)),
     // Normalised on the way in, so nothing downstream has to remember the pairing.
     strictEnclosureBonus: effectiveStrictBonus({
       placementRule,

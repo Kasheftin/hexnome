@@ -361,17 +361,13 @@ export interface Tableau {
   isBoardCell(cell: Axial): boolean
 }
 
-export function createTableau({
-  cells,
-  drawerSlots,
-  plateSlots,
-  sourceLots = 0,
-  sourceTilesPerLot = 0,
-  placementRule = DEFAULT_PLACEMENT_RULE,
-  stemsPerInternalAnchor = 0,
-  stemsPerExternalAnchor = 0,
-  strictEnclosureBonus = 0,
-}: {
+/**
+ * How a tableau is built.
+ *
+ * Named rather than inline because a replay has to construct an identical one from the same options
+ * (`gameLog.ts`), and a shape written out twice is a shape that drifts.
+ */
+export interface TableauOptions {
   cells: readonly Axial[]
   drawerSlots: number
   plateSlots: number
@@ -394,7 +390,19 @@ export function createTableau({
   stemsPerExternalAnchor?: number
   /** Extra stems when an enclosure is strict all the way round. Zero when the game is already strict. */
   strictEnclosureBonus?: number
-}): Tableau {
+}
+
+export function createTableau({
+  cells,
+  drawerSlots,
+  plateSlots,
+  sourceLots = 0,
+  sourceTilesPerLot = 0,
+  placementRule = DEFAULT_PLACEMENT_RULE,
+  stemsPerInternalAnchor = 0,
+  stemsPerExternalAnchor = 0,
+  strictEnclosureBonus = 0,
+}: TableauOptions): Tableau {
   const boardCells = new Set(cells.map(axialKey))
   const platesById = new Map<string, Plate>()
   const tilesById = new Map<string, Tile>()

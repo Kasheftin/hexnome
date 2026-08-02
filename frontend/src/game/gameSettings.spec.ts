@@ -4,8 +4,11 @@ import {
   DEFAULT_STEM_COUNT,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
+  DEFAULT_GROUP_BONUSES,
+  DEFAULT_MIN_GROUP_SIZE,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
   SINGLEPLAYER_MODES,
+  effectiveGroupBonuses,
   createGameId,
   defaultGameSettings,
   parseGameSettings,
@@ -22,6 +25,9 @@ const valid = {
   stemsPerExternalAnchor: 1,
   placementRule: 'strict',
   strictEnclosureBonus: 0,
+  minGroupSize: 4,
+  // Indexed by group size, and zeroed at or below the minimum — hence the leading run of noughts.
+  groupBonuses: [0, 0, 0, 0, 0, 5, 7],
   createdAt: 1_700_000_000_000,
 }
 
@@ -186,5 +192,51 @@ describe('the strict-enclosure bonus', () => {
     const older: Record<string, unknown> = { ...regular }
     delete older.strictEnclosureBonus
     expect(parseGameSettings(older)?.strictEnclosureBonus).toBe(DEFAULT_STRICT_ENCLOSURE_BONUS)
+  })
+})
+
+describe('the final-score dials', () => {
+  it('falls back rather than failing on a bad minimum', () => {
+    for (const bad of [1, 5, 3.5, -3, '3', null, undefined, NaN]) {
+      expect(parseGameSettings({ ...valid, minGroupSize: bad })?.minGroupSize)
+        .toBe(DEFAULT_MIN_GROUP_SIZE)
+    }
+  })
+
+  /*
+   * All or nothing. A half-repaired table is a scoring rule nobody chose, and the player would have
+   * no way to see which entries had been quietly rewritten.
+   */
+  it('replaces a malformed bonus table entirely rather than patching it', () => {
+    for (const bad of [[], [1, 2], 'six', null, [0, 0, 0, 0, 0, 0, 99], { 6: 6 }]) {
+      expect(parseGameSettings({ ...valid, groupBonuses: bad })?.groupBonuses)
+        .toEqual(effectiveGroupBonuses(valid.minGroupSize, DEFAULT_GROUP_BONUSES))
+    }
+  })
+
+  it('zeroes any bonus at or below the minimum on the way in', () => {
+    const parsed = parseGameSettings({
+      ...valid,
+      minGroupSize: 4,
+      groupBonuses: [0, 0, 9, 9, 9, 5, 7],
+    })
+    // Sizes 2, 3 and 4 cannot earn a bonus when 4 is the baseline that scores.
+    expect(parsed?.groupBonuses).toEqual([0, 0, 0, 0, 0, 5, 7])
+  })
+
+  it('defaults to paying only for a full group', () => {
+    const fresh = defaultGameSettings(0)
+    expect(fresh.minGroupSize).toBe(3)
+    expect(fresh.groupBonuses).toEqual([0, 0, 0, 0, 0, 0, 6])
+  })
+})
+
+describe('effectiveGroupBonuses', () => {
+  it('keeps everything above the minimum', () => {
+    expect(effectiveGroupBonuses(3, [0, 0, 0, 0, 3, 5, 7])).toEqual([0, 0, 0, 0, 3, 5, 7])
+  })
+
+  it('clears the minimum itself, which is the baseline rather than an achievement', () => {
+    expect(effectiveGroupBonuses(4, [0, 0, 0, 0, 3, 5, 7])).toEqual([0, 0, 0, 0, 0, 5, 7])
   })
 })

@@ -28,13 +28,7 @@ import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import {
-  createAgenda,
-  roundAgenda,
-  scoreTargets,
-  tallyRound,
-  type RoundTally,
-} from '@/game/agenda'
+import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@/game/agenda'
 import { createDeck, dealStartingPlates, type DealtPlate } from '@/game/deck'
 import { finalTally } from '@/game/groups'
 import {
@@ -56,7 +50,14 @@ import {
   type Payer,
   type PaymentTarget,
 } from '@/game/payment'
+import {
+  createGameLog,
+  entriesThroughRound,
+  recordingTableau,
+  replayTableau,
+} from '@/game/gameLog'
 import { createRecyclingBag } from '@/game/recycling'
+import type { RoundRecord } from '@/ui/roundRecord'
 import { hasRoomToShift, platesToReveal, pushLot, shouldRefill, sourceContents } from '@/game/source'
 import {
   createTableau,
@@ -64,7 +65,7 @@ import {
   type DiscardReceipt,
   type PlateLocation,
   type PlateSpec,
-  type Tile,
+  type TableauOptions,
   type TileLocation,
   type TileSpec,
 } from '@/game/tableau'
@@ -80,7 +81,7 @@ import {
   type TurnPhase,
 } from '@/game/turn'
 import type { Axial } from '@/game/hex'
-import { describeBoard, tilesInReadingOrder, type BoardDiagram } from '@/scene/boardDiagram'
+import { describeBoard, tilesInReadingOrder } from '@/scene/boardDiagram'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
 import DrawerChrome from '@/scene/DrawerChrome.vue'
@@ -105,6 +106,8 @@ import {
 } from '@/scene/constants'
 import { createDrawerLayout } from '@/scene/drawerLayout'
 import {
+  DEFAULT_GROUP_BONUSES,
+  DEFAULT_MIN_GROUP_SIZE,
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
   DEFAULT_STEM_COUNT,
@@ -195,7 +198,7 @@ const strictEnclosureBonus = settings.value
   ? effectiveStrictBonus(settings.value)
   : DEFAULT_STRICT_ENCLOSURE_BONUS
 
-const tableau = createTableau({
+const tableauOptions: TableauOptions = {
   cells,
   drawerSlots: DRAWER_SLOTS,
   plateSlots: PLATE_SLOTS,
@@ -205,7 +208,20 @@ const tableau = createTableau({
   stemsPerInternalAnchor,
   stemsPerExternalAnchor,
   strictEnclosureBonus,
-})
+}
+
+/**
+ * Everything that happens to the board, written down.
+ *
+ * The whole game is the journal: any earlier position is rebuilt by replaying a prefix of it, which is
+ * what lets the results panel show round 1 beside *the board as it was then*. Nothing is snapshotted.
+ *
+ * The tableau is **wrapped** rather than instrumented at each call site, because the board is mutated
+ * from two very different places — here, and the drag handling inside `TableauView` — and a journal
+ * with a hole in it is worse than none. Wrapping makes missing a site impossible.
+ */
+const log = createGameLog()
+const tableau = recordingTableau(createTableau(tableauOptions), log.append)
 
 /**
  * The bags this game's id seeds, and how far into them play has got.
@@ -430,7 +446,7 @@ const inferring = computed(() =>
   INFER_ACTIONS_FROM_GESTURES
   && phase.value.kind === 'idle'
   && announcing.value === null
-  && roundOver.value === null
+  && !showResults.value
   && !gameOver.value)
 
 const canStartTake = computed(() => inferring.value && options.value.take)
@@ -497,40 +513,73 @@ function chooseAction(action: TurnAction): void {
  * It is a choice, not a detection. It usually happens when nothing can be drafted and nothing placed,
  * but a player may pass with moves left, so nothing passes on their behalf.
  */
+/**
+ * Close the round by writing a bookmark, and nothing else.
+ *
+ * The score is not computed here and the board is not copied: both are *derived* from the journal
+ * whenever the panel asks. Marking the boundary at the moment the player passes is what makes the
+ * derivation right — the sweep of the source happens later, and a prefix cut here does not include it.
+ */
 function endRoundByPassing(): void {
   phase.value = IDLE
-  /*
-   * Tiles go in in reading order, and the tally's filter preserves it — so every row of the reveal
-   * sweeps down the board instead of hopping about in the order things happened to be placed.
-   */
-  roundOver.value = tallyRound(
-    roundAgenda(agenda, count.value.round) ?? [],
-    tilesInReadingOrder(tableau),
-  )
-  // Snapshotted, not passed live: the panel should show the board as it was scored.
-  roundBoard.value = describeBoard(tableau, HEX_SIZE)
+  log.append({ op: 'endRound', round: count.value.round })
+  roundsFinished.value = log.rounds()
+  showResults.value = true
 }
 
 /* ── the end of a round ───────────────────────────────────────────────────────── */
 
-/** The round's result while it is being shown, or null during play. */
-const roundOver = shallowRef<RoundTally<Tile> | null>(null)
+/** Rounds closed so far. The one reactive fact about the journal the template needs. */
+const roundsFinished = shallowRef(0)
+/** Whether the results panel is up. Separate from the count, since it closes on Next round. */
+const showResults = shallowRef(false)
 
-/** The board the round was scored against, frozen at the moment it ended. */
-const roundBoard = shallowRef<BoardDiagram | null>(null)
+/**
+ * A finished round, rebuilt from the journal.
+ *
+ * Memoised because a replay walks the whole prefix and a round's past never changes — but memoising is
+ * only an optimisation. The record is a pure function of the journal, so a game restored from a stored
+ * log would rebuild exactly these without having kept anything else.
+ */
+const derived = new Map<number, RoundRecord>()
 
-/** What each finished round scored, in order. The game's total is their sum. */
-const banked = shallowRef<readonly number[]>([])
+function roundRecord(round: number): RoundRecord {
+  const cached = derived.get(round)
+  if (cached) return cached
+
+  const asItWas = replayTableau(entriesThroughRound(log.entries, round), tableauOptions)
+  const record: RoundRecord = {
+    round,
+    board: describeBoard(asItWas, HEX_SIZE),
+    /*
+     * Reading order, and the tally's filter preserves it — so every row of the reveal sweeps down the
+     * board instead of hopping about in the order things happened to be placed.
+     */
+    tally: tallyRound(roundAgenda(agenda, round) ?? [], tilesInReadingOrder(asItWas)),
+  }
+  derived.set(round, record)
+  return record
+}
+
+const roundRecords = computed<readonly RoundRecord[]>(() =>
+  Array.from({ length: roundsFinished.value }, (_, index) => roundRecord(index + 1)))
+
+/** What each finished round scored, in order — derived, not banked. */
+const banked = computed<readonly number[]>(() =>
+  roundRecords.value.map(record => record.tally.total))
 
 const totalScore = computed(() => banked.value.reduce((sum, points) => sum + points, 0))
 
 /**
  * The finished board's connected groups.
  *
- * Derived from the same snapshot the panel draws, so the sheet and the picture cannot disagree about
- * what was on the board. Computed lazily — it is only read once the game is over.
+ * Read off the last round's board, so the sheet and the picture beside it cannot disagree about what
+ * was there. Only consulted once the game is over.
  */
-const finalGroups = computed(() => finalTally(roundBoard.value?.tiles ?? []))
+const finalGroups = computed(() => finalTally(roundRecords.value.at(-1)?.board.tiles ?? [], {
+  minGroupSize: settings.value?.minGroupSize ?? DEFAULT_MIN_GROUP_SIZE,
+  groupBonuses: settings.value?.groupBonuses ?? DEFAULT_GROUP_BONUSES,
+}))
 
 const isFinalRound = computed(() => count.value.round >= (totalRounds.value || 1))
 
@@ -574,9 +623,7 @@ function clearSource(): void {
  * new round deals its own supply into an empty column.
  */
 function startNextRound(): void {
-  const result = roundOver.value
-  if (!result) return
-  banked.value = [...banked.value, result.total]
+  if (!showResults.value) return
 
   if (isFinalRound.value) {
     // The panel stays up and becomes the end of the game — see RoundResults' `over`.
@@ -584,7 +631,7 @@ function startNextRound(): void {
     return
   }
 
-  roundOver.value = null
+  showResults.value = false
   count.value = nextRound(count.value)
   announceRound(count.value.round, () => {
     // Behind the card, and in this order: empty the column before the new round's quota is opened.
@@ -1281,7 +1328,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
     <Transition name="bar">
       <ActionBar
-        v-if="announcing === null && !roundOver && !gameOver"
+        v-if="announcing === null && !showResults && !gameOver"
         :phase="phase"
         :options="options"
         :selection="selection"
@@ -1303,13 +1350,10 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     </Transition>
 
     <RoundResults
-      v-if="roundOver && roundBoard"
-      :round="count.round"
-      :tally="roundOver"
-      :board="roundBoard"
+      v-if="showResults && roundRecords.length"
+      :rounds="roundRecords"
       :final="isFinalRound"
       :over="gameOver"
-      :banked="banked"
       :final-tally="finalGroups"
       @next="startNextRound"
     />

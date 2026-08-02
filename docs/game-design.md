@@ -571,12 +571,29 @@ These are the same groups placement is judged against — see
 [Groups, and the no-duplicates rule](#groups-and-the-no-duplicates-rule). A group can therefore never
 contain a duplicate by the time it is scored: the placement that would have created one was refused.
 
-- **Color group** — connected tiles of the **same color**, size ≥ 3 → scores the **sum of the tiles'
-  values**.
+- **Color group** — connected tiles of the **same color** → scores the **sum of the tiles' values**.
   - *Example:* touching green tiles 1, 2, 4 → **1 + 2 + 4 = 7 points**.
-- **Value group** — connected tiles of the **same value**, size ≥ 3 → scores the **sum of their
-  values**, which for a value group is the same as `value × size`.
+- **Value group** — connected tiles of the **same value** → scores the **sum of their values**, which
+  for a value group is the same as `value × size`.
   - *Example:* three touching 3s → **3 + 3 + 3 = 9 points**.
+
+### The two dials
+
+**Smallest group that scores** — 2, 3 or 4, default **3**. The single biggest lever on the endgame: at
+2 almost anything pays and the board fills with short runs; at 4 only deliberate building does.
+
+**Size bonus** — extra points on top of the sum, by the group's **exact** size. One input per size
+above the minimum, so choosing 3 offers bonuses for 4, 5 and 6.
+
+The default pays **+6 for a full group** and nothing else, which makes finishing worth chasing: five
+connected 1s are worth 5, and the sixth turns that into 6 + 6 = **12**. The other common shape rewards
+every step up — **+3 / +5 / +7** — which is why this is a table rather than one "full group" number.
+
+Exact size, never cumulative: under +3/+5/+7 a full group is worth 7 extra, not 15.
+
+**Six is as large as a group can get.** No group may repeat a tile, and there are only six values and
+six colours — so a full colour group is one tile of every value, and a full value group one of every
+colour. "Full group" and "six tiles" are the same thing.
 
 Both kinds therefore score by one rule — *sum the members' values* — which is why `game/groups.ts`
 implements it once rather than twice.

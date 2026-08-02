@@ -29,6 +29,12 @@ import {
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
   STRICT_BONUS_CHOICES,
+  GROUP_BONUS_CHOICES,
+  MAX_GROUP_SIZE,
+  MIN_GROUP_SIZE_CHOICES,
+  DEFAULT_GROUP_BONUSES,
+  DEFAULT_MIN_GROUP_SIZE,
+  effectiveGroupBonuses,
   effectiveStrictBonus,
   PLACEMENT_RULE_HINTS,
   PLACEMENT_RULE_LABELS,
@@ -60,6 +66,28 @@ const strictEnclosureBonus = ref<number>(DEFAULT_STRICT_ENCLOSURE_BONUS)
 
 const placementRule = ref<PlacementRule>(DEFAULT_PLACEMENT_RULE)
 
+const minGroupSize = ref<number>(DEFAULT_MIN_GROUP_SIZE)
+
+/**
+ * One ref per group size, rather than one ref holding the table.
+ *
+ * Which of these the player can see depends on the minimum, and a size that goes out of reach keeps
+ * its value while hidden — so raising the minimum and lowering it again does not silently wipe a
+ * bonus the player had set. The table handed to the game is assembled from these on start.
+ */
+const bonusBySize = Object.fromEntries(
+  Array.from({ length: MAX_GROUP_SIZE - 1 }, (_, index) => {
+    const size = index + 2
+    return [size, ref<number>(DEFAULT_GROUP_BONUSES[size] ?? 0)]
+  }),
+) as Record<number, Ref<number>>
+
+/** The table as the game will run it: zeroed at and below the minimum. */
+const groupBonuses = computed(() => effectiveGroupBonuses(
+  minGroupSize.value,
+  Array.from({ length: MAX_GROUP_SIZE + 1 }, (_, size) => bonusBySize[size]?.value ?? 0),
+))
+
 /**
  * A numeric dial: a row of choices behind the gear.
  *
@@ -79,6 +107,8 @@ interface Dial {
   readonly hint?: string
   /** False hides the dial entirely — see the strict bonus. */
   readonly applies?: () => boolean
+  /** Omitted from the readout strip, which would otherwise run to a dozen pills. */
+  readonly minor?: boolean
 }
 
 const DIALS: readonly Dial[] = [
@@ -128,7 +158,48 @@ const DIALS: readonly Dial[] = [
   },
 ]
 
+/**
+ * The final-score dials, kept apart because they answer a different question.
+ *
+ * The dials above shape the game being played; these two shape only how the finished board is added
+ * up, and mixing them into one list of nine made neither legible.
+ */
+const FINAL_DIALS: readonly Dial[] = [
+  {
+    key: 'minGroupSize',
+    legend: 'Smallest group that scores',
+    short: 'min group',
+    choices: MIN_GROUP_SIZE_CHOICES,
+    model: minGroupSize,
+    hint: 'Connected tiles of one colour, or of one value. The single biggest lever on the endgame: '
+      + 'at 2 almost anything pays, at 4 only deliberate building does.',
+  },
+  ...Array.from({ length: MAX_GROUP_SIZE - 1 }, (_, index): Dial => {
+    const size = index + 2
+    return {
+      key: `bonus${size}`,
+      legend: `Bonus for a group of ${size}`,
+      short: `bonus ${size}`,
+      choices: GROUP_BONUS_CHOICES,
+      model: bonusBySize[size] as Ref<number>,
+      minor: true,
+      // Nothing is paid at or below the minimum: that size is the baseline, not an achievement.
+      applies: () => size > minGroupSize.value,
+    }
+  }),
+]
+
 const visibleDials = computed(() => DIALS.filter(dial => dial.applies?.() ?? true))
+const visibleFinalDials = computed(() => FINAL_DIALS.filter(dial => dial.applies?.() ?? true))
+
+/** Every bonus still in reach, as one pill — a dozen of them would swamp the strip. */
+const bonusSummary = computed(() => visibleFinalDials.value
+  .filter(dial => dial.minor)
+  .map(dial => dial.model.value)
+  .join(' · '))
+
+const summaryDials = computed(() =>
+  [...visibleDials.value, ...visibleFinalDials.value].filter(dial => !dial.minor))
 
 const settingsOpen = ref(false)
 const gear = ref<HTMLButtonElement | null>(null)
@@ -179,6 +250,8 @@ function startGame(): void {
       strictEnclosureBonus: strictEnclosureBonus.value,
     }),
     placementRule: placementRule.value,
+    minGroupSize: minGroupSize.value,
+    groupBonuses: groupBonuses.value,
   })
   void router.push({ path: '/game', query: { id } })
 }
@@ -312,12 +385,19 @@ const selectedMode = computed(() => modeInfo(mode.value))
         >
           <span class="settings-values">
             <span
-              v-for="dial in visibleDials"
+              v-for="dial in summaryDials"
               :key="dial.key"
               class="pill"
             >
               <span class="pill-label">{{ dial.short }}</span>
               <span class="pill-value">{{ dial.model.value }}</span>
+            </span>
+            <span
+              v-if="bonusSummary"
+              class="pill"
+            >
+              <span class="pill-label">group bonus</span>
+              <span class="pill-value">{{ bonusSummary }}</span>
             </span>
           </span>
           <svg
@@ -381,6 +461,49 @@ const selectedMode = computed(() => modeInfo(mode.value))
           </p>
         </fieldset>
       </div>
+
+      <!--
+        Kept apart under its own heading: these shape how the finished board is added up, not how the
+        game is played, and the bonus rows only exist above whatever minimum is chosen.
+      -->
+      <h3 class="section">
+        Final score
+      </h3>
+      <div class="dials">
+        <fieldset
+          v-for="dial in visibleFinalDials"
+          :key="dial.key"
+          class="group"
+        >
+          <legend>{{ dial.legend }}</legend>
+          <div
+            class="counts"
+            :class="{ wide: dial.choices.length > 4 }"
+          >
+            <button
+              v-for="count in dial.choices"
+              :key="count"
+              type="button"
+              class="count"
+              :class="{ chosen: dial.model.value === count }"
+              :aria-pressed="dial.model.value === count"
+              @click="dial.model.value = count"
+            >
+              {{ count }}
+            </button>
+          </div>
+          <p
+            v-if="dial.hint"
+            class="description"
+          >
+            {{ dial.hint }}
+          </p>
+        </fieldset>
+      </div>
+      <p class="description">
+        A group scores the sum of its tiles' values, and a bonus for its size on top. Six is as large
+        as a group can get — no group may repeat a tile, and there are only six values and six colours.
+      </p>
     </SettingsFlyout>
   </main>
 </template>
@@ -576,6 +699,11 @@ legend {
   gap: 8px;
 }
 
+/* Ten choices sit as two rows of five; at four columns they would come out 4 + 4 + 2. */
+.counts.wide {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .count {
   padding: 11px 0;
   border: 1px solid #33383f;
@@ -591,6 +719,18 @@ legend {
 .count:hover:not(.chosen) {
   border-color: #7d6a41;
   color: #e8c878;
+}
+
+/* A rule across the flyout, so the second half reads as a different question rather than more dials. */
+.section {
+  margin: 22px 0 14px;
+  padding-top: 16px;
+  border-top: 1px solid #3a3222;
+  color: #e8c878;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
 }
 
 /* Dials sit closer together than the menu's own groups, being a list of one kind of thing. */

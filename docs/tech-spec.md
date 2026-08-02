@@ -225,6 +225,38 @@ deck deals indices `0…5` without consulting the palette. `tileMaterials.ts` ca
 assertion tying the two together, because `createTileMaterial` falls back to the first colour on an
 out-of-range index — drift would silently render the wrong colour rather than fail.
 
+### The game journal
+
+`game/gameLog.ts` writes down every mutation the tableau undergoes, so any earlier position can be
+rebuilt by replaying a prefix. The first thing that buys is the scoring accordion: a finished round is
+shown beside **the board as it stood then**, not as it stands now. Nothing is snapshotted — the round's
+picture *and* its tally are both derived from the log on demand.
+
+**It records effects, not intentions.** An entry is a mutation that succeeded ("this tile moved to that
+slot"), not a player's intent ("take the blues"). Three consequences, all deliberate:
+
+- Replay needs no rules and no randomness. Nothing is re-decided, so it cannot diverge: no bag is drawn
+  from, no reward re-derived, no legality re-checked.
+- It cannot miss a mutation. `recordingTableau` **wraps the model**, so anything that changes the board
+  is journalled wherever it was called from — and the board is mutated from two very different places,
+  `GameView` and the drag handling inside `TableauView`. Instrumenting call sites would have meant
+  catching every one of about twenty, in two files, for ever.
+- It does **not** validate. A journal proves what happened; it cannot prove it was allowed. Server-side
+  validation in multiplayer will want an intent log as well, built on the turn rules rather than on the
+  model — a different thing, and a later one.
+
+**Why replay reproduces the same ids.** Entries name tiles and plates by id, so replay is only sound if
+the ids come out the same. They do, because `addTile`, `addPlate` and `addStem` each check legality
+*before* taking the next id — a refused add never burns one. Recording only successful calls therefore
+advances the replay's counter exactly as the original advanced. That is an invariant of `tableau.ts`
+rather than of the log, so `gameLog.spec.ts` pins it directly: break it, and replay quietly rebuilds a
+board whose ids no longer match its journal.
+
+Round boundaries are `endRound` bookmarks — the one entry that changes nothing — so
+`entriesThroughRound` can cut a prefix. `TableauOptions` is deliberately *not* part of the journal: it
+carries the whole board's cell list, thousands of entries dwarfing a game's worth of moves, and it is
+already derivable from the game's settings.
+
 ### The reshuffle, and the third frozen contract
 
 `game/recycling.ts` wraps a bag in a discard pile: `createRecyclingBag(items, { seed })` draws from a

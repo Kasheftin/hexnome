@@ -294,10 +294,17 @@ const doubleCounted = computed(() =>
                   :value="tile.value"
                 />
               </span>
+              <!-- The bonus is shown apart from the sum it rides on: that is what the dial buys. -->
               <span
                 class="pts"
                 :class="{ shown: groupLanded(row, index) }"
-              >{{ group.points }}</span>
+              >
+                <span
+                  v-if="group.bonus > 0"
+                  class="bonus"
+                >+{{ group.bonus }}</span>
+                {{ group.points }}
+              </span>
             </span>
             <span
               v-if="category.groups.length === 0"
@@ -447,6 +454,13 @@ const doubleCounted = computed(() =>
 
 .pts.shown {
   opacity: 1;
+}
+
+/* Quieter than the total it contributes to, but present — the reward has to be visible to work. */
+.bonus {
+  margin-right: 3px;
+  color: #8fe6c0;
+  font-size: 10px;
 }
 
 .none {

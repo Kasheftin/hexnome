@@ -10,12 +10,17 @@
  * ## The rules
  *
  * A **group** is a run of connected tiles sharing an attribute — all one colour, or all one value —
- * reached by stepping from tile to adjacent tile without leaving the attribute. A group scores only at
- * **size 3 or more**, and it scores the **sum of its tiles' values**.
+ * reached by stepping from tile to adjacent tile without leaving the attribute. A group scores the
+ * **sum of its tiles' values**, once it reaches the scoring minimum, plus a **bonus for its size**.
  *
  * That single formula covers both kinds, which is not a coincidence worth hiding: a value group is
- * three-or-more of the same number, so summing its values *is* `value × size`. Writing it twice would
- * be two chances to disagree.
+ * several of the same number, so summing its values *is* `value × size`. Writing it twice would be two
+ * chances to disagree.
+ *
+ * Both the minimum and the bonus table are **settings** — they move the endgame a long way, which is
+ * exactly why they are dials rather than constants (see `gameSettings.ts`). The bonus is paid for a
+ * group's *exact* size and never accumulated up the table: `+3 / +5 / +7` has to mean seven for a full
+ * group, not fifteen.
  *
  * These are the same groups placement is judged against (`placement.ts`), so a scored group can never
  * contain a duplicate — the placement that would have created one was refused at the time.
@@ -27,6 +32,7 @@
  */
 import { NEIGHBOR_DIRS, axialAdd, axialKey, compareCellsInReadingOrder, type Axial } from './hex'
 import { TILE_COLOR_COUNT, TILE_VALUE_COUNT } from './deck'
+import { DEFAULT_GROUP_BONUSES, DEFAULT_MIN_GROUP_SIZE } from './gameSettings'
 import type { TileSpec } from './tableau'
 
 /** A tile as it sits on the board: what it is, and where. */
@@ -35,10 +41,20 @@ export interface PlacedTile extends TileSpec {
   readonly cell: Axial
 }
 
-/** Below this a run is just tiles that happen to touch. */
-export const MIN_GROUP_SIZE = 3
-
 export type GroupAttribute = 'color' | 'value'
+
+/** What the board is being scored under. Defaults match `gameSettings.ts`. */
+export interface ScoringRules {
+  /** Below this a run is just tiles that happen to touch. */
+  readonly minGroupSize: number
+  /** Extra points by exact group size, indexed by size. */
+  readonly groupBonuses: readonly number[]
+}
+
+export const DEFAULT_SCORING_RULES: ScoringRules = {
+  minGroupSize: DEFAULT_MIN_GROUP_SIZE,
+  groupBonuses: DEFAULT_GROUP_BONUSES,
+}
 
 export interface TileGroup {
   readonly attribute: GroupAttribute
@@ -46,6 +62,11 @@ export interface TileGroup {
   readonly key: number
   /** Members in reading order, so a reveal walks them down the board. */
   readonly tiles: readonly PlacedTile[]
+  /** The sum of the members' values. */
+  readonly base: number
+  /** Extra for reaching this size, and 0 below the table. Shown apart so the reward is visible. */
+  readonly bonus: number
+  /** `base + bonus`. */
   readonly points: number
 }
 
@@ -67,9 +88,14 @@ export interface FinalTally {
   readonly total: number
 }
 
-/** Sum of the members' values — the whole scoring rule, for both kinds of group. */
-export function groupPoints(tiles: readonly TileSpec[]): number {
+/** Sum of the members' values — the base rule, for both kinds of group. */
+export function groupBase(tiles: readonly TileSpec[]): number {
   return tiles.reduce((sum, tile) => sum + tile.value, 0)
+}
+
+/** What a group of this size is paid on top. By exact size; never the sum of the smaller bonuses. */
+export function groupBonus(size: number, rules: ScoringRules = DEFAULT_SCORING_RULES): number {
+  return rules.groupBonuses[size] ?? 0
 }
 
 /**
@@ -77,7 +103,7 @@ export function groupPoints(tiles: readonly TileSpec[]): number {
  *
  * A flood fill per unvisited tile, which partitions the board exactly once: each tile belongs to one
  * run for a given attribute, so the components cannot overlap and nothing is counted twice *within* an
- * attribute. Runs shorter than {@link MIN_GROUP_SIZE} are dropped after the fill rather than during it
+ * attribute. Runs shorter than the minimum are dropped after the fill rather than during it
  * — a run's size is not known until it is complete.
  *
  * Everything is ordered: members in reading order, and groups by their first member. A reveal built on
@@ -86,6 +112,7 @@ export function groupPoints(tiles: readonly TileSpec[]): number {
 export function findGroups(
   tiles: readonly PlacedTile[],
   attribute: GroupAttribute,
+  rules: ScoringRules = DEFAULT_SCORING_RULES,
 ): TileGroup[] {
   const byCell = new Map<string, PlacedTile>()
   for (const tile of tiles) byCell.set(axialKey(tile.cell), tile)
@@ -112,14 +139,11 @@ export function findGroups(
       }
     }
 
-    if (members.length < MIN_GROUP_SIZE) continue
+    if (members.length < rules.minGroupSize) continue
     members.sort((a, b) => compareCellsInReadingOrder(a.cell, b.cell))
-    groups.push({
-      attribute,
-      key: start[attribute],
-      tiles: members,
-      points: groupPoints(members),
-    })
+    const base = groupBase(members)
+    const bonus = groupBonus(members.length, rules)
+    groups.push({ attribute, key: start[attribute], tiles: members, base, bonus, points: base + bonus })
   }
 
   groups.sort((a, b) => compareCellsInReadingOrder(
@@ -135,11 +159,14 @@ export function findGroups(
  * Colours first because their order is arbitrary — nothing in the palette is "first" — while the values
  * have a natural 1–6 run, so putting them second lets the sheet end on something that counts upward.
  */
-export function finalTally(tiles: readonly PlacedTile[]): FinalTally {
+export function finalTally(
+  tiles: readonly PlacedTile[],
+  rules: ScoringRules = DEFAULT_SCORING_RULES,
+): FinalTally {
   // One pass per attribute, then bucketed — rather than a scan of the board per category.
   const byAttribute = {
-    color: findGroups(tiles, 'color'),
-    value: findGroups(tiles, 'value'),
+    color: findGroups(tiles, 'color', rules),
+    value: findGroups(tiles, 'value', rules),
   }
 
   function category(attribute: GroupAttribute, key: number): GroupCategory {
