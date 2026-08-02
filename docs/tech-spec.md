@@ -359,20 +359,29 @@ camera laid a uniform white specular sheet over the entire flat top face — a g
 (248, 248, 247). Dropping clearcoat removes that additive white term and lets the colour read; the rim
 still picks up a soft sheen from the environment, which is all the gloss an Azul-style piece has.
 
-Six saturated colours, matching the Azul pieces rather than the pastel swatches the pastel-era spec
-listed (those were chosen to survive a bright specular that no longer exists):
+Six saturated colours spread around the hue wheel, so two tiles are never in doubt at a glance — which
+matters more here than in most games, because colour is half of what a group is made of:
 
-| Name | Hex |
-|---|---|
-| helix green | `#2F7D52` |
-| chromosome blue | `#3D6AA8` |
-| base lilac | `#8B63B5` |
-| amber | `#D9A32B` |
-| coral | `#C2543E` |
-| teal | `#2C8C86` |
+| Index | Name | Hex |
+|---|---|---|
+| 0 | Orange | `#b06127` |
+| 1 | Lime | `#6a8f00` |
+| 2 | Green | `#00994b` |
+| 3 | Blue | `#0f81af` |
+| 4 | Indigo | `#613ECC` |
+| 5 | Magenta | `#CC3E9C` |
 
-Palette values belong to `scene/materials.ts`, not to `game/`. The rules know a tile's colour as an
-enum member; only the renderer knows what green looks like.
+**The index is the identity.** A tile's colour is that number everywhere in `game/`; the name and the
+hex exist only for the renderer and for prose. The order is therefore load-bearing — reordering this
+list repaints every saved game — while the hexes themselves can be tuned freely.
+
+**The swatch is not what you see.** These are sRGB values and the tiles are lit, so measure the render:
+Indigo is RGB(97, 62, 204) as a value and RGB(116, 69, 204) on the board.
+
+The list lives in `scene/constants.ts` and is consumed by `scene/tileMaterials.ts`, which carries a
+type-level assertion pinning its length to `TILE_COLOR_COUNT` in `game/deck.ts` — adding or removing an
+entry is a typecheck error until both agree. The rules know a tile's colour as an index; only the
+renderer knows what green looks like.
 
 ### Where tile gloss can and cannot live
 

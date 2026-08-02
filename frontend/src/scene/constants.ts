@@ -136,11 +136,12 @@ export const STEM_TEXTURE_URL = '/textures/stem.png'
 /**
  * The six tile colours, in palette order — a tile's `color` is an index into this list.
  *
- * `name` is user-facing: the action bar prints it when it names a draft ("all chromosome blue"), so it
- * reads as prose rather than as a swatch label.
+ * `name` is user-facing: the action bar prints it when it names a draft ("all indigo"), and the scoring
+ * panels name their colour targets the same way — so it reads as prose rather than as a swatch label.
  *
- * The hexes are sRGB and the tiles are **lit**, so what lands on screen is not the swatch. Teal
- * `#2C8C86` measures around RGB(44, 140, 134) in place. Tune against the render, not the value.
+ * The hexes are sRGB and the tiles are **lit**, so what lands on screen is not the swatch. Indigo
+ * `#613ECC` is RGB(97, 62, 204) as a value and measures RGB(116, 69, 204) on the board: brighter in
+ * red and green, with blue unmoved. Tune against the render, not against the number here.
  *
  * The rules never see any of this: `game/` knows a colour only as an index (docs/tech-spec.md, "The one
  * hard architectural rule"). The list length is pinned to `TILE_COLOR_COUNT` by an assertion in

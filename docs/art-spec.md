@@ -281,8 +281,8 @@ free game.
 - Textures: PNG with alpha for anything masked; power-of-two dimensions so mipmapping behaves.
 - Anything the renderer tints ships **white on transparent**, never pre-coloured.
 - SVG is the source of truth for symbols and icons; rasterised atlases are build artifacts.
-- Colour palette lives in code (`scene/materials.ts`), not in the assets. Values are in
-  [tech-spec.md](tech-spec.md#material-and-palette).
+- Colour palette lives in code (`scene/constants.ts`, as `TILE_COLORS`), not in the assets. Values are
+  in [tech-spec.md](tech-spec.md#material-and-palette).
 - Every asset needs its licence recorded before it lands. This ships publicly and free, so CC0 or OFL
   only for anything not made in-house — no "found it in a texture pack" assets.
 - If a generator cannot produce transparency, use pure magenta `#FF00FF` as the background and note it
