@@ -29,6 +29,61 @@ a {
 }
 
 /*
+ * Scrollbars, in the panels' own palette.
+ *
+ * Set on the root because `scrollbar-color` inherits, so every scrolling panel picks it up — the
+ * settings flyout and the scoring sheet today, and anything added later without having to remember.
+ *
+ * A transparent track rather than a coloured one: the panels are translucent with a blurred backdrop,
+ * and a filled channel would be a hard-edged rectangle sitting on top of that. The thumb is the same
+ * slate as an inactive control border, and warms to brass on hover exactly as the buttons do.
+ *
+ * Both spellings are here on purpose. Chrome 121+ and Firefox use the standard properties; older
+ * WebKit only understands the pseudo-elements. Where both are supported the standard ones **win and
+ * the pseudo-elements are ignored** — so the rounded thumb and the brass hover below are a bonus on
+ * old engines, not something to debug when a modern one draws a plain square one. The standard
+ * properties have no hover state for the thumb; that is the trade for them being standard.
+ */
+:root {
+  scrollbar-color: #33383f transparent;
+}
+
+/*
+ * `scrollbar-width` is **not** inherited, unlike `scrollbar-color`, so setting it on the root alone
+ * leaves every panel with a default-width bar and its steppers. It has to be said for everything.
+ */
+* {
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 5px;
+  /* Painted into the padding box, so the border above becomes breathing room around the thumb. */
+  background-clip: padding-box;
+  background-color: #33383f;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #7d6a41;
+}
+
+/* The steppers are chrome from another era and there is nowhere sensible to put them. */
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+
+/*
  * Board chrome is DOM over the canvas — see docs/tech-spec.md, "UI chrome".
  *
  * The drawer tray and plate bays cannot be DOM (they sit under live 3D tiles), so they reproduce

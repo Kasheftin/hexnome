@@ -2,6 +2,11 @@
 /**
  * A modal panel for settings that do not belong on the screen behind it.
  *
+ * **Header, body, actions** — and only the body scrolls. The panel is a flex column with its own
+ * overflow hidden, so the title stays put and *Done* stays reachable however long the list of dials
+ * grows. Scrolling the whole panel instead put the way out below the fold, which is where a settings
+ * list that keeps growing eventually leaves it.
+ *
  * **A shell, not a form.** It owns the scrim, the framing, the title, and the ways out — Escape, the
  * backdrop, the close button — and takes the controls themselves through a slot. The dials live next
  * to the data that declares them, in whichever view opened this, so adding one is an entry in a list
@@ -75,13 +80,15 @@ watch(() => props.open, async (open) => {
           <slot />
         </div>
 
-        <button
-          type="button"
-          class="done"
-          @click="emit('close')"
-        >
-          Done
-        </button>
+        <footer class="actions">
+          <button
+            type="button"
+            class="done"
+            @click="emit('close')"
+          >
+            Done
+          </button>
+        </footer>
       </section>
     </div>
   </Transition>
@@ -107,8 +114,8 @@ watch(() => props.open, async (open) => {
   flex-direction: column;
   width: min(420px, 100%);
   max-height: min(86vh, 720px);
-  padding: 20px 22px;
-  overflow-y: auto;
+  /* No padding of its own: each band pads itself, so the scrollbar runs the body's full height. */
+  overflow: hidden;
   border: 1px solid #3a3222;
   border-radius: 4px;
   background: rgb(21 23 28 / 97%);
@@ -121,10 +128,12 @@ watch(() => props.open, async (open) => {
 
 .head {
   display: flex;
+  flex: none;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 18px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid #2a2c33;
 }
 
 h2 {
@@ -162,12 +171,27 @@ h2 {
   color: #e8c878;
 }
 
+/*
+ * `min-height: 0` is what makes this scroll at all: a flex item will not shrink below its content
+ * without it, so the body would grow the panel past its max height instead of overflowing.
+ */
 .body {
   flex: 1;
+  min-height: 0;
+  padding: 16px 22px;
+  overflow-y: auto;
+}
+
+/* Pinned below the body, with a rule so the boundary reads even when nothing is scrolled. */
+.actions {
+  flex: none;
+  padding: 14px 22px 20px;
+  border-top: 1px solid #2a2c33;
 }
 
 .done {
-  margin-top: 20px;
+  display: block;
+  width: 100%;
   padding: 10px 0;
   border: 1px solid #7d6a41;
   border-radius: 3px;
