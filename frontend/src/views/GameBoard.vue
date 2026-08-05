@@ -14,14 +14,16 @@
  * live 3D tiles, and DOM sits above the canvas, so an opaque DOM drawer would cover its
  * own contents (docs/tech-spec.md, "UI chrome").
  *
- * Reached as `/game?id=…`. The id names a game whose settings were stored when it started, so a
- * refresh comes back as the same *kind* of game — singleplayer, classic, four plates a round —
- * rather than as a guess. The board itself still restarts; only the settings persist so far.
+ * **Not a route.** `GameView` is, and it mounts this only once it has fetched a game. Everything here
+ * is therefore built synchronously from props, exactly as it was when the game came out of
+ * localStorage — which is the point of the split, because making 1700 lines wait on a network call
+ * would have meant making all of them conditional.
  *
- * An id that is missing or unreadable means there is no game to show, so the menu is the honest
- * destination. Settings are not yet wired into setup: rounds and drafting do not exist, and
- * `platesPerRound` is a round-supply figure, not the drawer's bay count, so binding it to
- * PLATE_SLOTS would be conflating two different numbers.
+ * The board is **restored, not restarted**: `props.commands` is the server's whole log, replayed into
+ * the tableau before the recorder wraps it. A turn is played locally the instant the player makes it
+ * and submitted afterwards; what comes back is only the part the server added, because this side
+ * already has its own. The deck is not here at all — it belongs to the server, which is what makes a
+ * face-down plate genuinely unknown.
  */
 import { mdiArrowDownLeftBold, mdiArrowDownRightBold } from '@mdi/js'
 import { TresCanvas } from '@tresjs/core'
@@ -146,28 +148,19 @@ const modeLabel = computed(() => {
   return s ? modeInfo(s.mode)?.label ?? s.mode : ''
 })
 
-/**
- * Whether this game was already under way when it was opened.
- *
- * True once any seat has taken a turn — the server's own commands do not count, since a game that
- * has only been dealt has not been played. A reload is the ordinary way to arrive here.
- */
-const resumed = props.commands.some(command => command.author !== SERVER_SEAT)
-
 onMounted(() => {
   /*
-   * A game that is *starting* opens with its ceremony: the round card, then the first turn card.
-   * A game that is being *resumed* opens with the board, and nothing else.
+   * Every arrival is announced, including a reload — the two cards are how the board introduces
+   * itself, and coming back to a game deserves that as much as starting one.
    *
-   * Announcing on a reload was wrong twice over. `announceRound` always names turn 1 — right for a
-   * new round, which begins at one, and a lie for a board six turns in. And the ceremony means "this
-   * is beginning now", which a reload is not: the player is picking up where they left off, and
-   * being told the game has started again undercuts the restore rather than celebrating it.
+   * What matters is that they tell the truth. `announceRound` used to hardcode its turn card to 1,
+   * which is right for a new round — rounds begin at one — and a lie for a board five turns in. It
+   * takes the number now, so a resumed game says where it actually is.
    *
-   * Nothing is dealt here any more either. The opening lot arrives in the server's genesis command
-   * and is already on the board by the time this runs.
+   * Nothing is dealt here. The opening lot arrives in the server's genesis command and is already on
+   * the board by the time this runs.
    */
-  if (!resumed) announceRound(count.value.round)
+  announceRound(count.value.round, count.value.turn)
 })
 
 /**
@@ -599,7 +592,7 @@ function startNextRound(): void {
 
   showResults.value = false
   count.value = nextRound(count.value)
-  announceRound(count.value.round, () => {
+  announceRound(count.value.round, count.value.turn, () => {
     // Behind the card, and in this order: empty the column before the new round's quota is opened.
     clearSource()
     revision.value++
@@ -734,14 +727,17 @@ function announceTurn(turn: number, work?: () => void): void {
 }
 
 /**
- * A round card, then the first turn of it.
+ * A round card, then the turn card for whichever turn is about to be played.
+ *
+ * The turn is passed rather than assumed to be one. It *is* one whenever a round begins, but this is
+ * also how a reloaded game announces itself, and there the number is whatever the log says.
  *
  * Two beats rather than one: a new round is a bigger event than a new turn, and saying so takes the
  * time to say it. The restock rides on the *turn* card, which is the one the player is watching when
  * the new lot needs to appear.
  */
-function announceRound(round: number, work?: () => void): void {
-  announce([{ label: 'Round', n: round }, { label: 'Turn', n: 1, work }])
+function announceRound(round: number, turn: number, work?: () => void): void {
+  announce([{ label: 'Round', n: round }, { label: 'Turn', n: turn, work }])
 }
 
 /**
