@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common'
 import { recordingTableau, replayTableau, type LogEntry } from '@hexnome/rules/gameLog'
 import { defaultGameSettings } from '@hexnome/rules/gameSettings'
 import { BOARD_CENTRE, tableauOptionsFor } from '@hexnome/rules/setup'
 import { PrismaService } from '../prisma.service'
-import { SOLO_SEAT } from './dto'
+import { replayOf, SOLO_SEAT } from './dto'
 import { GamesService } from './games.service'
 
 /**
@@ -29,11 +34,26 @@ async function newGame(seed?: string) {
   return game
 }
 
+/*
+ * Effects are verified now, so a test's move has to be one the opening board actually allows.
+ *
+ * Ids come from a single counter, so the opening position — plate, its fixed tile, three stems — is
+ * always `p1`, `t2`, `s3`..`s5`. That makes the centre plate nameable, and its rotation the one move
+ * that is legal however many times it is made.
+ */
+const OPENING_PLATE = 'p1'
+
+/** Drawer slots 0..2 hold the opening stems; a new one has to go somewhere else. */
+const FIRST_FREE_SLOT = 3
+
+/** A legal move with no side effects worth tracking, repeatable without limit. */
+const nudge = (): LogEntry => ({ op: 'rotatePlate', id: OPENING_PLATE, steps: 1 })
+
 /** A distinguishable effect: `slot` carries who wrote it, so a torn command would be visible. */
-const stem = (slot: number): LogEntry => ({ op: 'addStem', slot })
+const stem = (n: number): LogEntry => ({ op: 'addStem', slot: FIRST_FREE_SLOT + n })
 
 /** A submission with everything but the parts a test cares about filled in. */
-const turn = (prevSeq: number, effects: LogEntry[] = [stem(0)], cmdId = randomUUID()) =>
+const turn = (prevSeq: number, effects: LogEntry[] = [nudge()], cmdId = randomUUID()) =>
   ({ cmdId, prevSeq, author: SOLO_SEAT, effects })
 
 beforeAll(async () => {
@@ -70,6 +90,8 @@ describe('starting a game', () => {
     expect(slice.commands).toHaveLength(1)
     expect(slice.commands[0]!.prevSeq).toBe(0)
     expect(slice.commands[0]!.author).toBe('server')
+    // No turn preceded it, so it is all response and no effects.
+    expect(slice.commands[0]!.effects).toEqual([])
     expect(game.head.seq).toBe(slice.commands[0]!.seq)
     expect(game.head.awaiting).toBe(SOLO_SEAT)
   })
@@ -83,7 +105,7 @@ describe('starting a game', () => {
   it('deals the opening position the server owns, not an empty board', async () => {
     const game = await newGame()
     const slice = await games.commands(game.id, 0)
-    const board = replayTableau(slice.commands[0]!.effects, tableauOptionsFor(SETTINGS))
+    const board = replayTableau(slice.commands[0]!.response, tableauOptionsFor(SETTINGS))
 
     expect(board.plates()).toHaveLength(1)
     expect(board.plates()[0]!.location).toEqual({ kind: 'board', hole: BOARD_CENTRE })
@@ -98,7 +120,7 @@ describe('starting a game', () => {
     const first = await newGame()
     const replay = await newGame(first.seed)
     const [a, b] = await Promise.all([games.commands(first.id, 0), games.commands(replay.id, 0)])
-    expect(a.commands[0]!.effects).toEqual(b.commands[0]!.effects)
+    expect(a.commands[0]!.response).toEqual(b.commands[0]!.response)
   })
 
   it('refuses settings it cannot read', async () => {
@@ -300,6 +322,74 @@ describe('submitting a command', () => {
 })
 
 /*
+ * What stops a client writing whatever it likes into the log.
+ *
+ * The server replays the chain and applies the submitted effects to a real tableau, using the same
+ * rules the client validated with — so this is not a second opinion about legality, it is the same
+ * one, checked again where the client cannot reach.
+ */
+describe('verifying a turn against the board', () => {
+  it('accepts a move the board allows', async () => {
+    const game = await newGame()
+    await expect(games.submit(game.id, turn(game.head.seq, [stem(0)])))
+      .resolves.toMatchObject({ duplicate: false })
+  })
+
+  it('refuses a piece that does not exist', async () => {
+    const game = await newGame()
+    const ghost: LogEntry = { op: 'moveTile', id: 't999', location: { kind: 'drawer', slot: 6 } }
+    await expect(games.submit(game.id, turn(game.head.seq, [ghost])))
+      .rejects.toThrow(UnprocessableEntityException)
+  })
+
+  it('refuses a drawer slot that is already taken', async () => {
+    const game = await newGame()
+    // Slots 0..2 hold the opening stems, so this one is occupied.
+    await expect(games.submit(game.id, turn(game.head.seq, [{ op: 'addStem', slot: 0 }])))
+      .rejects.toThrow(UnprocessableEntityException)
+  })
+
+  it('refuses a plate placed off the board', async () => {
+    const game = await newGame()
+    const offBoard: LogEntry = {
+      op: 'addPlate',
+      location: { kind: 'board', hole: { q: 9999, r: 9999 } },
+      rotation: 0,
+      faceDown: false,
+    }
+    await expect(games.submit(game.id, turn(game.head.seq, [offBoard])))
+      .rejects.toThrow(UnprocessableEntityException)
+  })
+
+  /* Refused whole: a later entry assumes a board the refused one never produced. */
+  it('writes nothing at all when one effect in a turn is illegal', async () => {
+    const game = await newGame()
+    const mixed = [stem(0), { op: 'addStem', slot: 0 } as LogEntry, stem(1)]
+
+    const refused = games.submit(game.id, turn(game.head.seq, mixed))
+    await expect(refused).rejects.toThrow(UnprocessableEntityException)
+    await expect(refused).rejects.toMatchObject({ response: { index: 1, op: 'addStem' } })
+
+    const { commands } = await games.commands(game.id, 0)
+    expect(commands).toHaveLength(1)
+    // And the good first effect did not leak into the board either.
+    expect(replayTableau(commands.flatMap(replayOf), tableauOptionsFor(SETTINGS)).stems())
+      .toHaveLength(SETTINGS.initialStems)
+  })
+
+  /*
+   * Legality is checked per mutation, not per turn. This is the gap the next stage closes, and it is
+   * recorded as a test so that closing it shows up here as a failure rather than as a surprise.
+   */
+  it('does not yet catch effects that are each legal but add up to two turns', async () => {
+    const game = await newGame()
+    const twoTurnsWorth = [stem(0), stem(1), stem(2), stem(3), stem(4)]
+    await expect(games.submit(game.id, turn(game.head.seq, twoTurnsWorth)))
+      .resolves.toMatchObject({ duplicate: false })
+  })
+})
+
+/*
  * The one real race. Two commands must never share a parent — and the failure would not be an error,
  * it would be a forked log that replays into two different boards.
  *
@@ -314,8 +404,8 @@ describe('commands arriving together', () => {
     const game = await newGame()
 
     const results = await Promise.allSettled(
-      Array.from({ length: RACERS }, (_, i) =>
-        games.submit(game.id, turn(game.head.seq, [stem(i)]))),
+      Array.from({ length: RACERS }, () =>
+        games.submit(game.id, turn(game.head.seq, [nudge()]))),
     )
 
     const won = results.filter(r => r.status === 'fulfilled')
@@ -341,7 +431,7 @@ describe('commands arriving together', () => {
 
     for (let round = 0; round < 5; round++) {
       const results = await Promise.allSettled(
-        Array.from({ length: 8 }, (_, i) => games.submit(game.id, turn(head, [stem(i)]))),
+        Array.from({ length: 8 }, () => games.submit(game.id, turn(head, [nudge()]))),
       )
       const won = results.filter(r => r.status === 'fulfilled')
       expect(won).toHaveLength(1)
@@ -379,7 +469,7 @@ describe('a game played through the API', () => {
 
     // Start from the server's opening position, exactly as a client would.
     const opening = await games.commands(game.id, 0)
-    const played = replayTableau(opening.commands[0]!.effects, options)
+    const played = replayTableau(replayOf(opening.commands[0]!), options)
 
     let head = game.head.seq
     const ids: string[] = []
@@ -395,7 +485,7 @@ describe('a game played through the API', () => {
     }
 
     const stored = await games.commands(game.id, 0)
-    const rebuilt = replayTableau(stored.commands.flatMap(c => [...c.effects]), options)
+    const rebuilt = replayTableau(stored.commands.flatMap(replayOf), options)
 
     expect(rebuilt.tiles().map(t => t.id)).toEqual(played.tiles().map(t => t.id))
     expect(rebuilt.plates().map(p => p.id)).toEqual(played.plates().map(p => p.id))

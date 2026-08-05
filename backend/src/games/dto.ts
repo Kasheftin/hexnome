@@ -50,14 +50,28 @@ export interface GameView {
   readonly head: Head
 }
 
-/** A stored command, as anyone reading the log sees it. */
+/**
+ * A stored command, as anyone reading the log sees it.
+ *
+ * `effects` then `response`, in that order, is what replaying this command means. They are kept
+ * apart for the one caller that cannot treat them alike: a client that applied its own turn
+ * optimistically already holds `effects` and must apply only `response`.
+ */
 export interface CommandView {
   readonly seq: number
   readonly prevSeq: number
   readonly author: string
   readonly awaiting: string
   readonly cmdId: string
+  /** What the author's turn did. */
   readonly effects: readonly LogEntry[]
+  /** What the server added in reply — a restock, a plate turning over. Often empty. */
+  readonly response: readonly LogEntry[]
+}
+
+/** Everything a command did, in the order it has to be replayed. */
+export function replayOf(command: CommandView): LogEntry[] {
+  return [...command.effects, ...command.response]
 }
 
 export interface CommandSlice {

@@ -101,12 +101,22 @@ model Command {
   /// from "already applied". With it, the conflict is recognised and the original row returned.
   cmdId    String   @db.VarChar(64)
 
-  /// `LogEntry[]` from @hexnome/rules — the player's effects and whatever the server owed in
-  /// response, in one array.
+  /// `LogEntry[]` from @hexnome/rules: what the author's turn did.
   ///
-  /// One command is one row so that it is one INSERT, which InnoDB makes atomic without a
-  /// transaction. A client must never be able to observe a move landing without its restock.
+  /// Verified before it is stored — replayed against the chain through the same rules the client
+  /// validated with, and refused whole if any of it was not allowed.
   effects  Json
+
+  /// `LogEntry[]`: what the server added in reply — a restock, a plate turning over.
+  ///
+  /// Separate from `effects`, and the separation is load-bearing rather than tidy. A client applies
+  /// its own turn optimistically, so when the acknowledgement arrives it has *already* got
+  /// everything in `effects`; replaying the whole row would apply them twice, and skipping the whole
+  /// row would miss the deal. It needs the boundary, so the boundary is a column.
+  ///
+  /// Both halves live in one row so they are one INSERT, atomic under InnoDB without a transaction.
+  /// A client must never be able to observe a move landing without the deal it triggered.
+  response Json
 
   at       DateTime @default(now())
 

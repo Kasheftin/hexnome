@@ -1,10 +1,22 @@
 import { randomUUID } from 'node:crypto'
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common'
 import { createDeck, dealStartingPlates } from '@hexnome/rules/deck'
-import { createGameLog, recordingTableau, type LogEntry } from '@hexnome/rules/gameLog'
+import {
+  applyEntry,
+  createGameLog,
+  recordingTableau,
+  replayTableau,
+  type LogEntry,
+} from '@hexnome/rules/gameLog'
 import { parseGameSettings, type GameSettings } from '@hexnome/rules/gameSettings'
 import { openingPosition, tableauOptionsFor } from '@hexnome/rules/setup'
-import { createTableau } from '@hexnome/rules/tableau'
+import { createTableau, type Tableau } from '@hexnome/rules/tableau'
 import { PrismaService } from '../prisma.service'
 import {
   GENESIS,
@@ -30,6 +42,7 @@ interface CommandRow {
   awaiting: string
   cmdId: string
   effects: unknown
+  response: unknown
 }
 
 function toCommandView(row: CommandRow): CommandView {
@@ -40,6 +53,7 @@ function toCommandView(row: CommandRow): CommandView {
     awaiting: row.awaiting,
     cmdId: row.cmdId,
     effects: row.effects as LogEntry[],
+    response: row.response as LogEntry[],
   }
 }
 
@@ -56,6 +70,41 @@ function toCommandView(row: CommandRow): CommandView {
  */
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string }).code === 'P2002'
+}
+
+/**
+ * Check a turn against the board it claims to have been played on, and refuse it whole if any part
+ * of it could not have happened.
+ *
+ * This is the whole of server-side validation, and it is short because the model already does the
+ * work: every mutator decides legality and refuses by returning nothing, and `applyEntry` now says
+ * so. Replaying a client's effects through a real tableau therefore *is* checking them — with the
+ * identical code the client validated with, so the two cannot hold different opinions about what is
+ * legal.
+ *
+ * **Whole, not partly.** A refused entry means the board never reached the state the later entries
+ * assume, so the rest are meaningless even where they would individually apply. The client is told
+ * which entry failed and re-syncs.
+ *
+ * ## What this does not catch
+ *
+ * Legality is a property of each mutation, not of the turn. Effects that are each allowed but add up
+ * to two turns' work — drafting twice, placing without paying — pass here. That needs the turn rules
+ * (`turn.ts`, `draft.ts`) and the phase machine that still lives in `GameView.vue`, and it is the
+ * expensive step this deliberately stops short of. Fabricating a tile, placing on an occupied petal
+ * or naming a piece that does not exist are all caught.
+ *
+ * The tableau is mutated as it goes — the caller's copy is spent afterwards and must not be reused.
+ */
+function verify(board: Tableau, effects: readonly LogEntry[]): void {
+  for (const [index, entry] of effects.entries()) {
+    if (applyEntry(board, entry)) continue
+    throw new UnprocessableEntityException({
+      message: `effect ${index} (${entry.op}) is not a move this board allows`,
+      index,
+      op: entry.op,
+    })
+  }
 }
 
 @Injectable()
@@ -93,7 +142,11 @@ export class GamesService {
             author: SERVER_SEAT,
             awaiting: SOLO_SEAT,
             cmdId: randomUUID(),
-            effects: this.openingEffects(seed, settings) as unknown as object,
+            // The opening is entirely the server's doing — there was no turn for it to answer — so
+            // it goes in `response` and `effects` is empty. A client replaying the log treats the
+            // two the same; only an author reconciling its own optimistic state cares.
+            effects: [] as unknown as object,
+            response: this.openingEffects(seed, settings) as unknown as object,
           },
         },
       },
@@ -157,8 +210,9 @@ export class GamesService {
    * the insert itself decides the race. The head is read to *reason* about the move, and that read is
    * allowed to be stale: nothing downstream trusts it.
    *
-   * The checks below therefore produce better errors rather than correctness. Deleting them would
-   * leave the log just as sound and the client just as confused.
+   * The ordering checks below therefore produce better *errors* rather than correctness. The
+   * legality check is different: nothing else performs it, and without it a client writes whatever
+   * it likes into the log.
    */
   async submit(id: string, body: SubmitBody): Promise<SubmitResult> {
     if (!body?.cmdId) throw new ConflictException('a command needs a cmdId')
@@ -194,6 +248,14 @@ export class GamesService {
       })
     }
 
+    const settings = parseGameSettings(game.settings)
+    if (!settings) throw new ConflictException(`game ${id} has settings this server cannot read`)
+
+    const board = await this.replay(id, settings)
+    const effects = body.effects ?? []
+    verify(board, effects)
+    const response = this.serverEffects()
+
     try {
       const row = await this.prisma.command.create({
         data: {
@@ -204,9 +266,10 @@ export class GamesService {
           // and multiplayer from the seat order.
           awaiting: SOLO_SEAT,
           cmdId: body.cmdId,
-          // The player's effects and anything the server owes, in one array and therefore one INSERT.
-          // A client must never be able to observe a move landing without its restock.
-          effects: [...(body.effects ?? []), ...this.serverEffects()] as unknown as object,
+          // Both halves in one row, and therefore one INSERT: a client must never be able to observe
+          // a move landing without the deal it triggered.
+          effects: effects as unknown as object,
+          response: response as unknown as object,
         },
       })
       return { command: toCommandView(row), duplicate: false }
@@ -239,6 +302,26 @@ export class GamesService {
    */
   private serverEffects(): LogEntry[] {
     return []
+  }
+
+  /**
+   * The board as the log leaves it.
+   *
+   * O(n) in the length of the game, on every command. Fine at the few hundred a game runs to, and
+   * worth measuring before it is worth caching — a snapshot every N commands is the obvious fix, and
+   * an unnecessary one until the numbers say so.
+   */
+  private async replay(gameId: string, settings: GameSettings): Promise<Tableau> {
+    const rows = await this.prisma.command.findMany({
+      where: { gameId },
+      orderBy: { seq: 'asc' },
+      select: { effects: true, response: true },
+    })
+    const entries = rows.flatMap(r => [
+      ...(r.effects as LogEntry[]),
+      ...(r.response as LogEntry[]),
+    ])
+    return replayTableau(entries, tableauOptionsFor(settings))
   }
 
   private async stored(gameId: string, cmdId: string): Promise<CommandView | null> {

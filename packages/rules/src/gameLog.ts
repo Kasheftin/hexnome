@@ -170,23 +170,37 @@ export function recordingTableau(inner: Tableau, record: (entry: LogEntry) => vo
   }
 }
 
-/** Apply one entry. Exported for tests; `replayTableau` is what callers want. */
-export function applyEntry(tableau: Tableau, entry: LogEntry): void {
+/**
+ * Apply one entry, and say whether the model accepted it.
+ *
+ * **The return value is what makes replay double as verification.** Every mutator already checks
+ * legality and answers `null` or `false` when it refuses; this used to discard that and return
+ * nothing, so an entry describing an impossible move applied as silently as a real one. A server
+ * receiving entries from a client needs exactly the opposite: it replays what it was sent and
+ * refuses the lot if any of it was not allowed — using this same code, so the two sides cannot
+ * disagree about what is legal.
+ *
+ * `false` means *this entry did not happen*, not that the tableau is damaged: a refused mutation
+ * changes nothing, so a caller may stop and discard, or carry on, as it prefers.
+ *
+ * Exported for tests and for verification; `replayTableau` is what ordinary callers want.
+ */
+export function applyEntry(tableau: Tableau, entry: LogEntry): boolean {
   switch (entry.op) {
-    case 'addTile': tableau.addTile(entry.spec, entry.location, { fixed: entry.fixed }); break
+    case 'addTile':
+      return !!tableau.addTile(entry.spec, entry.location, { fixed: entry.fixed })
     case 'addPlate':
-      tableau.addPlate(entry.location, { rotation: entry.rotation, faceDown: entry.faceDown })
-      break
-    case 'addStem': tableau.addStem(entry.slot); break
-    case 'moveTile': tableau.moveTile(entry.id, entry.location); break
-    case 'movePlate': tableau.movePlate(entry.id, entry.location); break
-    case 'moveStem': tableau.moveStem(entry.id, entry.slot); break
-    case 'rotatePlate': tableau.rotatePlate(entry.id, entry.steps); break
-    case 'discard': tableau.discard(entry.id); break
-    case 'revealPlate': tableau.revealPlate(entry.id, entry.spec, entry.petal); break
-    case 'swapDrawerItems': tableau.swapDrawerItems(entry.a, entry.b); break
-    // A bookmark, with nothing to apply.
-    case 'endRound': break
+      return !!tableau.addPlate(entry.location, { rotation: entry.rotation, faceDown: entry.faceDown })
+    case 'addStem': return !!tableau.addStem(entry.slot)
+    case 'moveTile': return !!tableau.moveTile(entry.id, entry.location)
+    case 'movePlate': return !!tableau.movePlate(entry.id, entry.location)
+    case 'moveStem': return !!tableau.moveStem(entry.id, entry.slot)
+    case 'rotatePlate': return !!tableau.rotatePlate(entry.id, entry.steps)
+    case 'discard': return !!tableau.discard(entry.id)
+    case 'revealPlate': return !!tableau.revealPlate(entry.id, entry.spec, entry.petal)
+    case 'swapDrawerItems': return !!tableau.swapDrawerItems(entry.a, entry.b)
+    // A bookmark. Nothing to apply, and nothing that can be refused.
+    case 'endRound': return true
   }
 }
 
