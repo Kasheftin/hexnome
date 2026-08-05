@@ -68,6 +68,63 @@ describe('looking through a seat', () => {
  * Watching someone else. The renderer is the same one — this is not a picture of their board, it is
  * their board — so the only thing that must differ is that nothing can be done to it.
  */
+/*
+ * The bug this file did not catch the first time. The view scoped the queries it overrode and left
+ * `plates()` and `tiles()` whole — and those are what the renderer reads. Both players' boards grow
+ * from hole (0,0), so every plate drawn at its own hole put two boards in the same place, and every
+ * tile drawn put two drawers in one.
+ */
+describe('the accessors a renderer actually reads', () => {
+  function twoPlayers() {
+    const game = createTableau(OPTIONS)
+    const mine = game.addPlate(boardHole(CENTRE, 0))!
+    const yours = game.addPlate(boardHole(CENTRE, 1))!
+    game.addTile({ color: 1, value: 1 }, { kind: 'onPlate', plateId: mine.id, petal: 0 }, { fixed: true })
+    game.addTile({ color: 2, value: 2 }, { kind: 'onPlate', plateId: yours.id, petal: 0 }, { fixed: true })
+    game.addTile({ color: 3, value: 3 }, drawerSlot(0, 0))
+    game.addTile({ color: 4, value: 4 }, drawerSlot(0, 1))
+    return { game, mine, yours }
+  }
+
+  it('shows one plate per board, not both at the same hole', () => {
+    const { game, mine, yours } = twoPlayers()
+    expect(seatView(game, 0).plates().map(p => p.id)).toEqual([mine.id])
+    expect(seatView(game, 1).plates().map(p => p.id)).toEqual([yours.id])
+    // The tableau itself still has both, which is what conservation counts.
+    expect(game.plates()).toHaveLength(2)
+  })
+
+  it('shows one drawer, not both merged', () => {
+    const { game } = twoPlayers()
+    const drawerOf = (s: number) => seatView(game, s).tiles()
+      .filter(t => t.location.kind === 'drawer')
+      .map(t => t.value)
+
+    expect(drawerOf(0)).toEqual([3])
+    expect(drawerOf(1)).toEqual([4])
+  })
+
+  /* A plate's own tile follows its plate — which is why `onPlate` carries no seat of its own. */
+  it('carries a plate\'s fixed tile along with the plate', () => {
+    const { game } = twoPlayers()
+    expect(seatView(game, 0).tiles().filter(t => t.fixed).map(t => t.value)).toEqual([1])
+    expect(seatView(game, 1).tiles().filter(t => t.fixed).map(t => t.value)).toEqual([2])
+  })
+
+  /* The source is everyone's, so it is in every view. */
+  it('keeps the shared source in both views', () => {
+    const { game } = twoPlayers()
+    game.addPlate({ kind: 'source', lot: 0 }, { faceDown: true })
+    game.addTile({ color: 5, value: 5 }, { kind: 'source', lot: 0, index: 0 })
+
+    for (const s of [0, 1]) {
+      const view = seatView(game, s)
+      expect(view.plates().filter(p => p.location.kind === 'source')).toHaveLength(1)
+      expect(view.tiles().filter(t => t.location.kind === 'source')).toHaveLength(1)
+    }
+  })
+})
+
 describe('a view of somebody else', () => {
   it('shows everything and changes nothing', () => {
     const game = createTableau(OPTIONS)

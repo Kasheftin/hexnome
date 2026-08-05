@@ -29,7 +29,7 @@
  * somebody else's board silently refuses every mutation rather than trusting a caller to remember
  * not to try. Turn order is a separate gate again, checked by the server.
  */
-import type { PlateLocation, Seat, Tableau, TileLocation } from './tableau'
+import { seatOf, type Plate, type PlateLocation, type Seat, type Tableau, type Tile, type TileLocation } from './tableau'
 
 /** Fill in the seat on a location that did not name one. Source locations are shared and untouched. */
 function atSeat<L extends PlateLocation | TileLocation>(location: L, seat: Seat): L {
@@ -46,10 +46,36 @@ function atSeat<L extends PlateLocation | TileLocation>(location: L, seat: Seat)
 export function seatView(inner: Tableau, seat: Seat, writable = true): Tableau {
   const no = <T>(value: T) => value
 
+  /** A plate belongs to this view if it is this seat's, or in the source everyone shares. */
+  const platePresent = (plate: Plate): boolean =>
+    plate.location.kind === 'source' || seatOf(plate.location) === seat
+
+  /**
+   * A tile likewise — and a tile on a plate inherits the plate's answer, which is why `onPlate`
+   * carries no seat of its own.
+   */
+  function tilePresent(tile: Tile): boolean {
+    if (tile.location.kind === 'source') return true
+    if (tile.location.kind === 'drawer') return seatOf(tile.location) === seat
+    const plate = inner.plate(tile.location.plateId)
+    return plate !== undefined && platePresent(plate)
+  }
+
   return {
     ...inner,
 
-    // ── looking ──────────────────────────────────────────────────────────────
+    /*
+     * ── looking ──────────────────────────────────────────────────────────────
+     *
+     * `plates` and `tiles` are scoped here too, and that is not tidiness — leaving them whole was a
+     * bug you could see. Two players' boards both grow from hole (0,0), so a renderer reading every
+     * plate drew them on top of each other, and reading every tile put both drawers in one. Anything
+     * that genuinely wants the whole table — conservation, the server — holds the tableau itself and
+     * never a view.
+     */
+    plates: () => inner.plates().filter(platePresent),
+    tiles: () => inner.tiles().filter(tilePresent),
+
     tilesOnBoard: () => inner.tilesOnBoard(seat),
     platesOnBoard: () => inner.platesOnBoard(seat),
     freeDrawerSlots: () => inner.freeDrawerSlots(seat),
