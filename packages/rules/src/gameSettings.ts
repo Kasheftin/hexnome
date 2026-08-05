@@ -25,7 +25,7 @@ export interface GameKindInfo {
 
 export const GAME_KINDS: readonly GameKindInfo[] = [
   { id: 'singleplayer', label: 'Single player', available: true },
-  { id: 'multiplayer', label: 'Multiplayer', available: false },
+  { id: 'multiplayer', label: 'Multiplayer', available: true },
   { id: 'quiz', label: 'Quiz mode', available: false },
 ]
 
@@ -67,6 +67,15 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
  */
 export const PLAYER_COUNT_CHOICES: readonly number[] = [1, 2, 3, 4]
 export const DEFAULT_PLAYERS = 1
+
+/**
+ * What a multiplayer table may be, and what it is unless told otherwise.
+ *
+ * One is missing on purpose: a multiplayer game of one is a singleplayer game, and offering it would
+ * be two names for the same thing sitting next to each other in a menu.
+ */
+export const MULTIPLAYER_COUNT_CHOICES: readonly number[] = [2, 3, 4]
+export const DEFAULT_MULTIPLAYER_PLAYERS = 2
 
 // Seven, because a four-player game wants that many. See `defaultPlatesPerRound`.
 export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6, 7]

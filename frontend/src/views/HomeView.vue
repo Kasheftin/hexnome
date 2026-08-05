@@ -20,9 +20,10 @@ import {
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
   GAME_KINDS,
-  PLAYER_COUNT_CHOICES,
   DEFAULT_PLAYERS,
   defaultPlatesPerRound,
+  MULTIPLAYER_COUNT_CHOICES,
+  DEFAULT_MULTIPLAYER_PLAYERS,
   PLATES_PER_ROUND_CHOICES,
   PLATE_SLOT_CHOICES,
   TILE_SLOT_CHOICES,
@@ -90,6 +91,14 @@ const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
  * helpfulness that feels like a bug.
  */
 const platesPerRoundTouched = ref(false)
+
+/*
+ * The seat count follows the kind, and the supply follows the seat count. Set here rather than
+ * defaulted at declaration because the menu chooses the kind *after* these exist.
+ */
+watch(kind, (chosen) => {
+  players.value = chosen === 'multiplayer' ? DEFAULT_MULTIPLAYER_PLAYERS : 1
+})
 
 watch(players, (count) => {
   if (!platesPerRoundTouched.value) platesPerRound.value = defaultPlatesPerRound(count)
@@ -161,14 +170,21 @@ interface Dial {
   readonly minor?: boolean
 }
 
-/** Asked first, because everything else about a game's size follows from it. */
+/**
+ * Asked first, because everything else about a game's size follows from it.
+ *
+ * Only for a multiplayer game. A single-player table has one seat by definition, so a dial offering
+ * to change it would be offering to make the game something else — the menu already asked that
+ * question one step earlier.
+ */
 const TABLE_DIALS: readonly Dial[] = [
   {
     key: 'players',
     legend: 'Players',
     short: 'players',
-    choices: PLAYER_COUNT_CHOICES,
+    choices: MULTIPLAYER_COUNT_CHOICES,
     model: players,
+    applies: () => kind.value === 'multiplayer',
   },
 ]
 
