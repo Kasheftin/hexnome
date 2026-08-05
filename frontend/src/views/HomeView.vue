@@ -14,7 +14,7 @@
  * which is what lets a refresh come back as the same game (composables/useSavedGames.ts).
  */
 import { mdiCog } from '@mdi/js'
-import { computed, nextTick, ref, type Ref } from 'vue'
+import { computed, nextTick, ref, shallowRef, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   DEFAULT_PLATES_PER_ROUND,
@@ -54,7 +54,7 @@ import {
   type PlacementRule,
 } from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
-import { useSavedGames } from '@/composables/useSavedGames'
+import { createGame } from '@/api/games'
 
 type Step = 'title' | 'kind' | 'singleplayer'
 
@@ -63,7 +63,10 @@ const SWITCH_CHOICES: readonly number[] = [0, 1]
 const SWITCH_LABELS: readonly string[] = ['No', 'Yes']
 
 const router = useRouter()
-const savedGames = useSavedGames()
+
+/** Set while the server is making the game, so the button cannot be pressed twice. */
+const starting = shallowRef(false)
+const startError = shallowRef('')
 
 const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
@@ -334,8 +337,13 @@ function back(): void {
   }
 }
 
-function startGame(): void {
-  const id = savedGames.create({
+async function startGame(): Promise<void> {
+  if (starting.value) return
+  starting.value = true
+  startError.value = ''
+
+  try {
+    const game = await createGame({
     kind: 'singleplayer',
     mode: mode.value,
     platesPerRound: platesPerRound.value,
@@ -351,10 +359,21 @@ function startGame(): void {
     placementRule: placementRule.value,
     minGroupSize: minGroupSize.value,
     groupBonuses: groupBonuses.value,
-    fineUnplaced: fineUnplaced.value === 1,
-    rewardStems: rewardStems.value === 1,
-  })
-  void router.push({ path: '/game', query: { id } })
+      fineUnplaced: fineUnplaced.value === 1,
+      rewardStems: rewardStems.value === 1,
+    })
+    await router.push({ path: '/game', query: { id: game.id } })
+  }
+  catch {
+    /*
+     * The game is made on the server, so there is nothing to show if it cannot be reached. Better to
+     * say so here than to navigate to a board that will only fail to load.
+     */
+    startError.value = 'The server could not be reached. Try again.'
+  }
+  finally {
+    starting.value = false
+  }
 }
 
 const selectedMode = computed(() => modeInfo(mode.value))
@@ -513,10 +532,19 @@ const selectedMode = computed(() => modeInfo(mode.value))
         <button
           type="button"
           class="option start"
+          :disabled="starting"
           @click="startGame"
         >
-          <span class="option-label">Start game</span>
+          <span class="option-label">{{ starting ? 'Dealing…' : 'Start game' }}</span>
         </button>
+
+        <p
+          v-if="startError"
+          class="start-error"
+          role="alert"
+        >
+          {{ startError }}
+        </p>
       </template>
 
       <button
@@ -910,5 +938,17 @@ legend {
   :is(.option, .count, .settings) {
     transition: none;
   }
+}
+
+.start-error {
+  margin: 0;
+  color: #d98c72;
+  font-size: 12px;
+  text-align: center;
+}
+
+.option:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 </style>

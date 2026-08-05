@@ -6,9 +6,10 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common'
-import { recordingTableau, replayTableau, type LogEntry } from '@hexnome/rules/gameLog'
+import { applyEntry, recordingTableau, replayTableau, type LogEntry } from '@hexnome/rules/gameLog'
 import { defaultGameSettings } from '@hexnome/rules/gameSettings'
 import { BOARD_CENTRE, tableauOptionsFor } from '@hexnome/rules/setup'
+import type { Tableau } from '@hexnome/rules/tableau'
 import { PrismaService } from '../prisma.service'
 import { replayOf, SOLO_SEAT } from './dto'
 import { GamesService } from './games.service'
@@ -107,12 +108,22 @@ describe('starting a game', () => {
     const slice = await games.commands(game.id, 0)
     const board = replayTableau(slice.commands[0]!.response, tableauOptionsFor(SETTINGS))
 
-    expect(board.plates()).toHaveLength(1)
-    expect(board.plates()[0]!.location).toEqual({ kind: 'board', hole: BOARD_CENTRE })
+    const centre = board.plates().find(p => p.location.kind === 'board')
+    expect(centre?.location).toEqual({ kind: 'board', hole: BOARD_CENTRE })
     // The plate's own fixed tile, plus the starting stems in ordinary drawer slots.
     expect(board.tilesOnBoard()).toHaveLength(1)
     expect(board.tilesOnBoard()[0]!.fixed).toBe(true)
     expect(board.stems()).toHaveLength(SETTINGS.initialStems)
+  })
+
+  /* The source has to be stocked before the player is asked to draft from it. */
+  it('stocks the source with the first lot, so turn one has something to take', async () => {
+    const game = await newGame()
+    const slice = await games.commands(game.id, 0)
+    const board = replayTableau(slice.commands[0]!.response, tableauOptionsFor(SETTINGS))
+
+    expect(board.plateInSourceLot(0)).toBeDefined()
+    expect(board.tilesInSourceLot(0)).toHaveLength(4)
   })
 
   /* Same seed, same deal — the opening plate included. */
@@ -390,6 +401,72 @@ describe('verifying a turn against the board', () => {
 })
 
 /*
+ * The reason there is a server at all.
+ *
+ * A face-down plate's token used to be a fiction: the model held none, but every client derived the
+ * whole deck from the game's seed, so anyone who wanted to know could work it out. Now the deck is
+ * dealt here and the seed alone is not enough — what a plate is carrying exists only in this
+ * process, until the lot above it is picked clean.
+ *
+ * Checked against the stored bytes rather than the model. What leaks is what is written down.
+ */
+describe('what a face-down plate gives away', () => {
+  /** Take every tile off the top lot, which is what makes the plate beneath eligible to turn over. */
+  async function clearTopLot(gameId: string, head: number, board: Tableau) {
+    const entries: LogEntry[] = []
+    const live = recordingTableau(board, e => entries.push(e))
+    for (const tile of board.tilesInSourceLot(0)) {
+      const slot = live.freeDrawerSlots()[0]
+      if (slot !== undefined) live.moveTile(tile.id, { kind: 'drawer', slot })
+    }
+    return games.submit(gameId, turn(head, entries))
+  }
+
+  it('is nothing, until the lot above it is taken', async () => {
+    const game = await newGame()
+    const opening = await games.commands(game.id, 0)
+    const board = replayTableau(replayOf(opening.commands[0]!), tableauOptionsFor(SETTINGS))
+
+    const hidden = board.plateInSourceLot(0)!
+    // The model itself holds no token for it — the property the deal is built on.
+    expect(board.plateToken(hidden.id)).toBeUndefined()
+
+    // And neither does anything stored. `revealPlate` is the only entry that ever carries one.
+    const rows = await prisma.command.findMany({ where: { gameId: game.id } })
+    expect(JSON.stringify(rows)).not.toContain('revealPlate')
+
+    const cleared = await clearTopLot(game.id, game.head.seq, board)
+
+    // Now, and only now, the token arrives — in the server's answer, not the player's move.
+    const reveals = cleared.command.response.filter(e => e.op === 'revealPlate')
+    expect(reveals).toHaveLength(1)
+    expect(reveals[0]).toMatchObject({ id: hidden.id })
+  })
+
+  /*
+   * The strong form. Two games on the same seed deal the same board, so a token is *derivable* from
+   * a seed — which is exactly why the seed must never travel with the plate it hides. It does not:
+   * `GameView` carries the seed openly, and the deal it produces is the server's alone until it
+   * chooses to reveal it.
+   */
+  it('does not put the deck anywhere a client can read it', async () => {
+    const game = await newGame()
+    const slice = await games.commands(game.id, 0)
+
+    const stored = JSON.stringify(slice)
+    // The four heaped tiles are visible and belong in the log; the plate under them is not.
+    const faceDown = slice.commands[0]!.response.filter(
+      e => e.op === 'addPlate' && e.faceDown,
+    )
+    expect(faceDown).toHaveLength(1)
+    expect(faceDown[0]).not.toHaveProperty('spec')
+    // Nothing anywhere in the slice says how many plates are left, which would narrow the deal.
+    expect(stored).not.toContain('remaining')
+    expect(stored).not.toContain('plateBag')
+  })
+})
+
+/*
  * The one real race. Two commands must never share a parent — and the failure would not be an error,
  * it would be a forked log that replays into two different boards.
  *
@@ -481,7 +558,15 @@ describe('a game played through the API', () => {
       const tile = live.addTile({ color: i, value: i + 1 }, { kind: 'drawer', slot: 12 + i })!
       live.moveTile(tile.id, { kind: 'drawer', slot: 8 + i })
       ids.push(tile.id)
-      head = (await games.submit(game.id, turn(head, entries))).command.seq
+
+      const result = await games.submit(game.id, turn(head, entries))
+      head = result.command.seq
+      /*
+       * What a real client does with the acknowledgement: its own effects are already on its board,
+       * so only the server's answer is applied. Skipping this is not a small inaccuracy — the deal
+       * consumes model ids, so the next turn's tile would be named differently on the two sides.
+       */
+      for (const entry of result.command.response) applyEntry(played, entry)
     }
 
     const stored = await games.commands(game.id, 0)

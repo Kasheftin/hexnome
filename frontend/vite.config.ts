@@ -25,6 +25,19 @@ export default defineConfig({
       '@hexnome/rules': fileURLToPath(new URL('../packages/rules/src', import.meta.url)),
     },
   },
+  server: {
+    /*
+     * The API, proxied rather than reached across origins.
+     *
+     * Keeping the browser on one origin means the app's fetches are same-origin in development
+     * exactly as they are in production, so there is no CORS to configure, no credentials mode to
+     * get wrong, and no `VITE_API_BASE` to set before the thing will run at all.
+     */
+    proxy: {
+      '/games': 'http://localhost:3000',
+      '/health': 'http://localhost:3000',
+    },
+  },
   test: {
     /*
      * App-layer specs. The rules package runs its own suite — see packages/rules/vitest.config.ts.

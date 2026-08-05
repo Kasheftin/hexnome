@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import { readSavedGame } from '@/composables/useSavedGames'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -12,16 +11,15 @@ const routes: RouteRecordRaw[] = [
     name: 'game',
     component: () => import('@/views/GameView.vue'),
     /**
-     * Turn away an unknown game before its chunk loads.
+     * Only the obviously-missing id is turned away here.
      *
-     * GameView pulls in three.js — around 870 kB — so guarding inside the component means
-     * downloading and parsing all of it just to bounce straight back to the menu, which took
-     * over two seconds. Deciding here costs one localStorage read and fetches nothing.
+     * There used to be a real check: a localStorage read that bounced an unknown game before
+     * three.js — around 870 kB — was fetched to bounce it. Whether a game exists is now the
+     * server's answer, and asking a guard to wait on the network would stall the navigation
+     * itself. `GameView` is a small chunk that loads the game and only then pulls in the board,
+     * so an unknown id costs a request rather than a megabyte.
      */
-    beforeEnter: to => {
-      const id = typeof to.query.id === 'string' ? to.query.id : ''
-      return readSavedGame(id) ? true : { path: '/' }
-    },
+    beforeEnter: to => (typeof to.query.id === 'string' && to.query.id ? true : { path: '/' }),
   },
   {
     path: '/:pathMatch(.*)*',

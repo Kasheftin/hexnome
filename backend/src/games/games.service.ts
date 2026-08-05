@@ -8,14 +8,20 @@ import {
 } from '@nestjs/common'
 import { createDeck, dealStartingPlates } from '@hexnome/rules/deck'
 import {
-  applyEntry,
-  createGameLog,
-  recordingTableau,
-  replayTableau,
-  type LogEntry,
-} from '@hexnome/rules/gameLog'
-import { parseGameSettings, type GameSettings } from '@hexnome/rules/gameSettings'
+  applyCommand,
+  createDealer,
+  replayDealer,
+  type Dealer,
+  type ReplayedGame,
+} from '@hexnome/rules/dealer'
+import { recordingTableau, type LogEntry } from '@hexnome/rules/gameLog'
+import {
+  DEFAULT_PLATES_PER_ROUND,
+  parseGameSettings,
+  type GameSettings,
+} from '@hexnome/rules/gameSettings'
 import { openingPosition, tableauOptionsFor } from '@hexnome/rules/setup'
+import { shouldRefill } from '@hexnome/rules/source'
 import { createTableau, type Tableau } from '@hexnome/rules/tableau'
 import { PrismaService } from '../prisma.service'
 import {
@@ -70,41 +76,6 @@ function toCommandView(row: CommandRow): CommandView {
  */
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string }).code === 'P2002'
-}
-
-/**
- * Check a turn against the board it claims to have been played on, and refuse it whole if any part
- * of it could not have happened.
- *
- * This is the whole of server-side validation, and it is short because the model already does the
- * work: every mutator decides legality and refuses by returning nothing, and `applyEntry` now says
- * so. Replaying a client's effects through a real tableau therefore *is* checking them — with the
- * identical code the client validated with, so the two cannot hold different opinions about what is
- * legal.
- *
- * **Whole, not partly.** A refused entry means the board never reached the state the later entries
- * assume, so the rest are meaningless even where they would individually apply. The client is told
- * which entry failed and re-syncs.
- *
- * ## What this does not catch
- *
- * Legality is a property of each mutation, not of the turn. Effects that are each allowed but add up
- * to two turns' work — drafting twice, placing without paying — pass here. That needs the turn rules
- * (`turn.ts`, `draft.ts`) and the phase machine that still lives in `GameView.vue`, and it is the
- * expensive step this deliberately stops short of. Fabricating a tile, placing on an occupied petal
- * or naming a piece that does not exist are all caught.
- *
- * The tableau is mutated as it goes — the caller's copy is spent afterwards and must not be reused.
- */
-function verify(board: Tableau, effects: readonly LogEntry[]): void {
-  for (const [index, entry] of effects.entries()) {
-    if (applyEntry(board, entry)) continue
-    throw new UnprocessableEntityException({
-      message: `effect ${index} (${entry.op}) is not a move this board allows`,
-      index,
-      op: entry.op,
-    })
-  }
 }
 
 @Injectable()
@@ -164,11 +135,23 @@ export class GamesService {
    * getting it wrong the first time a rule changed.
    */
   private openingEffects(seed: string, settings: GameSettings): LogEntry[] {
-    const log = createGameLog()
-    const tableau = recordingTableau(createTableau(tableauOptionsFor(settings)), log.append)
+    const entries: LogEntry[] = []
+    const tableau = recordingTableau(
+      createTableau(tableauOptionsFor(settings)),
+      entry => entries.push(entry),
+    )
+
     const deck = createDeck(seed)
     openingPosition(tableau, settings, dealStartingPlates(deck.plates, SEATS).starting[0])
-    return [...log.entries]
+
+    /*
+     * And the first lot, so a created game is playable on arrival. It is dealt here rather than in
+     * answer to the first turn because there would be nothing to draft from on that turn — the
+     * source has to be stocked before the player is asked to take from it.
+     */
+    createDealer(seed).deal(tableau)
+
+    return entries
   }
 
   async find(id: string): Promise<GameView> {
@@ -251,10 +234,25 @@ export class GamesService {
     const settings = parseGameSettings(game.settings)
     if (!settings) throw new ConflictException(`game ${id} has settings this server cannot read`)
 
-    const board = await this.replay(id, settings)
+    /*
+     * One pass answers both questions. `applyCommand` walks the turn through a real board, keeping
+     * the deck in step as it goes, and refuses the first entry the board will not take — so "is this
+     * legal" and "what does it do to the deck" cannot drift apart into two opinions.
+     */
+    const { tableau, dealer } = await this.replay(id, settings)
     const effects = body.effects ?? []
-    verify(board, effects)
-    const response = this.serverEffects()
+
+    const outcome = applyCommand(tableau, dealer, effects)
+    if (!outcome.ok) {
+      const refused = effects[outcome.refusedAt]
+      throw new UnprocessableEntityException({
+        message: `effect ${outcome.refusedAt} (${refused?.op}) is not a move this board allows`,
+        index: outcome.refusedAt,
+        op: refused?.op,
+      })
+    }
+
+    const response = this.dealerResponse(tableau, dealer, settings)
 
     try {
       const row = await this.prisma.command.create({
@@ -294,34 +292,54 @@ export class GamesService {
   }
 
   /**
-   * What the server owes in response to a turn.
+   * What the server owes in answer to a turn: a plate turned over, a fresh lot on the source.
    *
-   * Nothing yet: the deck moves across in Stage C, and it is what will fill this — a restock when one
-   * is due, a `revealPlate` when a lot is picked clean. The seam exists now so that when it does, the
-   * effects land in the same row as the move that caused them rather than in a second write.
+   * **This is where the deck stops being the client's.** The tiles heaped on a new lot are visible
+   * and go into the log as themselves; the plate beneath goes in face down and carries no token,
+   * because at that moment the model holds none — only the dealer here knows what it is. The token
+   * reaches a client exactly once, in the `revealPlate` entry, and only after the lot is picked
+   * clean. Nothing else in any response narrows it.
+   *
+   * Recorded off a wrapper so the dealer's own mutations are journalled as ordinary entries. A client
+   * applies them without needing to know or care that the server made them.
    */
-  private serverEffects(): LogEntry[] {
-    return []
+  private dealerResponse(tableau: Tableau, dealer: Dealer, settings: GameSettings): LogEntry[] {
+    const response: LogEntry[] = []
+    const recorder = recordingTableau(tableau, entry => response.push(entry))
+
+    // Turn over anything the turn just picked clean, before restocking on top of it.
+    dealer.reveal(recorder)
+
+    const supply = {
+      platesDealt: dealer.platesDealt(),
+      platesPerRound: settings.platesPerRound ?? DEFAULT_PLATES_PER_ROUND,
+    }
+    if (shouldRefill(recorder, supply)) dealer.deal(recorder)
+
+    return response
   }
 
   /**
-   * The board as the log leaves it.
+   * The game as its log leaves it: the board, and the deck behind the board.
    *
    * O(n) in the length of the game, on every command. Fine at the few hundred a game runs to, and
    * worth measuring before it is worth caching — a snapshot every N commands is the obvious fix, and
    * an unnecessary one until the numbers say so.
    */
-  private async replay(gameId: string, settings: GameSettings): Promise<Tableau> {
+  private async replay(gameId: string, settings: GameSettings): Promise<ReplayedGame> {
+    const game = await this.prisma.game.findUnique({ where: { id: gameId }, select: { seed: true } })
     const rows = await this.prisma.command.findMany({
       where: { gameId },
       orderBy: { seq: 'asc' },
       select: { effects: true, response: true },
     })
-    const entries = rows.flatMap(r => [
-      ...(r.effects as LogEntry[]),
-      ...(r.response as LogEntry[]),
-    ])
-    return replayTableau(entries, tableauOptionsFor(settings))
+    /*
+     * Grouped by command, never flattened. The deck's piles are batched per event and a turn holds
+     * at most one payment, so the command boundary is the batch boundary — flattening loses it and
+     * produces a deck that is subtly, permanently wrong from the first reshuffle.
+     */
+    const commands = rows.map(r => [...(r.effects as LogEntry[]), ...(r.response as LogEntry[])])
+    return replayDealer(game?.seed ?? '', settings, commands)
   }
 
   private async stored(gameId: string, cmdId: string): Promise<CommandView | null> {
