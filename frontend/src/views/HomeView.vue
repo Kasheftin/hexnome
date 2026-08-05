@@ -58,6 +58,7 @@ import {
 } from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { createGame } from '@/api/games'
+import { playerName, rememberSeat } from '@/composables/useSeat'
 
 type Step = 'title' | 'kind' | 'singleplayer'
 
@@ -377,7 +378,7 @@ async function startGame(): Promise<void> {
   startError.value = ''
 
   try {
-    const game = await createGame({
+    const claim = await createGame({
     kind: 'singleplayer',
     mode: mode.value,
       players: players.value,
@@ -396,8 +397,9 @@ async function startGame(): Promise<void> {
     groupBonuses: groupBonuses.value,
       fineUnplaced: fineUnplaced.value === 1,
       rewardStems: rewardStems.value === 1,
-    })
-    await router.push({ path: '/game', query: { id: game.id } })
+    }, playerName())
+    rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
+    await router.push({ path: '/game', query: { id: claim.game.id } })
   }
   catch {
     /*

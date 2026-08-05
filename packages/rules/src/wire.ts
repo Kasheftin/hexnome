@@ -25,17 +25,26 @@ import type { GameSettings } from './gameSettings'
  */
 export type { GameSettings, LogEntry }
 
-/** The only seat there is, until there are seats. */
-export const SOLO_SEAT = 'p1'
-
-/** The author of anything the server writes on its own account. */
-export const SERVER_SEAT = 'server'
+/**
+ * The server's own writes have no seat.
+ *
+ * `null` rather than a reserved number, so nothing can accidentally compare equal to a real seat —
+ * and so the type says outright that not every command comes from a player.
+ */
+export const SERVER_SEAT = null
 
 /** The predecessor of the first command. Zero rather than null — see the schema. */
 export const GENESIS = 0
 
+export interface JoinBody {
+  /** Optional. An empty name leaves the seat showing its own label rather than a shared default. */
+  readonly name?: string
+}
+
 export interface CreateGameBody {
   readonly settings: unknown
+  /** What the creator calls themselves. They take seat 0. */
+  readonly name?: string
   /**
    * Replay an existing deal. Omitted, a fresh seed is minted.
    *
@@ -49,8 +58,31 @@ export interface CreateGameBody {
 export interface Head {
   /** The `seq` a new command must name as its `prevSeq`. */
   readonly seq: number
-  /** The seat that may act. Empty once the game is over. */
-  readonly awaiting: string
+  /** The seat that may act, or null once the game is over. Zero-based, as the tableau counts. */
+  readonly awaiting: number | null
+}
+
+/** A place at the table, as everyone is allowed to see it. Never the token. */
+export interface SeatView {
+  /** Zero-based, matching the tableau. The screen adds one when it shows a number. */
+  readonly seat: number
+  /** What they called themselves, or empty if they did not say. */
+  readonly name: string
+  readonly joined: boolean
+}
+
+/** What a game is waiting for, or that it is not waiting. */
+export type GameStatus = 'lobby' | 'running' | 'finished'
+
+/**
+ * The answer to joining or creating: which seat is yours, and the secret that proves it.
+ *
+ * The **only** response a token ever appears in. Keep it out of everything else.
+ */
+export interface SeatClaim {
+  readonly seat: number
+  readonly token: string
+  readonly game: GameView
 }
 
 /** A game's identity and setup. Never its deck: that is the server's alone. */
@@ -58,7 +90,9 @@ export interface GameView {
   readonly id: string
   readonly seed: string
   readonly settings: GameSettings
-  readonly status: string
+  readonly status: GameStatus
+  /** Every seat, claimed or not, so a waiting room can show who is still missing. */
+  readonly seats: readonly SeatView[]
   readonly head: Head
 }
 
@@ -72,8 +106,8 @@ export interface GameView {
 export interface CommandView {
   readonly seq: number
   readonly prevSeq: number
-  readonly author: string
-  readonly awaiting: string
+  readonly author: number | null
+  readonly awaiting: number | null
   readonly cmdId: string
   /** What the author's turn did. */
   readonly effects: readonly LogEntry[]
@@ -110,8 +144,10 @@ export interface SubmitBody {
    * with the real head, so a client that fell behind can catch up in one round trip.
    */
   readonly prevSeq: number
-  /** The seat submitting. Refused unless it matches the head's `awaiting`. */
-  readonly author?: string
+  /*
+   * No author. It is derived from the seat token on the request — a client that could name its own
+   * seat could take somebody else's turn, which is the whole reason the token exists.
+   */
   /** What the player's turn did. Server-owned effects are appended to these, in the same row. */
   readonly effects: readonly LogEntry[]
 }

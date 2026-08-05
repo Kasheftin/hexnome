@@ -27,25 +27,35 @@ import { PrismaService } from '../prisma.service'
 import {
   GENESIS,
   SERVER_SEAT,
-  SOLO_SEAT,
   type CommandSlice,
   type CommandView,
   type CreateGameBody,
+  type GameStatus,
+  type JoinBody,
+  type SeatClaim,
   type GameView,
   type Head,
   type SubmitBody,
   type SubmitResult,
 } from './dto'
 
-/** One seat for now. Seats arrive with multiplayer; the column and the check are already real. */
-const SEATS = 1
+/** Whoever makes the game sits down first, in the seat the tableau calls zero. */
+const CREATOR_SEAT = 0
+
+/** And plays first. Turn order is seat order. */
+const FIRST_SEAT = 0
+
+/** Names are shown to strangers, so they are trimmed and bounded. Empty means "did not say". */
+function cleanName(name: string | undefined): string {
+  return (name ?? '').trim().slice(0, 40)
+}
 
 /** A row as Prisma hands it back, before the JSON column is trusted. */
 interface CommandRow {
   seq: number
   prevSeq: number
-  author: string
-  awaiting: string
+  author: number | null
+  awaiting: number | null
   cmdId: string
   effects: unknown
   response: unknown
@@ -93,38 +103,122 @@ export class GamesService {
    * with an empty log would have no head to build on and no board to replay, which is not a state
    * worth being able to represent.
    */
-  async create(body: CreateGameBody): Promise<GameView> {
+  async create(body: CreateGameBody): Promise<SeatClaim> {
     const settings = parseGameSettings(body.settings)
     if (!settings) throw new ConflictException('settings are not a game this server understands')
 
     const seed = body.seed?.slice(0, 64) || randomUUID()
+    const id = randomUUID()
+    const token = randomUUID()
 
-    const game = await this.prisma.game.create({
+    /*
+     * Made as a lobby with every seat laid out and the creator sitting in the first one. No genesis
+     * command yet: what the opening deals depends on who is playing, and nobody else has arrived.
+     *
+     * A solo game takes this same path and simply fills up at once — one route rather than two, so
+     * there is no singleplayer special case to fall out of step with the rest.
+     */
+    await this.prisma.game.create({
       data: {
-        id: randomUUID(),
+        id,
         seed,
         // Prisma's JSON input wants an index signature; GameSettings is a closed shape, and being
         // closed is the point of it.
         settings: settings as unknown as object,
-        status: 'running',
-        commands: {
-          create: {
-            prevSeq: GENESIS,
-            author: SERVER_SEAT,
-            awaiting: SOLO_SEAT,
-            cmdId: randomUUID(),
-            // The opening is entirely the server's doing — there was no turn for it to answer — so
-            // it goes in `response` and `effects` is empty. A client replaying the log treats the
-            // two the same; only an author reconciling its own optimistic state cares.
-            effects: [] as unknown as object,
-            response: this.openingEffects(seed, settings) as unknown as object,
-          },
+        status: 'lobby',
+        seats: {
+          create: Array.from({ length: settings.players }, (_, seat) => ({
+            seat,
+            // Seat zero is the creator's, claimed in the same write so it cannot be taken from them.
+            name: seat === CREATOR_SEAT ? cleanName(body.name) : null,
+            token: seat === CREATOR_SEAT ? token : null,
+            joined: seat === CREATOR_SEAT ? new Date() : null,
+          })),
         },
       },
-      include: { commands: { orderBy: { seq: 'desc' }, take: 1 } },
     })
 
-    return this.toView(game)
+    return { seat: CREATOR_SEAT, token, game: await this.startIfFull(id) }
+  }
+
+  /**
+   * Take the lowest free seat.
+   *
+   * **The claim is a conditional update, and that is the whole concurrency design** — the same shape
+   * as the command chain. `WHERE token IS NULL` either takes the seat or affects nothing, so two
+   * people opening the link together cannot both get in; the loser simply tries the next one. A read
+   * to find a free seat would be a race however carefully it were written.
+   */
+  async join(id: string, body: JoinBody): Promise<SeatClaim> {
+    const game = await this.prisma.game.findUnique({
+      where: { id },
+      include: { seats: { orderBy: { seat: 'asc' } } },
+    })
+    if (!game) throw new NotFoundException(`no game ${id}`)
+    if (game.status !== 'lobby') throw new ConflictException('this game has already started')
+
+    const token = randomUUID()
+
+    for (const seat of game.seats) {
+      if (seat.token !== null) continue
+      const taken = await this.prisma.seat.updateMany({
+        where: { gameId: id, seat: seat.seat, token: null },
+        data: { token, name: cleanName(body?.name), joined: new Date() },
+      })
+      // Zero rows means somebody else took it between the read and the write. Try the next.
+      if (taken.count === 1) return { seat: seat.seat, token, game: await this.startIfFull(id) }
+    }
+
+    throw new ConflictException('every seat at this table is taken')
+  }
+
+  /**
+   * Start the game if the last seat has just been claimed; otherwise leave it waiting.
+   *
+   * The genesis command is written here rather than at creation because the opening deals one board
+   * per player, and until the table is full there is no knowing how many that is.
+   *
+   * Racing joins may both arrive here. The chain settles it: the genesis names `prevSeq: 0`, and
+   * `@@unique([gameId, prevSeq])` lets exactly one of them write it.
+   */
+  private async startIfFull(id: string): Promise<GameView> {
+    const game = await this.prisma.game.findUnique({
+      where: { id },
+      include: { seats: true, commands: { orderBy: { seq: 'desc' }, take: 1 } },
+    })
+    if (!game) throw new NotFoundException(`no game ${id}`)
+    if (game.status !== 'lobby' || game.seats.some(seat => seat.token === null)) {
+      return this.toView(game)
+    }
+
+    const settings = parseGameSettings(game.settings)
+    if (!settings) throw new ConflictException(`game ${id} has settings this server cannot read`)
+
+    try {
+      await this.prisma.game.update({
+        where: { id },
+        data: {
+          status: 'running',
+          commands: {
+            create: {
+              prevSeq: GENESIS,
+              author: SERVER_SEAT,
+              awaiting: FIRST_SEAT,
+              cmdId: randomUUID(),
+              // Entirely the server's doing — no turn preceded it — so it is all response.
+              effects: [] as unknown as object,
+              response: this.openingEffects(game.seed, settings) as unknown as object,
+            },
+          },
+        },
+      })
+    }
+    catch (error) {
+      // Another join got there first. Its genesis is the one that counts.
+      if (!isUniqueViolation(error)) throw error
+    }
+
+    return this.find(id)
   }
 
   /**
@@ -133,6 +227,9 @@ export class GamesService {
    * Played onto a throwaway recording tableau rather than hand-written: the ids the entries name are
    * assigned by the model, so composing them by hand would mean reimplementing its counter and
    * getting it wrong the first time a rule changed.
+   *
+   * **One board and one drawer per seat, from one deck.** The starting plates are dealt together so
+   * that no player's opening depends on the order the seats happened to fill.
    */
   private openingEffects(seed: string, settings: GameSettings): LogEntry[] {
     const entries: LogEntry[] = []
@@ -142,10 +239,13 @@ export class GamesService {
     )
 
     const deck = createDeck(seed)
-    openingPosition(tableau, settings, dealStartingPlates(deck.plates, SEATS).starting[0])
+    const starting = dealStartingPlates(deck.plates, settings.players).starting
+    for (let seat = 0; seat < settings.players; seat++) {
+      openingPosition(tableau, settings, starting[seat], seat)
+    }
 
     /*
-     * And the first lot, so a created game is playable on arrival. It is dealt here rather than in
+     * And the first lot, so a started game is playable on arrival. It is dealt here rather than in
      * answer to the first turn because there would be nothing to draft from on that turn — the
      * source has to be stocked before the player is asked to take from it.
      */
@@ -157,7 +257,7 @@ export class GamesService {
   async find(id: string): Promise<GameView> {
     const game = await this.prisma.game.findUnique({
       where: { id },
-      include: { commands: { orderBy: { seq: 'desc' }, take: 1 } },
+      include: { seats: true, commands: { orderBy: { seq: 'desc' }, take: 1 } },
     })
     if (!game) throw new NotFoundException(`no game ${id}`)
     return this.toView(game)
@@ -173,7 +273,7 @@ export class GamesService {
   async commands(id: string, since: number): Promise<CommandSlice> {
     const game = await this.prisma.game.findUnique({
       where: { id },
-      include: { commands: { orderBy: { seq: 'desc' }, take: 1 } },
+      include: { seats: true, commands: { orderBy: { seq: 'desc' }, take: 1 } },
     })
     if (!game) throw new NotFoundException(`no game ${id}`)
 
@@ -197,17 +297,23 @@ export class GamesService {
    * legality check is different: nothing else performs it, and without it a client writes whatever
    * it likes into the log.
    */
-  async submit(id: string, body: SubmitBody): Promise<SubmitResult> {
+  async submit(id: string, body: SubmitBody, token: string): Promise<SubmitResult> {
     if (!body?.cmdId) throw new ConflictException('a command needs a cmdId')
 
     const game = await this.prisma.game.findUnique({
       where: { id },
-      include: { commands: { orderBy: { seq: 'desc' }, take: 1 } },
+      include: { seats: true, commands: { orderBy: { seq: 'desc' }, take: 1 } },
     })
     if (!game) throw new NotFoundException(`no game ${id}`)
 
     const head = headOf(game.commands)
-    const author = body.author ?? SOLO_SEAT
+
+    /*
+     * **Who this is comes from the token, never from the request body.** A client that could name its
+     * own seat could take somebody else's turn, so `author` is not a field a caller may set — it is
+     * looked up.
+     */
+    const author = await this.seatOfToken(id, token)
 
     /*
      * Idempotency is checked before staleness, and the order is the whole point. A retry of a command
@@ -226,7 +332,9 @@ export class GamesService {
 
     if (author !== head.awaiting) {
       throw new ForbiddenException({
-        message: `it is not ${author}'s turn`,
+        message: head.awaiting === null
+          ? 'this game is over'
+          : `it is seat ${head.awaiting}'s turn, not seat ${author}'s`,
         awaiting: head.awaiting,
       })
     }
@@ -260,9 +368,8 @@ export class GamesService {
           gameId: id,
           prevSeq: body.prevSeq,
           author,
-          // Whose turn it is next. Trivial with one seat; Stage C computes it from the round state,
-          // and multiplayer from the seat order.
-          awaiting: SOLO_SEAT,
+          // Round the table. Seat order is join order, and seat zero plays first.
+          awaiting: (author + 1) % settings.players,
           cmdId: body.cmdId,
           // Both halves in one row, and therefore one INSERT: a client must never be able to observe
           // a move landing without the deal it triggered.
@@ -342,6 +449,23 @@ export class GamesService {
     return replayDealer(game?.seed ?? '', settings, commands)
   }
 
+  /**
+   * Which seat a token belongs to.
+   *
+   * The only place a request's identity is decided. An unknown token is not a seat at this table and
+   * gets nothing — including, deliberately, no hint about whether the game or the token was wrong.
+   */
+  private async seatOfToken(gameId: string, token: string): Promise<number> {
+    const seat = token
+      ? await this.prisma.seat.findUnique({
+        where: { gameId_token: { gameId, token } },
+        select: { seat: true },
+      })
+      : null
+    if (!seat) throw new ForbiddenException('that is not a seat at this table')
+    return seat.seat
+  }
+
   private async stored(gameId: string, cmdId: string): Promise<CommandView | null> {
     const row = await this.prisma.command.findUnique({ where: { gameId_cmdId: { gameId, cmdId } } })
     return row ? toCommandView(row) : null
@@ -362,7 +486,8 @@ export class GamesService {
     seed: string
     settings: unknown
     status: string
-    commands: CommandRow[]
+    seats?: { seat: number, name: string | null, token: string | null, joined: Date | null }[]
+    commands?: CommandRow[]
   }): GameView {
     const settings = parseGameSettings(game.settings)
     if (!settings) throw new ConflictException(`game ${game.id} has settings this server cannot read`)
@@ -370,8 +495,16 @@ export class GamesService {
       id: game.id,
       seed: game.seed,
       settings,
-      status: game.status,
-      head: headOf(game.commands),
+      status: game.status as GameStatus,
+      /*
+       * Names and who has arrived, and nothing else. The token is read here and deliberately not
+       * carried across — handing every player the others' tokens would give each of them the others'
+       * turns, and it would happen through a `select` nobody looked at twice.
+       */
+      seats: [...(game.seats ?? [])]
+        .sort((a, b) => a.seat - b.seat)
+        .map(seat => ({ seat: seat.seat, name: seat.name ?? '', joined: seat.token !== null })),
+      head: headOf(game.commands ?? []),
     }
   }
 }
@@ -383,9 +516,9 @@ export class GamesService {
  * must name. `create` never leaves a game in that state, but a head that has to be special-cased by
  * every caller is worse than one that answers sensibly.
  */
-function headOf(commands: readonly { seq: number, awaiting: string }[]): Head {
+function headOf(commands: readonly { seq: number, awaiting: number | null }[]): Head {
   const last = commands[0]
   return last
     ? { seq: last.seq, awaiting: last.awaiting }
-    : { seq: GENESIS, awaiting: SOLO_SEAT }
+    : { seq: GENESIS, awaiting: FIRST_SEAT }
 }

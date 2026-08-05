@@ -11,7 +11,7 @@ import { defaultGameSettings } from '@hexnome/rules/gameSettings'
 import { BOARD_CENTRE, tableauOptionsFor } from '@hexnome/rules/setup'
 import type { Tableau } from '@hexnome/rules/tableau'
 import { PrismaService } from '../prisma.service'
-import { replayOf, SOLO_SEAT } from './dto'
+import { replayOf } from './dto'
 import { GamesService } from './games.service'
 
 /**
@@ -29,10 +29,18 @@ const games = new GamesService(prisma)
 const made: string[] = []
 const SETTINGS = defaultGameSettings(1700000000000)
 
+/** A solo game: one seat, claimed by its creator, so it is running the moment it is made. */
 async function newGame(seed?: string) {
-  const game = await games.create({ settings: SETTINGS, seed })
-  made.push(game.id)
-  return game
+  const claim = await games.create({ settings: SETTINGS, seed, name: 'Solo' })
+  made.push(claim.game.id)
+  return { ...claim.game, token: claim.token, seat: claim.seat }
+}
+
+/** A table of `players` seats, with only the creator sitting down. */
+async function newTable(players: number) {
+  const claim = await games.create({ settings: { ...SETTINGS, players }, name: 'Host' })
+  made.push(claim.game.id)
+  return claim
 }
 
 /*
@@ -53,9 +61,13 @@ const nudge = (): LogEntry => ({ op: 'rotatePlate', id: OPENING_PLATE, steps: 1 
 /** A distinguishable effect: `slot` carries who wrote it, so a torn command would be visible. */
 const stem = (n: number): LogEntry => ({ op: 'addStem', slot: FIRST_FREE_SLOT + n })
 
+/** Submit as the game's own creator, whose token comes back with it. */
+type Seated = { id: string, token: string }
+const play = (game: Seated, body: ReturnType<typeof turn>) => games.submit(game.id, body, game.token)
+
 /** A submission with everything but the parts a test cares about filled in. */
 const turn = (prevSeq: number, effects: LogEntry[] = [nudge()], cmdId = randomUUID()) =>
-  ({ cmdId, prevSeq, author: SOLO_SEAT, effects })
+  ({ cmdId, prevSeq, effects })
 
 beforeAll(async () => {
   await prisma.$connect()
@@ -90,11 +102,12 @@ describe('starting a game', () => {
     const slice = await games.commands(game.id, 0)
     expect(slice.commands).toHaveLength(1)
     expect(slice.commands[0]!.prevSeq).toBe(0)
-    expect(slice.commands[0]!.author).toBe('server')
+    // Null, not a reserved seat number: the server is not a player at the table.
+    expect(slice.commands[0]!.author).toBeNull()
     // No turn preceded it, so it is all response and no effects.
     expect(slice.commands[0]!.effects).toEqual([])
     expect(game.head.seq).toBe(slice.commands[0]!.seq)
-    expect(game.head.awaiting).toBe(SOLO_SEAT)
+    expect(game.head.awaiting).toBe(0)
   })
 
   /* The head is a real seq, not a count — the numbering is global and sparse. */
@@ -151,15 +164,15 @@ describe('starting a game', () => {
   it('has nothing to say about a game that does not exist', async () => {
     await expect(games.find('no-such-game')).rejects.toThrow(NotFoundException)
     await expect(games.commands('no-such-game', 0)).rejects.toThrow(NotFoundException)
-    await expect(games.submit('no-such-game', turn(0))).rejects.toThrow(NotFoundException)
+    await expect(games.submit('no-such-game', turn(0), 'nobody')).rejects.toThrow(NotFoundException)
   })
 })
 
 describe('reading the log', () => {
   it('returns exactly the tail after the cursor', async () => {
     const game = await newGame()
-    const first = await games.submit(game.id, turn(game.head.seq))
-    const second = await games.submit(game.id, turn(first.command.seq))
+    const first = await play(game, turn(game.head.seq))
+    const second = await play(game, turn(first.command.seq))
 
     const all = await games.commands(game.id, 0)
     expect(all.commands).toHaveLength(3)
@@ -196,7 +209,7 @@ describe('reading the log', () => {
       { op: 'addTile', spec: { color: 3, value: 5 }, location: { kind: 'drawer', slot: 9 }, fixed: true },
       { op: 'addStem', slot: 4 },
     ]
-    const written = await games.submit(game.id, turn(game.head.seq, effects))
+    const written = await play(game, turn(game.head.seq, effects))
     const read = await games.commands(game.id, game.head.seq)
     expect(written.command.effects).toEqual(effects)
     expect(read.commands[0]!.effects).toEqual(effects)
@@ -206,8 +219,8 @@ describe('reading the log', () => {
 describe('submitting a command', () => {
   it('links each command to the one before it', async () => {
     const game = await newGame()
-    const first = await games.submit(game.id, turn(game.head.seq))
-    const second = await games.submit(game.id, turn(first.command.seq))
+    const first = await play(game, turn(game.head.seq))
+    const second = await play(game, turn(first.command.seq))
 
     expect(first.command.prevSeq).toBe(game.head.seq)
     expect(second.command.prevSeq).toBe(first.command.seq)
@@ -219,7 +232,7 @@ describe('submitting a command', () => {
   it('leaves a chain with no fork and no break', async () => {
     const game = await newGame()
     let head = game.head.seq
-    for (let i = 0; i < 8; i++) head = (await games.submit(game.id, turn(head, [stem(i)]))).command.seq
+    for (let i = 0; i < 8; i++) head = (await play(game, turn(head, [stem(i)]))).command.seq
 
     const { commands } = await games.commands(game.id, 0)
     expect(commands[0]!.prevSeq).toBe(0)
@@ -231,33 +244,34 @@ describe('submitting a command', () => {
 
   it('records who submitted it and who may act next', async () => {
     const game = await newGame()
-    const { command } = await games.submit(game.id, turn(game.head.seq))
-    expect(command.author).toBe(SOLO_SEAT)
-    expect(command.awaiting).toBe(SOLO_SEAT)
+    const { command } = await play(game, turn(game.head.seq))
+    expect(command.author).toBe(0)
+    // One seat, so it comes round to the same player.
+    expect(command.awaiting).toBe(0)
   })
 
   it('insists on a cmdId', async () => {
     const game = await newGame()
-    await expect(games.submit(game.id, { cmdId: '', prevSeq: game.head.seq, effects: [] }))
+    await expect(games.submit(game.id, { cmdId: '', prevSeq: game.head.seq, effects: [] }, game.token))
       .rejects.toThrow(ConflictException)
   })
 
   describe('building on a head that has moved', () => {
     it('is refused, and told where the head really is', async () => {
       const game = await newGame()
-      const first = await games.submit(game.id, turn(game.head.seq))
+      const first = await play(game, turn(game.head.seq))
 
-      const stale = games.submit(game.id, turn(game.head.seq))
+      const stale = play(game, turn(game.head.seq))
       await expect(stale).rejects.toThrow(ConflictException)
       await expect(stale).rejects.toMatchObject({
-        response: { head: { seq: first.command.seq, awaiting: SOLO_SEAT } },
+        response: { head: { seq: first.command.seq, awaiting: 0 } },
       })
     })
 
     it('writes nothing when it refuses', async () => {
       const game = await newGame()
-      await games.submit(game.id, turn(game.head.seq))
-      await games.submit(game.id, turn(game.head.seq)).catch(() => {})
+      await play(game, turn(game.head.seq))
+      await play(game, turn(game.head.seq)).catch(() => {})
       expect((await games.commands(game.id, 0)).commands).toHaveLength(2)
     })
   })
@@ -273,8 +287,8 @@ describe('submitting a command', () => {
       const game = await newGame()
       const submission = turn(game.head.seq, [stem(3)])
 
-      const first = await games.submit(game.id, submission)
-      const again = await games.submit(game.id, submission)
+      const first = await play(game, submission)
+      const again = await play(game, submission)
 
       expect(again.duplicate).toBe(true)
       expect(again.command).toEqual(first.command)
@@ -284,8 +298,8 @@ describe('submitting a command', () => {
     /* The distinction that makes it useful: a *different* command from the same stale point is not. */
     it('does not excuse a different command from the same stale point', async () => {
       const game = await newGame()
-      await games.submit(game.id, turn(game.head.seq, [stem(1)]))
-      await expect(games.submit(game.id, turn(game.head.seq, [stem(2)])))
+      await play(game, turn(game.head.seq, [stem(1)]))
+      await expect(play(game, turn(game.head.seq, [stem(2)])))
         .rejects.toThrow(ConflictException)
     })
 
@@ -294,8 +308,8 @@ describe('submitting a command', () => {
       const game = await newGame()
       const submission = turn(game.head.seq)
       const both = await Promise.all([
-        games.submit(game.id, submission),
-        games.submit(game.id, submission),
+        play(game, submission),
+        play(game, submission),
       ])
       expect(both[0].command.seq).toBe(both[1].command.seq)
       expect(both.filter(r => r.duplicate)).toHaveLength(1)
@@ -304,30 +318,34 @@ describe('submitting a command', () => {
   })
 
   /*
-   * Authorization, which is a different job from the guard above and must not be confused with it: it
-   * reads the state it is protecting, so two commands from the *same* seat both pass. One seat exists
-   * in play, so `awaiting` is set directly here — the mechanism is real even though nothing exercises
-   * it yet.
+   * Authorization, and a different job from the guard above: it reads the state it is protecting, so
+   * two commands from the *same* seat both pass it. What it does stop is somebody else's turn.
    */
   describe('acting out of turn', () => {
-    it('is refused before the database is touched', async () => {
-      const game = await newGame()
-      await prisma.command.update({
-        where: { seq: game.head.seq },
-        data: { awaiting: 'p2' },
-      })
+    it('refuses the seat that is not being awaited', async () => {
+      const host = await newTable(2)
+      const guest = await games.join(host.game.id, { name: 'Guest' })
 
-      const wrongSeat = games.submit(game.id, { ...turn(game.head.seq), author: 'p1' })
-      await expect(wrongSeat).rejects.toThrow(ForbiddenException)
-      await expect(wrongSeat).rejects.toMatchObject({ response: { awaiting: 'p2' } })
-      expect((await games.commands(game.id, 0)).commands).toHaveLength(1)
+      // Seat 0 leads, so the guest's move is refused before the database is touched.
+      const early = games.submit(guest.game.id, turn(guest.game.head.seq), guest.token)
+      await expect(early).rejects.toThrow(ForbiddenException)
+      await expect(early).rejects.toMatchObject({ response: { awaiting: 0 } })
+      expect((await games.commands(host.game.id, 0)).commands).toHaveLength(1)
     })
 
-    it('lets the awaited seat through', async () => {
-      const game = await newGame()
-      await prisma.command.update({ where: { seq: game.head.seq }, data: { awaiting: 'p2' } })
-      await expect(games.submit(game.id, { ...turn(game.head.seq), author: 'p2' }))
-        .resolves.toMatchObject({ duplicate: false })
+    it('lets the awaited seat through, and then passes the turn on', async () => {
+      const host = await newTable(2)
+      const guest = await games.join(host.game.id, { name: 'Guest' })
+      const head = guest.game.head.seq
+
+      const first = await games.submit(host.game.id, turn(head), host.token)
+      expect(first.command.author).toBe(0)
+      expect(first.command.awaiting).toBe(1)
+
+      const second = await games.submit(host.game.id, turn(first.command.seq), guest.token)
+      expect(second.command.author).toBe(1)
+      // Round the table and back to the start.
+      expect(second.command.awaiting).toBe(0)
     })
   })
 })
@@ -342,21 +360,21 @@ describe('submitting a command', () => {
 describe('verifying a turn against the board', () => {
   it('accepts a move the board allows', async () => {
     const game = await newGame()
-    await expect(games.submit(game.id, turn(game.head.seq, [stem(0)])))
+    await expect(play(game, turn(game.head.seq, [stem(0)])))
       .resolves.toMatchObject({ duplicate: false })
   })
 
   it('refuses a piece that does not exist', async () => {
     const game = await newGame()
     const ghost: LogEntry = { op: 'moveTile', id: 't999', location: { kind: 'drawer', slot: 6 } }
-    await expect(games.submit(game.id, turn(game.head.seq, [ghost])))
+    await expect(play(game, turn(game.head.seq, [ghost])))
       .rejects.toThrow(UnprocessableEntityException)
   })
 
   it('refuses a drawer slot that is already taken', async () => {
     const game = await newGame()
     // Slots 0..2 hold the opening stems, so this one is occupied.
-    await expect(games.submit(game.id, turn(game.head.seq, [{ op: 'addStem', slot: 0 }])))
+    await expect(play(game, turn(game.head.seq, [{ op: 'addStem', slot: 0 }])))
       .rejects.toThrow(UnprocessableEntityException)
   })
 
@@ -368,7 +386,7 @@ describe('verifying a turn against the board', () => {
       rotation: 0,
       faceDown: false,
     }
-    await expect(games.submit(game.id, turn(game.head.seq, [offBoard])))
+    await expect(play(game, turn(game.head.seq, [offBoard])))
       .rejects.toThrow(UnprocessableEntityException)
   })
 
@@ -377,7 +395,7 @@ describe('verifying a turn against the board', () => {
     const game = await newGame()
     const mixed = [stem(0), { op: 'addStem', slot: 0 } as LogEntry, stem(1)]
 
-    const refused = games.submit(game.id, turn(game.head.seq, mixed))
+    const refused = play(game, turn(game.head.seq, mixed))
     await expect(refused).rejects.toThrow(UnprocessableEntityException)
     await expect(refused).rejects.toMatchObject({ response: { index: 1, op: 'addStem' } })
 
@@ -395,7 +413,7 @@ describe('verifying a turn against the board', () => {
   it('does not yet catch effects that are each legal but add up to two turns', async () => {
     const game = await newGame()
     const twoTurnsWorth = [stem(0), stem(1), stem(2), stem(3), stem(4)]
-    await expect(games.submit(game.id, turn(game.head.seq, twoTurnsWorth)))
+    await expect(play(game, turn(game.head.seq, twoTurnsWorth)))
       .resolves.toMatchObject({ duplicate: false })
   })
 })
@@ -412,14 +430,14 @@ describe('verifying a turn against the board', () => {
  */
 describe('what a face-down plate gives away', () => {
   /** Take every tile off the top lot, which is what makes the plate beneath eligible to turn over. */
-  async function clearTopLot(gameId: string, head: number, board: Tableau) {
+  async function clearTopLot(game: Seated, head: number, board: Tableau) {
     const entries: LogEntry[] = []
     const live = recordingTableau(board, e => entries.push(e))
     for (const tile of board.tilesInSourceLot(0)) {
       const slot = live.freeDrawerSlots()[0]
       if (slot !== undefined) live.moveTile(tile.id, { kind: 'drawer', slot })
     }
-    return games.submit(gameId, turn(head, entries))
+    return play(game, turn(head, entries))
   }
 
   it('is nothing, until the lot above it is taken', async () => {
@@ -435,7 +453,7 @@ describe('what a face-down plate gives away', () => {
     const rows = await prisma.command.findMany({ where: { gameId: game.id } })
     expect(JSON.stringify(rows)).not.toContain('revealPlate')
 
-    const cleared = await clearTopLot(game.id, game.head.seq, board)
+    const cleared = await clearTopLot(game, game.head.seq, board)
 
     // Now, and only now, the token arrives — in the server's answer, not the player's move.
     const reveals = cleared.command.response.filter(e => e.op === 'revealPlate')
@@ -482,7 +500,7 @@ describe('commands arriving together', () => {
 
     const results = await Promise.allSettled(
       Array.from({ length: RACERS }, () =>
-        games.submit(game.id, turn(game.head.seq, [nudge()]))),
+        play(game, turn(game.head.seq, [nudge()]))),
     )
 
     const won = results.filter(r => r.status === 'fulfilled')
@@ -508,7 +526,7 @@ describe('commands arriving together', () => {
 
     for (let round = 0; round < 5; round++) {
       const results = await Promise.allSettled(
-        Array.from({ length: 8 }, () => games.submit(game.id, turn(head, [nudge()]))),
+        Array.from({ length: 8 }, () => play(game, turn(head, [nudge()]))),
       )
       const won = results.filter(r => r.status === 'fulfilled')
       expect(won).toHaveLength(1)
@@ -526,8 +544,8 @@ describe('commands arriving together', () => {
   it('does not make games wait for each other', async () => {
     const [a, b] = await Promise.all([newGame(), newGame()])
     const [ra, rb] = await Promise.all([
-      games.submit(a.id, turn(a.head.seq)),
-      games.submit(b.id, turn(b.head.seq)),
+      play(a, turn(a.head.seq)),
+      play(b, turn(b.head.seq)),
     ])
     expect(ra.duplicate).toBe(false)
     expect(rb.duplicate).toBe(false)
@@ -559,7 +577,7 @@ describe('a game played through the API', () => {
       live.moveTile(tile.id, { kind: 'drawer', slot: 8 + i })
       ids.push(tile.id)
 
-      const result = await games.submit(game.id, turn(head, entries))
+      const result = await play(game, turn(head, entries))
       head = result.command.seq
       /*
        * What a real client does with the acknowledgement: its own effects are already on its board,
@@ -577,5 +595,144 @@ describe('a game played through the API', () => {
     expect(rebuilt.stems().map(s => s.slot)).toEqual(played.stems().map(s => s.slot))
     // The ids must come out the same, or entries naming them would resolve to different pieces.
     for (const id of ids) expect(rebuilt.tile(id)).toBeDefined()
+  })
+})
+
+/*
+ * Sitting down. Two people opening the same link is the ordinary case, not the exotic one, so the
+ * claim has to settle it in the write rather than in a read — the same discipline as the chain.
+ */
+describe('taking a seat', () => {
+  it('seats the creator and leaves the rest of the table empty', async () => {
+    const host = await newTable(3)
+    expect(host.seat).toBe(0)
+    expect(host.game.status).toBe('lobby')
+    expect(host.game.seats.map(s => s.joined)).toEqual([true, false, false])
+    expect(host.game.seats[0]!.name).toBe('Host')
+  })
+
+  it('fills the lowest free seat in order', async () => {
+    const host = await newTable(3)
+    const second = await games.join(host.game.id, { name: 'Ada' })
+    const third = await games.join(host.game.id, { name: 'Lee' })
+    expect([second.seat, third.seat]).toEqual([1, 2])
+    expect(third.game.seats.map(s => s.name)).toEqual(['Host', 'Ada', 'Lee'])
+  })
+
+  it('gives every seat a different token', async () => {
+    const host = await newTable(2)
+    const guest = await games.join(host.game.id, {})
+    expect(guest.token).not.toBe(host.token)
+  })
+
+  it('has nothing left once the table is full', async () => {
+    const host = await newTable(2)
+    await games.join(host.game.id, {})
+    await expect(games.join(host.game.id, {})).rejects.toThrow(ConflictException)
+  })
+
+  it('refuses to seat anyone in a game that has started', async () => {
+    const solo = await newGame()
+    await expect(games.join(solo.id, {})).rejects.toThrow(ConflictException)
+  })
+
+  /* The race the conditional claim exists for. Removing `token: null` from the where lets two in. */
+  it('gives one seat to exactly one of two people arriving together', async () => {
+    const host = await newTable(2)
+    const rush = await Promise.allSettled(
+      Array.from({ length: 12 }, () => games.join(host.game.id, { name: 'Rush' })),
+    )
+    const seated = rush.filter(r => r.status === 'fulfilled')
+    expect(seated).toHaveLength(1)
+    expect((seated[0] as PromiseFulfilledResult<{ seat: number }>).value.seat).toBe(1)
+  }, 60_000)
+})
+
+describe('a table that fills up', () => {
+  it('stays a lobby with an empty log until the last seat is taken', async () => {
+    const host = await newTable(2)
+    expect(host.game.status).toBe('lobby')
+    expect((await games.commands(host.game.id, 0)).commands).toEqual([])
+    // A lobby still answers with a head, so a client has something to build its first command on.
+    expect(host.game.head).toEqual({ seq: 0, awaiting: 0 })
+  })
+
+  it('starts, and deals one board per player, when it does', async () => {
+    const host = await newTable(3)
+    await games.join(host.game.id, { name: 'Ada' })
+    const last = await games.join(host.game.id, { name: 'Lee' })
+
+    expect(last.game.status).toBe('running')
+    const slice = await games.commands(host.game.id, 0)
+    expect(slice.commands).toHaveLength(1)
+
+    const settings = { ...SETTINGS, players: 3 }
+    const board = replayTableau(slice.commands[0]!.response, tableauOptionsFor(settings))
+    for (const seat of [0, 1, 2]) {
+      expect(board.platesOnBoard(seat)).toHaveLength(1)
+      expect(board.stems(seat)).toHaveLength(settings.initialStems)
+    }
+    // One shared source, however many players.
+    expect(board.tilesInSourceLot(0)).toHaveLength(4)
+  })
+
+  it('deals every player a different starting plate', async () => {
+    const host = await newTable(4)
+    for (const name of ['Ada', 'Lee', 'Sam']) await games.join(host.game.id, { name })
+
+    const slice = await games.commands(host.game.id, 0)
+    const settings = { ...SETTINGS, players: 4 }
+    const board = replayTableau(slice.commands[0]!.response, tableauOptionsFor(settings))
+
+    const faces = [0, 1, 2, 3].map((seat) => {
+      const plate = board.platesOnBoard(seat)[0]!
+      const token = board.plateToken(plate.id)!
+      return `${token.color}:${token.value}`
+    })
+    expect(new Set(faces).size).toBe(4)
+  })
+
+  it('is solo when there is one seat, and starts at once', async () => {
+    const solo = await newGame()
+    expect(solo.status).toBe('running')
+    expect(solo.seats).toHaveLength(1)
+  })
+})
+
+/*
+ * The token is the only thing standing between a player and somebody else's turn, so it must not
+ * travel anywhere except the response that mints it.
+ */
+describe('what a seat token is allowed to reach', () => {
+  it('never appears in a game, a seat list or a command', async () => {
+    const host = await newTable(2)
+    const guest = await games.join(host.game.id, { name: 'Ada' })
+    await games.submit(host.game.id, turn(guest.game.head.seq), host.token)
+
+    const everything = JSON.stringify([
+      await games.find(host.game.id),
+      await games.commands(host.game.id, 0),
+    ])
+    expect(everything).not.toContain(host.token)
+    expect(everything).not.toContain(guest.token)
+  })
+
+  it('is what decides the author, whatever the caller says', async () => {
+    const host = await newTable(2)
+    const guest = await games.join(host.game.id, { name: 'Ada' })
+
+    const claiming = { ...turn(guest.game.head.seq), author: 1 } as never
+    const written = await games.submit(host.game.id, claiming, host.token)
+    // Seat 0's token, so seat 0's command, however the body was dressed up.
+    expect(written.command.author).toBe(0)
+  })
+
+  it('turns away a token that belongs to no seat here', async () => {
+    const host = await newTable(2)
+    const other = await newTable(2)
+    await expect(games.submit(host.game.id, turn(host.game.head.seq), other.token))
+      .rejects.toThrow(ForbiddenException)
+    await expect(games.submit(host.game.id, turn(host.game.head.seq), ''))
+      .rejects.toThrow(ForbiddenException)
   })
 })

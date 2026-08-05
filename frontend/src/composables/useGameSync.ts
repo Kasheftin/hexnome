@@ -30,8 +30,9 @@
  */
 import { shallowRef } from 'vue'
 import type { LogEntry } from '@hexnome/rules/gameLog'
-import { SOLO_SEAT, type CommandView, type GameView } from '@hexnome/rules/wire'
+import type { CommandView, GameView } from '@hexnome/rules/wire'
 import { ApiError, getCommands, getGame, submitCommand } from '@/api/games'
+import { seatIn } from '@/composables/useSeat'
 
 /** How many times to resend a turn whose response never arrived. */
 const RETRIES = 3
@@ -89,6 +90,8 @@ export function useGameSync(): GameSync {
 
   let gameId = ''
   let head = 0
+  /** The seat token for this game, looked up when it loads. Without one you are a spectator. */
+  let token = ''
 
   function diverge(why: string): null {
     status.value = 'diverged'
@@ -98,6 +101,7 @@ export function useGameSync(): GameSync {
 
   async function load(id: string): Promise<LoadedGame | null> {
     gameId = id
+    token = seatIn(id)?.token ?? ''
     status.value = 'loading'
     problem.value = ''
 
@@ -127,12 +131,12 @@ export function useGameSync(): GameSync {
     // An empty turn is not worth a row. Cancelling a placement produces one.
     if (effects.length === 0) return []
 
-    const turn = { cmdId: newCommandId(), prevSeq: head, author: SOLO_SEAT, effects }
+    const turn = { cmdId: newCommandId(), prevSeq: head, effects }
     status.value = 'saving'
 
     for (let attempt = 0; attempt < RETRIES; attempt++) {
       try {
-        const result = await submitCommand(gameId, turn)
+        const result = await submitCommand(gameId, turn, token)
         head = result.command.seq
         status.value = 'ready'
         /*

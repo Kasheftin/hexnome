@@ -51,16 +51,57 @@ model Game {
   /// exactly this reason.
   settings  Json
 
-  /// running | finished. Derived from the log; denormalised so a future lobby can filter without
-  /// replaying every game.
-  status    String   @default("running") @db.VarChar(16)
+  /// lobby | running | finished.
+  ///
+  /// Every game begins as a lobby, singleplayer included — a solo game is one whose only seat is
+  /// claimed by its creator, so it starts immediately and takes the same path as the rest. There is
+  /// no second code route to keep in step.
+  status    String   @default("lobby") @db.VarChar(16)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   commands  Command[]
+  seats     Seat[]
 
   @@index([status, updatedAt])
+}
+
+/// A place at a table, and the secret that proves it is yours.
+model Seat {
+  gameId String @db.VarChar(64)
+
+  /// **Zero-based, matching the tableau.**
+  ///
+  /// The model's `SOLO_SEAT` is 0, so a solo creator taking seat 0 makes every location a
+  /// singleplayer game writes identical to the ones it wrote before seats existed. Numbering these
+  /// from one would put an off-by-one between the database and the board, which is the sort of thing
+  /// that surfaces as a player editing somebody else's drawer. The screen says "Player 1"; the row
+  /// says 0.
+  ///
+  /// Also the turn order: seats are claimed in order and `awaiting` walks them.
+  seat   Int
+
+  /// What the player called themselves. Null until claimed; empty means they did not say, and the
+  /// screen falls back to the seat's own label.
+  name   String? @db.VarChar(40)
+
+  /// The secret that says a request is from this seat.
+  ///
+  /// Null while the seat is free, which is also the claim: an `UPDATE … WHERE token IS NULL` either
+  /// takes the seat or affects no rows, so two people opening the same link cannot both get in. Same
+  /// discipline as the command chain — the write adjudicates, not a read.
+  ///
+  /// **Leaves the server exactly once**, in the response to the join that mints it. Never in a game,
+  /// a seat list or a command.
+  token  String? @db.VarChar(64)
+
+  joined DateTime?
+
+  game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@id([gameId, seat])
+  @@unique([gameId, token])
 }
 
 /// One step of the game loop: a turn a seat committed, and everything that followed from it.
@@ -85,14 +126,17 @@ model Command {
   /// which would therefore let the chain fork at its root.
   prevSeq  Int
 
-  /// The seat that submitted this, or `server`. Authorization only: it cannot serve as the
-  /// concurrency guard, because two commands from the *same* seat both pass it — and a duplicate is
-  /// far more often a retry or a double-tap than a second player.
-  author   String   @db.VarChar(32)
+  /// The seat that submitted this, or null for the server's own writes.
+  ///
+  /// A number rather than a name, so it indexes the tableau directly and cannot be compared against
+  /// a seat with the wrong type. Authorization only: it cannot serve as the concurrency guard,
+  /// because two commands from the *same* seat both pass it — and a duplicate is far more often a
+  /// retry or a double-tap than a second player.
+  author   Int?
 
-  /// The seat that may act next; empty once the game is over. Read from the head to gate the next
+  /// The seat that may act next; null once the game is over. Read from the head to gate the next
   /// command without replaying anything.
-  awaiting String   @db.VarChar(32)
+  awaiting Int?
 
   /// Client-minted, and the deduplication guard.
   ///

@@ -16,6 +16,7 @@ import type {
   GameSettings,
   GameView,
   LogEntry,
+  SeatClaim,
   SubmitResult,
 } from '@hexnome/rules/wire'
 
@@ -52,11 +53,15 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: init?.body ? { 'content-type': 'application/json' } : undefined,
-  })
+async function request<T>(
+  path: string,
+  init?: RequestInit & { seatToken?: string },
+): Promise<T> {
+  const headers: Record<string, string> = {}
+  if (init?.body) headers['content-type'] = 'application/json'
+  if (init?.seatToken) headers.authorization = `Seat ${init.seatToken}`
+
+  const response = await fetch(`${BASE}${path}`, { ...init, headers })
 
   const text = await response.text()
   let body: unknown = text
@@ -73,11 +78,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function createGame(
   settings: Omit<GameSettings, 'createdAt'> & { createdAt?: number },
+  name: string,
   seed?: string,
-): Promise<GameView> {
+): Promise<SeatClaim> {
   return request('/games', {
     method: 'POST',
-    body: JSON.stringify({ settings: { ...settings, createdAt: settings.createdAt ?? Date.now() }, seed }),
+    body: JSON.stringify({
+      settings: { ...settings, createdAt: settings.createdAt ?? Date.now() },
+      name,
+      seed,
+    }),
   })
 }
 
@@ -92,14 +102,27 @@ export function getCommands(id: string, since = 0): Promise<CommandSlice> {
 export interface SubmitTurn {
   readonly cmdId: string
   readonly prevSeq: number
-  readonly author?: string
   readonly effects: readonly LogEntry[]
 }
 
-export function submitCommand(id: string, turn: SubmitTurn): Promise<SubmitResult> {
+/**
+ * Who this is comes from the token, not from the body — so there is no `author` to send.
+ *
+ * A header rather than a field: it is credentials, not content, and a client that could name its own
+ * seat could take somebody else's turn.
+ */
+export function submitCommand(id: string, turn: SubmitTurn, token: string): Promise<SubmitResult> {
   return request(`/games/${encodeURIComponent(id)}/commands`, {
     method: 'POST',
     body: JSON.stringify(turn),
+    seatToken: token,
+  })
+}
+
+export function joinGame(id: string, name: string): Promise<SeatClaim> {
+  return request(`/games/${encodeURIComponent(id)}/join`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
   })
 }
 
