@@ -176,7 +176,17 @@ export class GamesService {
         data: { token, name: cleanName(body?.name), joined: new Date() },
       })
       // Zero rows means somebody else took it between the read and the write. Try the next.
-      if (taken.count === 1) return { seat: seat.seat, token, game: await this.startIfFull(id, token) }
+      if (taken.count !== 1) continue
+
+      const game = await this.startIfFull(id, token)
+      /*
+       * Tell the waiting room. A join does not move the head — a lobby has no commands yet — so the
+       * seq carries nothing and is not meant to: watchers treat any message as "go and look", and
+       * what they look at in a lobby is the seat list. Without this the room would only notice a new
+       * player on its next poll.
+       */
+      this.heads.moved(id, game.head.seq)
+      return { seat: seat.seat, token, game }
     }
 
     throw new ConflictException('every seat at this table is taken')

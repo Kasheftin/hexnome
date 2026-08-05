@@ -170,24 +170,6 @@ interface Dial {
   readonly minor?: boolean
 }
 
-/**
- * Asked first, because everything else about a game's size follows from it.
- *
- * Only for a multiplayer game. A single-player table has one seat by definition, so a dial offering
- * to change it would be offering to make the game something else — the menu already asked that
- * question one step earlier.
- */
-const TABLE_DIALS: readonly Dial[] = [
-  {
-    key: 'players',
-    legend: 'Players',
-    short: 'players',
-    choices: MULTIPLAYER_COUNT_CHOICES,
-    model: players,
-    applies: () => kind.value === 'multiplayer',
-  },
-]
-
 const SUPPLY_DIALS: readonly Dial[] = [
   {
     key: 'platesPerRound',
@@ -322,7 +304,6 @@ interface DialSection {
 }
 
 const SECTIONS: readonly DialSection[] = [
-  { key: 'table', dials: TABLE_DIALS },
   { key: 'supply', dials: SUPPLY_DIALS },
   { key: 'drawer', title: 'Drawer', dials: DRAWER_DIALS },
   { key: 'stems', title: 'Receiving stems', dials: STEM_DIALS },
@@ -517,6 +498,31 @@ const selectedMode = computed(() => modeInfo(mode.value))
 
       <!-- Step 3 -->
       <template v-else>
+        <!--
+          Above the mode, because it is the question everything else answers to: the round supply
+          follows it, and a mode is a different game at two players than at four. On the main screen
+          rather than behind the gear for the same reason — it is not a dial, it is what you came to
+          choose.
+        -->
+        <fieldset
+          v-if="kind === 'multiplayer'"
+          class="group"
+        >
+          <legend>Players</legend>
+          <button
+            v-for="count in MULTIPLAYER_COUNT_CHOICES"
+            :key="count"
+            type="button"
+            class="option"
+            :class="{ chosen: players === count }"
+            :aria-pressed="players === count"
+            @click="players = count"
+          >
+            <span class="option-label">{{ count }}</span>
+            <span class="rounds">{{ defaultPlatesPerRound(count) }} plates a round</span>
+          </button>
+        </fieldset>
+
         <fieldset class="group">
           <legend>Mode</legend>
           <button

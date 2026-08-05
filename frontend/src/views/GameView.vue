@@ -18,6 +18,7 @@
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { joinGame, ApiError } from '@/api/games'
+import { watchHead, type HeadWatch } from '@/composables/useHeadWatch'
 import { useGameSync, type LoadedGame } from '@/composables/useGameSync'
 import { playerName, rememberName, rememberSeat } from '@/composables/useSeat'
 import LobbyPanel from '@/ui/LobbyPanel.vue'
@@ -42,13 +43,10 @@ const generation = shallowRef(0)
  */
 const mySeat = shallowRef<number | null>(null)
 
-/** How often a waiting room asks whether the last player has arrived. */
-const LOBBY_POLL_MS = 1500
-
 const name = shallowRef(playerName())
 const joining = shallowRef(false)
 const joinProblem = shallowRef('')
-let lobbyTimer: ReturnType<typeof setTimeout> | null = null
+let watcher: HeadWatch | null = null
 
 /**
  * Whose board is on screen.
@@ -59,14 +57,36 @@ let lobbyTimer: ReturnType<typeof setTimeout> | null = null
  */
 const viewedSeat = shallowRef(0)
 
+/**
+ * Load the game from scratch: the curtain, then the board.
+ *
+ * Only for arriving, or for starting again after a divergence. Everything that merely *updates* goes
+ * through `refresh`, which is the difference between a screen that changes and a screen that blinks.
+ */
 async function open(): Promise<void> {
   loaded.value = null
+  stopWatching()
   if (!gameId.value) {
     void router.replace('/')
     return
   }
+  if (await refresh()) generation.value++
+}
+
+/**
+ * Fetch the game again and update in place.
+ *
+ * **Nothing is cleared first**, and that is the whole point. Clearing `loaded` unmounts whatever is on
+ * screen and shows the curtain for as long as the request takes, so a waiting room that polled once a
+ * second flashed once a second. The panel is a live view of a value; replacing the value re-renders
+ * the parts that differ and leaves the rest alone.
+ *
+ * `generation` is deliberately not touched either: bumping it re-keys the board and throws away a
+ * running scene, which is not what "somebody else joined" should cost.
+ */
+async function refresh(): Promise<boolean> {
   const game = await sync.load(gameId.value)
-  if (!game) return
+  if (!game) return false
 
   /*
    * Which seat is mine comes from the server, worked out from the token we sent — not from the seat
@@ -74,30 +94,33 @@ async function open(): Promise<void> {
    * answer that can go stale, and a client trusting it could draw one board while playing another.
    */
   mySeat.value = game.game.you
-  viewedSeat.value = mySeat.value ?? 0
+  // Only on arrival: a refresh must not yank the view back from a board you chose to watch.
+  if (loaded.value === null) viewedSeat.value = game.game.you ?? 0
   loaded.value = game
-  generation.value++
 
-  if (game.game.status === 'lobby') waitForTable()
+  if (game.game.status === 'lobby') watchTable()
+  else stopWatching()
+  return true
 }
 
 /**
- * Watch a lobby until the last seat is taken.
+ * Watch a lobby until it fills.
  *
- * A poll rather than a socket, and the shape is the same either way: something says the game moved
- * and we reload. Replacing the timer later changes this function and nothing else.
+ * The same notifier the board uses, so a seat being taken travels the way a turn does — the server
+ * says the game moved and this goes and looks. A poll underneath means a socket that never connects
+ * only costs a second or two.
  */
-function waitForTable(): void {
-  stopWaiting()
-  lobbyTimer = setTimeout(() => { void open() }, LOBBY_POLL_MS)
+function watchTable(): void {
+  if (watcher !== null) return
+  watcher = watchHead(gameId.value, () => { void refresh() })
 }
 
-function stopWaiting(): void {
-  if (lobbyTimer !== null) clearTimeout(lobbyTimer)
-  lobbyTimer = null
+function stopWatching(): void {
+  watcher?.stop()
+  watcher = null
 }
 
-onBeforeUnmount(stopWaiting)
+onBeforeUnmount(stopWatching)
 
 /** Sit down, and remember the seat well enough to come back to it after a refresh. */
 async function takeSeat(): Promise<void> {
@@ -109,14 +132,14 @@ async function takeSeat(): Promise<void> {
   try {
     const claim = await joinGame(gameId.value, name.value)
     rememberSeat(gameId.value, { seat: claim.seat, token: claim.token })
-    await open()
+    await refresh()
   }
   catch (error) {
     joinProblem.value = error instanceof ApiError && error.status === 409
       ? 'Somebody took the last seat first. You can still watch.'
       : 'Could not reach the table. Try again.'
     // Whatever happened, the truth about the table has moved on — go and look.
-    await open()
+    await refresh()
   }
   finally {
     joining.value = false
