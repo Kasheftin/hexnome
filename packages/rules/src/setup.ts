@@ -30,7 +30,7 @@ import {
   type GameSettings,
 } from './gameSettings'
 import type { DealtPlate } from './deck'
-import type { Tableau, TableauOptions } from './tableau'
+import { boardHole, SOLO_SEAT, type Seat, type Tableau, type TableauOptions } from './tableau'
 
 /**
  * Half-extent of the board, in cells, measured from the centre.
@@ -85,6 +85,8 @@ export function tableauOptionsFor(settings: GameSettings): TableauOptions {
  * fewer places to put a drafted tile until they are spent. `freeDrawerSlots` counts them as taken
  * without knowing what they are, so the drawer's capacity rules need no special case.
  *
+ * One seat at a time: a four-player game calls this four times, once per seat, from the same deck.
+ *
  * Mutates the tableau it is given rather than returning entries, so that a `recordingTableau`
  * journals it exactly as it journals a turn. That is what makes the opening position the first
  * command rather than a special case beside the log.
@@ -93,8 +95,9 @@ export function openingPosition(
   tableau: Tableau,
   settings: GameSettings,
   starting: DealtPlate | undefined,
+  seat: Seat = SOLO_SEAT,
 ): void {
-  const centre = tableau.addPlate({ kind: 'board', hole: BOARD_CENTRE })
+  const centre = tableau.addPlate(boardHole(BOARD_CENTRE, seat))
   if (starting && centre) {
     // `fixed`: the plate's own tile, part of the plate and never separable from it.
     tableau.addTile(
@@ -106,8 +109,8 @@ export function openingPosition(
 
   const stems = settings.initialStems ?? DEFAULT_STEM_COUNT
   for (let i = 0; i < stems; i++) {
-    const slot = tableau.freeDrawerSlots()[0]
+    const slot = tableau.freeDrawerSlots(seat)[0]
     if (slot === undefined) break
-    tableau.addStem(slot)
+    tableau.addStem(slot, seat)
   }
 }

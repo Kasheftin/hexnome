@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { applyEntry, createGameLog, recordingTableau, replayTableau } from './gameLog'
+import { reachesAnotherSeat } from './dealer'
+import { applyEntry, createGameLog, recordingTableau, replayTableau, type LogEntry } from './gameLog'
 import { hexRectangle } from './hex'
 import {
   createTableau,
@@ -209,5 +210,77 @@ describe('the unstated seat', () => {
     expect(tile.location).toEqual({ kind: 'drawer', slot: 2 })
     expect(drawerSlot(2)).not.toHaveProperty('seat')
     expect(boardHole(CENTRE)).not.toHaveProperty('seat')
+  })
+})
+
+/*
+ * The hole a seat token alone does not close.
+ *
+ * The token says which seat a command came from. Nothing in a *location* is bounded, so a command may
+ * name any seat's board — and it would be verified as legal, because it is legal; it is simply not
+ * that player's to make.
+ */
+describe('a turn may only reach its own seat', () => {
+  function board() {
+    const t = createTableau(OPTIONS)
+    t.addPlate(boardHole(CENTRE, 0))
+    t.addPlate(boardHole(CENTRE, 1))
+    return t
+  }
+
+  it('allows a turn that stays at home', () => {
+    expect(reachesAnotherSeat(board(), [{ op: 'addStem', slot: 4, seat: 1 }], 1)).toBe(-1)
+  })
+
+  it('refuses a plate placed on another player\'s board', () => {
+    const onTheirBoard: LogEntry = {
+      op: 'addPlate',
+      location: boardHole({ q: 1, r: 1 }, 0),
+      rotation: 0,
+      faceDown: false,
+    }
+    expect(reachesAnotherSeat(board(), [onTheirBoard], 1)).toBe(0)
+  })
+
+  it('refuses a tile put into another player\'s drawer', () => {
+    const intoTheirDrawer: LogEntry = {
+      op: 'addTile',
+      spec: { color: 1, value: 1 },
+      location: drawerSlot(2, 0),
+      fixed: false,
+    }
+    expect(reachesAnotherSeat(board(), [intoTheirDrawer], 1)).toBe(0)
+  })
+
+  it('refuses a stem claimed for another player', () => {
+    expect(reachesAnotherSeat(board(), [{ op: 'addStem', slot: 4, seat: 0 }], 1)).toBe(0)
+  })
+
+  /* Naming a piece is as good as reaching for it: you may not rotate an opponent's plate. */
+  it('refuses a move of a piece belonging to someone else', () => {
+    const t = board()
+    const theirs = t.platesOnBoard(0)[0]!
+    expect(reachesAnotherSeat(t, [{ op: 'rotatePlate', id: theirs.id, steps: 1 }], 1)).toBe(0)
+    expect(reachesAnotherSeat(board(), [{ op: 'rotatePlate', id: theirs.id, steps: 1 }], 0)).toBe(-1)
+  })
+
+  /*
+   * The shared source belongs to nobody, so drafting out of it is allowed — and the tile becomes
+   * yours in the same turn, which is why the check reads the board as it goes rather than up front.
+   */
+  it('allows drafting from the shared source', () => {
+    const t = board()
+    const loose = t.addTile({ color: 2, value: 2 }, { kind: 'source', lot: 0, index: 0 })!
+    const draft: LogEntry[] = [{ op: 'moveTile', id: loose.id, location: drawerSlot(0, 1) }]
+    expect(reachesAnotherSeat(t, draft, 1)).toBe(-1)
+  })
+
+  it('reports which effect reached too far', () => {
+    const t = board()
+    const turn: LogEntry[] = [
+      { op: 'addStem', slot: 4, seat: 1 },
+      { op: 'addStem', slot: 5, seat: 0 },
+    ]
+    expect(reachesAnotherSeat(t, turn, 1)).toBe(1)
   })
 })

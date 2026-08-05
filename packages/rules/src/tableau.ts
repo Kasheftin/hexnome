@@ -273,6 +273,7 @@ export interface Tableau {
   /** A plate's own tile — the one it arrived with. Absent while the plate is face down. */
   plateToken(plateId: string): Tile | undefined
 
+  /** Every stem in the game, or just one seat's. Unscoped is what conservation counts. */
   stems(seat?: Seat): readonly Stem[]
   /**
    * Put a stem in a drawer slot.
@@ -1069,7 +1070,7 @@ export function createTableau({
       return found
     },
 
-    stems: (seat = SOLO_SEAT) => [...stemsById.values()].filter(stem => stem.seat === seat),
+    stems: seat => [...stemsById.values()].filter(stem => seat === undefined || stem.seat === seat),
 
     addStem(slot, seat = SOLO_SEAT) {
       if (!inRange(slot, drawerSlots)) return undefined

@@ -33,7 +33,16 @@ import { applyEntry, type LogEntry } from './gameLog'
 import { createRecyclingBag } from './recycling'
 import { tableauOptionsFor } from './setup'
 import { hasRoomToShift, platesToReveal, pushLot } from './source'
-import { createTableau, type PlateSpec, type Tableau, type TileSpec } from './tableau'
+import {
+  createTableau,
+  seatOf,
+  SOLO_SEAT,
+  type PlateSpec,
+  type Seat,
+  type Tableau,
+  type TileLocation,
+  type TileSpec,
+} from './tableau'
 import type { GameSettings } from './gameSettings'
 
 /** Seats dealt an opening plate. One, until there are more. */
@@ -241,4 +250,69 @@ export function applyCommand(
 
   dealer.recycle(spentTiles, spentPlates)
   return { ok: true, refusedAt: -1 }
+}
+
+/**
+ * The seat a piece belongs to, or `undefined` for one nobody owns yet — a tile loose in the shared
+ * source, a face-down plate in a lot.
+ */
+export function seatOfPiece(tableau: Tableau, id: string): Seat | undefined {
+  const tile = tableau.tile(id)
+  if (tile) {
+    if (tile.location.kind === 'drawer') return seatOf(tile.location)
+    if (tile.location.kind === 'onPlate') return seatOfPiece(tableau, tile.location.plateId)
+    return undefined
+  }
+  const plate = tableau.plate(id)
+  if (plate) return plate.location.kind === 'source' ? undefined : seatOf(plate.location)
+  return tableau.stems().find(stem => stem.id === id)?.seat
+}
+
+/**
+ * Everything a turn touches must belong to the seat that submitted it.
+ *
+ * **A token proves who you are; it does not stop you naming somebody else's board.** Nothing bounds
+ * the seat in a location, so without this check a player can submit a perfectly legal placement onto
+ * an opponent's board, or move one of their tiles into their own drawer — and verification would
+ * accept it, because it *is* legal, just not theirs to do.
+ *
+ * Read against the board as it stands before the turn, so a piece drafted out of the shared source
+ * during the turn is unowned when it is taken and this seat's by the time it lands.
+ *
+ * Returns the index of the first effect that reaches somewhere it should not, or −1.
+ */
+export function reachesAnotherSeat(
+  tableau: Tableau,
+  entries: readonly LogEntry[],
+  seat: Seat,
+): number {
+  const mine = (where: Seat | undefined) => where === undefined || where === seat
+
+  for (const [index, entry] of entries.entries()) {
+    switch (entry.op) {
+      case 'addTile':
+      case 'moveTile':
+        if (!mine(seatOfLocation(tableau, entry.location))) return index
+        break
+      case 'addPlate':
+      case 'movePlate':
+        if (entry.location.kind !== 'source' && seatOf(entry.location) !== seat) return index
+        break
+      case 'addStem':
+        if ((entry.seat ?? SOLO_SEAT) !== seat) return index
+        break
+      default:
+        break
+    }
+    // Whatever it names must also be a piece this seat is allowed to touch.
+    if ('id' in entry && !mine(seatOfPiece(tableau, entry.id))) return index
+    applyEntry(tableau, entry)
+  }
+  return -1
+}
+
+function seatOfLocation(tableau: Tableau, location: TileLocation): Seat | undefined {
+  if (location.kind === 'drawer') return seatOf(location)
+  if (location.kind === 'onPlate') return seatOfPiece(tableau, location.plateId)
+  return undefined
 }
