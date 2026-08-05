@@ -18,6 +18,7 @@
 import { computed, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameSync, type LoadedGame } from '@/composables/useGameSync'
+import { seatIn } from '@/composables/useSeat'
 import GameBoard from './GameBoard.vue'
 
 const route = useRoute()
@@ -30,6 +31,24 @@ const loaded = shallowRef<LoadedGame | null>(null)
 /** Bumped to rebuild the board from scratch. See the note above. */
 const generation = shallowRef(0)
 
+/**
+ * The seat this browser holds, from the token kept when it joined — or null.
+ *
+ * Null is a spectator, and deliberately not an error: anyone with the link may watch. It is never
+ * their turn, because their seat matches nobody's, so every gate downstream refuses them without
+ * needing to know that spectators exist.
+ */
+const mySeat = shallowRef<number | null>(null)
+
+/**
+ * Whose board is on screen.
+ *
+ * Separate from `mySeat`, which is the whole point: watching another player is this changing and
+ * nothing else. It seeds from your own seat, and falls back to the first — the natural thing to show
+ * somebody who has only been sent a link.
+ */
+const viewedSeat = shallowRef(0)
+
 async function open(): Promise<void> {
   loaded.value = null
   if (!gameId.value) {
@@ -38,6 +57,8 @@ async function open(): Promise<void> {
   }
   const game = await sync.load(gameId.value)
   if (game) {
+    mySeat.value = seatIn(gameId.value)?.seat ?? null
+    viewedSeat.value = mySeat.value ?? 0
     loaded.value = game
     generation.value++
   }
@@ -60,12 +81,38 @@ const problem = computed(() => sync.problem())
 <template>
   <GameBoard
     v-if="loaded"
-    :key="generation"
+    :key="`${generation}:${viewedSeat}`"
     :game="loaded.game"
     :commands="loaded.commands"
+    :my-seat="mySeat"
+    :viewed-seat="viewedSeat"
     :sync="sync"
     @diverged="onDiverged"
   />
+
+  <!--
+    Whose board to look at. Outside the board rather than inside it, because changing it remounts the
+    board — the key includes it — and a control cannot survive unmounting itself.
+  -->
+  <nav
+    v-if="loaded && loaded.game.seats.length > 1"
+    class="seats"
+    aria-label="Whose board to watch"
+  >
+    <button
+      v-for="seat in loaded.game.seats"
+      :key="seat.seat"
+      type="button"
+      :class="{ watching: seat.seat === viewedSeat }"
+      :aria-pressed="seat.seat === viewedSeat"
+      @click="viewedSeat = seat.seat"
+    >
+      {{ seat.name || `Player ${seat.seat + 1}` }}<span
+        v-if="seat.seat === mySeat"
+        class="you"
+      >you</span>
+    </button>
+  </nav>
 
   <div
     v-else
@@ -104,6 +151,55 @@ const problem = computed(() => sync.problem())
 </template>
 
 <style scoped>
+/*
+ * Top right, where the scoring panel sits, so the two read as one column about the table rather than
+ * as chrome scattered around the board.
+ */
+.seats {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.seats button {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 7px 12px;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  background: rgb(21 23 28 / 92%);
+  color: #79808f;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms;
+}
+
+.seats button:hover,
+.seats button.watching {
+  border-color: #7d6a41;
+  color: #e8c878;
+}
+
+.you {
+  color: #8fe6c0;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.seats button:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 2px;
+}
+
 .curtain {
   position: fixed;
   inset: 0;

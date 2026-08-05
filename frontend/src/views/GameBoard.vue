@@ -67,6 +67,7 @@ import {
   type TableauOptions,
   type TileLocation,
 } from '@hexnome/rules/tableau'
+import { seatView } from '@hexnome/rules/seatView'
 import { tableauOptionsFor } from '@hexnome/rules/setup'
 import {
   IDLE,
@@ -126,6 +127,15 @@ const props = defineProps<{
   game: GameView
   /** Every command the server has recorded, oldest first. The opening position is the first of them. */
   commands: readonly CommandView[]
+  /**
+   * The seat this browser holds, or null for somebody who only has the link.
+   *
+   * A spectator is not a special case: with no seat of their own it is never their turn, so every
+   * gate that asks "is this mine?" answers no without being told about spectators at all.
+   */
+  mySeat: number | null
+  /** Whose board is on screen. Starts as `mySeat`, or seat 0 for someone just watching. */
+  viewedSeat: number
   sync: GameSync
 }>()
 
@@ -245,10 +255,28 @@ const history = props.commands.flatMap(replayOf)
 
 const unrecorded = replayTableau(history, tableauOptions)
 
-const tableau = recordingTableau(unrecorded, (entry) => {
+/** Every mutation, journalled and gathered into the turn being built. */
+const recording = recordingTableau(unrecorded, (entry) => {
   log.append(entry)
   batch.push(entry)
 })
+
+/**
+ * The board this screen is about — one seat's view of the whole game.
+ *
+ * The state above holds every player's board and drawer; this decides which of them the scene is
+ * asking about. Pointed at your own seat it is writable, and at anybody else's it refuses every
+ * mutation, so watching another player is the *real* renderer rather than a picture of one, and
+ * nothing downstream has to remember it is only looking.
+ *
+ * Fixed for the lifetime of this component. Changing which seat you are watching remounts the board
+ * — `GameView` keys on it — which costs one replay and keeps the hundred call sites below reading a
+ * plain constant instead of a reactive one.
+ */
+const tableau = seatView(recording, props.viewedSeat, props.viewedSeat === props.mySeat)
+
+/** True when this is your own board and you may act on it at all. Turn order is a separate gate. */
+const isMyBoard = computed(() => props.viewedSeat === props.mySeat)
 
 /*
  * The journal starts where the server's log ends, not empty. The results accordion replays a prefix
@@ -383,6 +411,19 @@ const freeBays = computed(() => {
   return tableau.freePlateSlots()
 })
 
+/**
+ * Whether this browser may act at all right now.
+ *
+ * Two questions, and they are genuinely different: *is this my board* — watching another player is a
+ * view of the real thing, not a picture, so it has to refuse — and *is it my turn*. A spectator fails
+ * the first without spectators being mentioned anywhere, because a seat of `null` matches nobody.
+ *
+ * The model refuses anyway: `tableau` is a read-only view unless this is your own seat. This is the
+ * same answer said early enough to grey a button instead of swallowing a click.
+ */
+const canAct = computed(() =>
+  isMyBoard.value && props.game.head.awaiting === props.mySeat)
+
 const options = computed(() => turnOptions({
   sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
   sourcePlates: sourceItems.value.filter(item => item.kind === 'plate').length,
@@ -390,6 +431,23 @@ const options = computed(() => turnOptions({
   freeDrawerSlots: freeSlots.value.length,
   freePlateSlots: freeBays.value.length,
 }))
+
+/** Nothing is offered when it is not yours to do. `waitingFor` says why, in the bar's own words. */
+const liveOptions = computed(() =>
+  canAct.value ? options.value : { take: false, put: false, pass: false })
+
+/** Whose turn it is, named, or empty when it is yours. */
+const waitingFor = computed(() => {
+  if (canAct.value) return ''
+  if (!isMyBoard.value) {
+    const seat = props.game.seats[props.viewedSeat]
+    return `Watching ${seat?.name || `Player ${props.viewedSeat + 1}`}`
+  }
+  const awaiting = props.game.head.awaiting
+  if (awaiting === null) return 'The game is over'
+  const seat = props.game.seats[awaiting]
+  return `Waiting for ${seat?.name || `Player ${awaiting + 1}`}`
+})
 
 const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.selected : [])
 
@@ -456,7 +514,14 @@ const completed = computed(() => completedStrategies(sourceItems.value, selected
  * In singleplayer it is always your turn, so this is a status line. Multiplayer will put
  * "Player 2's turn" here and hide the actions.
  */
-const turnLabel = computed(() => 'Your turn')
+/**
+ * The bar's headline: what you may do, or who everyone is waiting for.
+ *
+ * "Your turn" was the only possibility when there was one player. Now it is the *exception* — most
+ * of a four-player game is spent watching — so the bar says whose turn it is by name, and offers
+ * nothing while it is not yours.
+ */
+const turnLabel = computed(() => waitingFor.value || 'Your turn')
 
 function chooseAction(action: TurnAction): void {
   if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
@@ -1261,7 +1326,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <ActionBar
         v-if="announcing === null && !showResults && !gameOver"
         :phase="phase"
-        :options="options"
+        :options="liveOptions"
         :selection="selection"
         :can-confirm="canConfirm"
         :fits="fits"
