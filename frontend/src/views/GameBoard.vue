@@ -490,6 +490,9 @@ const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.s
  */
 const inferring = computed(() =>
   INFER_ACTIONS_FROM_GESTURES
+  // Nothing is inferred from a gesture when there is nothing you may do. The action bar being
+  // greyed is not enough: touching the source *is* a way to begin a draft, so it has to refuse too.
+  && canAct.value
   && phase.value.kind === 'idle'
   && announcing.value === null
   && !showResults.value
@@ -549,7 +552,13 @@ const completed = computed(() => completedStrategies(sourceItems.value, selected
  */
 const turnLabel = computed(() => waitingFor.value || 'Your turn')
 
+/*
+ * Every route into a turn checks `canAct` for itself, rather than trusting the buttons to be
+ * disabled. There are three of them — the bar, a gesture on the source, a drag out of the drawer —
+ * and a disabled button is a statement about a button, not about the game.
+ */
 function chooseAction(action: TurnAction): void {
+  if (!canAct.value) return
   if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
   else if (action === 'put') phase.value = { kind: 'putting' }
   else endRoundByPassing()
@@ -858,7 +867,6 @@ function onCardShown(): void {
 onBeforeUnmount(clearCardTimers)
 
 async function endTurn(): Promise<void> {
-  count.value = nextTurn(count.value)
   phase.value = IDLE
 
   /*
@@ -873,6 +881,13 @@ async function endTurn(): Promise<void> {
     emit('diverged')
     return
   }
+  /*
+   * The turn number advances only once the server has taken the command, and that ordering is a bug
+   * fixed rather than a preference: incrementing first meant a refused turn still moved the counter,
+   * so a player waiting their turn could press Take, achieve nothing, and watch the round number
+   * climb anyway.
+   */
+  count.value = nextTurn(count.value)
   dealtByServer = [...answer]
 
   /*
@@ -935,6 +950,7 @@ function onSelectTile(id: string): void {
 }
 
 function confirmTake(): void {
+  if (!canAct.value) return
   if (!canConfirm.value) return
   const slots = [...freeSlots.value]
   const bays = [...freeBays.value]
@@ -1143,6 +1159,7 @@ function awardEnclosedAnchors(): void {
 }
 
 function applyPayment(): void {
+  if (!canAct.value) return
   const current = phase.value
   if (current.kind !== 'paying' || !canApply.value) return
 
