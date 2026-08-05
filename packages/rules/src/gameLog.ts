@@ -51,7 +51,11 @@ import {
 export type LogEntry =
   | { readonly op: 'addTile', readonly spec: TileSpec, readonly location: TileLocation, readonly fixed: boolean }
   | { readonly op: 'addPlate', readonly location: PlateLocation, readonly rotation: number, readonly faceDown: boolean }
-  | { readonly op: 'addStem', readonly slot: number }
+  /**
+   * `seat` is omitted for seat zero, so a singleplayer journal is byte-identical to the one this
+   * game wrote before seats existed — including the entries already in the database.
+   */
+  | { readonly op: 'addStem', readonly slot: number, readonly seat?: number }
   | { readonly op: 'moveTile', readonly id: string, readonly location: TileLocation }
   | { readonly op: 'movePlate', readonly id: string, readonly location: PlateLocation }
   | { readonly op: 'moveStem', readonly id: string, readonly slot: number }
@@ -120,9 +124,9 @@ export function recordingTableau(inner: Tableau, record: (entry: LogEntry) => vo
       return plate
     },
 
-    addStem(slot) {
-      const stem = inner.addStem(slot)
-      if (stem) record({ op: 'addStem', slot })
+    addStem(slot, seat) {
+      const stem = inner.addStem(slot, seat)
+      if (stem) record(seat ? { op: 'addStem', slot, seat } : { op: 'addStem', slot })
       return stem
     },
 
@@ -191,7 +195,7 @@ export function applyEntry(tableau: Tableau, entry: LogEntry): boolean {
       return !!tableau.addTile(entry.spec, entry.location, { fixed: entry.fixed })
     case 'addPlate':
       return !!tableau.addPlate(entry.location, { rotation: entry.rotation, faceDown: entry.faceDown })
-    case 'addStem': return !!tableau.addStem(entry.slot)
+    case 'addStem': return !!tableau.addStem(entry.slot, entry.seat)
     case 'moveTile': return !!tableau.moveTile(entry.id, entry.location)
     case 'movePlate': return !!tableau.movePlate(entry.id, entry.location)
     case 'moveStem': return !!tableau.moveStem(entry.id, entry.slot)

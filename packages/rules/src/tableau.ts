@@ -30,14 +30,51 @@ import {
 } from './placement'
 import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
 
+/**
+ * Whose board, drawer or bays a place belongs to. Omitted means {@link SOLO_SEAT}.
+ *
+ * Optional rather than required, and that is the whole reason a four-player game did not need the
+ * game rewritten around it: `{kind: 'drawer', slot: 3}` still means what it always meant. A
+ * singleplayer game never mentions a seat and never has to.
+ *
+ * Only the three *owned* places carry one. `onPlate` does not — the plate it names already belongs to
+ * somebody — and `source` does not, because there is one source and everyone drafts from it.
+ */
+export type Seat = number
+
+/** The seat a place belongs to when it does not say. */
+export const SOLO_SEAT: Seat = 0
+
+/**
+ * A drawer slot, naming the seat only when it is not the default.
+ *
+ * The omission is deliberate and load-bearing. Locations are written into the journal and stored as
+ * JSON, so emitting `seat: 0` would change every entry a singleplayer game produces — and would not
+ * match the entries already in the database. Anything comparing locations by value, tests included,
+ * would also start seeing a field that used to be absent. Unstated stays unstated.
+ */
+export function drawerSlot(slot: number, seat: Seat = SOLO_SEAT): TileLocation {
+  return seat === SOLO_SEAT ? { kind: 'drawer', slot } : { kind: 'drawer', slot, seat }
+}
+
+/** A board hole, naming the seat only when it is not the default. See {@link drawerSlot}. */
+export function boardHole(hole: Axial, seat: Seat = SOLO_SEAT): PlateLocation {
+  return seat === SOLO_SEAT ? { kind: 'board', hole } : { kind: 'board', hole, seat }
+}
+
+/** A plate bay, naming the seat only when it is not the default. See {@link drawerSlot}. */
+export function plateBay(slot: number, seat: Seat = SOLO_SEAT): PlateLocation {
+  return seat === SOLO_SEAT ? { kind: 'plateSlot', slot } : { kind: 'plateSlot', slot, seat }
+}
+
 export type PlateLocation =
-  | { readonly kind: 'board', readonly hole: Axial }
-  | { readonly kind: 'plateSlot', readonly slot: number }
+  | { readonly kind: 'board', readonly hole: Axial, readonly seat?: Seat }
+  | { readonly kind: 'plateSlot', readonly slot: number, readonly seat?: Seat }
   /** Face-down in a lot of the shared source, waiting to be picked. */
   | { readonly kind: 'source', readonly lot: number }
 
 export type TileLocation =
-  | { readonly kind: 'drawer', readonly slot: number }
+  | { readonly kind: 'drawer', readonly slot: number, readonly seat?: Seat }
   | { readonly kind: 'onPlate', readonly plateId: string, readonly petal: number }
   /**
    * Lying loose in a lot of the shared source.
@@ -141,6 +178,8 @@ export interface Stem {
   readonly id: string
   /** Always a drawer slot. Stems have nowhere else to be. */
   readonly slot: number
+  /** Whose drawer. Defaults to {@link SOLO_SEAT}, so a singleplayer stem never mentions one. */
+  readonly seat: Seat
 }
 
 /**
@@ -169,17 +208,35 @@ export interface Coverage {
   readonly petal: number | null
 }
 
+/**
+ * The seat a place belongs to, or {@link SOLO_SEAT} where it does not say.
+ *
+ * One function, used by both key builders and by every query that scopes to a board, so "unstated
+ * means seat zero" is decided once. Spelling it out at each site is how the two would eventually
+ * disagree about a location with no seat.
+ */
+export function seatOf(location: PlateLocation | TileLocation): Seat {
+  return 'seat' in location ? location.seat ?? SOLO_SEAT : SOLO_SEAT
+}
+
+/*
+ * Occupancy runs entirely through these two functions, which is what kept seats from spreading. Both
+ * take the seat into the key for the owned places and leave it out of the shared ones: two players
+ * may hold the centre hole at once, and may not hold one source lot at once.
+ *
+ * `onPlate` needs no seat because the plate id resolves to one, and a plate cannot be in two places.
+ */
 export function plateLocationKey(location: PlateLocation): string {
   switch (location.kind) {
-    case 'board': return `plate:board:${axialKey(location.hole)}`
-    case 'plateSlot': return `plate:slot:${location.slot}`
+    case 'board': return `plate:board:${seatOf(location)}:${axialKey(location.hole)}`
+    case 'plateSlot': return `plate:slot:${seatOf(location)}:${location.slot}`
     case 'source': return `plate:source:${location.lot}`
   }
 }
 
 export function tileLocationKey(location: TileLocation): string {
   switch (location.kind) {
-    case 'drawer': return `tile:drawer:${location.slot}`
+    case 'drawer': return `tile:drawer:${seatOf(location)}:${location.slot}`
     case 'onPlate': return `tile:plate:${location.plateId}:${location.petal}`
     case 'source': return `tile:source:${location.lot}:${location.index}`
   }
@@ -201,8 +258,11 @@ export interface Tableau {
    * board" has to filter, and a caller that forgets scores the player's hand. A plate's own `fixed`
    * tile is **included**: it counts for scoring like any other (docs/game-design.md).
    */
-  tilesOnBoard(): readonly Tile[]
+  tilesOnBoard(seat?: Seat): readonly Tile[]
+  /** Every plate in the game, all seats and the source included. See {@link platesOnBoard}. */
   plates(): readonly Plate[]
+  /** Just the plates standing on one seat's board — what a board view and scoring want. */
+  platesOnBoard(seat?: Seat): readonly Plate[]
   plate(id: string): Plate | undefined
   tile(id: string): Tile | undefined
 
@@ -213,14 +273,14 @@ export interface Tableau {
   /** A plate's own tile — the one it arrived with. Absent while the plate is face down. */
   plateToken(plateId: string): Tile | undefined
 
-  stems(): readonly Stem[]
+  stems(seat?: Seat): readonly Stem[]
   /**
    * Put a stem in a drawer slot.
    *
    * Shares the slot index with tiles, so a stem and a tile can never occupy the same slot and
    * `freeDrawerSlots` counts stems as taken without knowing what they are.
    */
-  addStem(slot: number): Stem | undefined
+  addStem(slot: number, seat?: Seat): Stem | undefined
   /**
    * Move a stem to another drawer slot.
    *
@@ -231,7 +291,7 @@ export interface Tableau {
   moveStem(id: string, slot: number): boolean
 
   /** Which plate, if any, covers this board cell, and as what. */
-  coverageAt(cell: Axial): Coverage | undefined
+  coverageAt(cell: Axial, seat?: Seat): Coverage | undefined
   /** The board cell a tile sits on, if its plate is on the board. */
   cellOfTile(id: string): Axial | undefined
 
@@ -297,7 +357,7 @@ export interface Tableau {
   plateEnclosureIsStrict(plateId: string): boolean
 
   /** Every anchor on the board right now — plate holes, plus any bare cell the plates have wrapped. */
-  anchors(): readonly Anchor[]
+  anchors(seat?: Seat): readonly Anchor[]
   /** Do all six cells around this one hold a tile? */
   anchorIsEnclosed(cell: Axial): boolean
   /** Is the ring of six around this cell connected pair-to-pair? */
@@ -354,9 +414,9 @@ export interface Tableau {
    * plate covers it. Null for the hole or an uncovered cell, which is what makes
    * "tiles only go on plates" fall out of target resolution.
    */
-  petalAt(cell: Axial): TileLocation | null
+  petalAt(cell: Axial, seat?: Seat): TileLocation | null
 
-  freeDrawerSlots(): number[]
+  freeDrawerSlots(seat?: Seat): number[]
   freePlateSlots(): number[]
   isBoardCell(cell: Axial): boolean
 }
@@ -409,19 +469,30 @@ export function createTableau({
   const stemsById = new Map<string, Stem>()
   /** locationKey → id, for both kinds. Occupancy lives here and nowhere else. */
   const occupants = new Map<string, string>()
-  /** cellKey → coverage. Derived from the plates; rebuilt whenever they change. */
+  /**
+   * `seat:cellKey` → coverage. Derived from the plates; rebuilt whenever they change.
+   *
+   * Keyed by seat as well as cell for the same reason occupancy is: every player has their own board
+   * and the same hole on two of them is two different places.
+   */
   let coverage = new Map<string, Coverage>()
   let nextId = 1
+
+  /** The coverage key for a cell on one seat's board. */
+  function coverKey(cell: Axial, seat: Seat): string {
+    return `${seat}:${axialKey(cell)}`
+  }
 
   function reindexCoverage(): void {
     const next = new Map<string, Coverage>()
     for (const plate of platesById.values()) {
       if (plate.location.kind !== 'board') continue
+      const seat = seatOf(plate.location)
       const cellsOfPlate = plateCells(plate.location.hole)
       cellsOfPlate.forEach((cell, index) => {
         // plateCells puts the hole first, then the six directions in order. A cell lying in
         // direction d holds logical petal (d + rotation): the plate turned under it.
-        next.set(axialKey(cell), {
+        next.set(coverKey(cell, seat), {
           plateId: plate.id,
           petal: index === 0 ? null : normalizePetal(index - 1 + plate.rotation),
         })
@@ -434,10 +505,10 @@ export function createTableau({
     return boardCells.has(axialKey(cell))
   }
 
-  function plateFits(hole: Axial, movingId?: string): boolean {
+  function plateFits(hole: Axial, movingId?: string, seat: Seat = SOLO_SEAT): boolean {
     for (const cell of plateCells(hole)) {
       if (!isBoardCell(cell)) return false
-      const covered = coverage.get(axialKey(cell))
+      const covered = coverage.get(coverKey(cell, seat))
       // Its own cells are fine — putting a plate back where it is, is a no-op.
       if (covered && covered.plateId !== movingId) return false
     }
@@ -460,10 +531,11 @@ export function createTableau({
    * board has nothing to touch at all — with no other plates, this is vacuously true and anywhere is
    * legal. That is what lets the opening plate land in the middle of an empty board.
    */
-  function plateConnects(hole: Axial, movingId?: string): boolean {
+  function plateConnects(hole: Axial, movingId?: string, seat: Seat = SOLO_SEAT): boolean {
+    // Only this seat's board counts. Another player's plates are not something to connect to.
     let others = false
     for (const plate of platesById.values()) {
-      if (plate.location.kind === 'board' && plate.id !== movingId) {
+      if (plate.location.kind === 'board' && seatOf(plate.location) === seat && plate.id !== movingId) {
         others = true
         break
       }
@@ -476,7 +548,7 @@ export function createTableau({
         const key = axialKey(axialAdd(cell, dir))
         // A cell of the plate itself is not something it can be connected *to*.
         if (own.has(key)) continue
-        const covered = coverage.get(key)
+        const covered = coverage.get(coverKey(axialAdd(cell, dir), seat))
         if (covered && covered.plateId !== movingId) return true
       }
     }
@@ -538,17 +610,17 @@ export function createTableau({
   }
 
   /** Put a tile or stem in a drawer slot, assuming the slot has already been vacated. */
-  function seatInTileSlot(id: string, slot: number): void {
-    const key = tileLocationKey({ kind: 'drawer', slot })
+  function seatInTileSlot(id: string, slot: number, seat: Seat = SOLO_SEAT): void {
+    const key = tileLocationKey({ kind: 'drawer', slot, seat })
     const stem = stemsById.get(id)
     if (stem) {
-      stemsById.set(id, { id, slot })
+      stemsById.set(id, { id, slot, seat })
       occupants.set(key, id)
       return
     }
     const tile = tilesById.get(id)
     if (!tile) return
-    tilesById.set(id, { ...tile, location: { kind: 'drawer', slot } })
+    tilesById.set(id, { ...tile, location: drawerSlot(slot, seat) })
     occupants.set(key, id)
   }
 
@@ -561,8 +633,8 @@ export function createTableau({
   }
 
   /** What tile, if any, is on this cell right now. */
-  function settledTileAt(cell: Axial): Tile | undefined {
-    const covered = coverage.get(axialKey(cell))
+  function settledTileAt(cell: Axial, seat: Seat = SOLO_SEAT): Tile | undefined {
+    const covered = coverage.get(coverKey(cell, seat))
     if (!covered || covered.petal === null) return undefined
     const id = occupants.get(
       tileLocationKey({ kind: 'onPlate', plateId: covered.plateId, petal: covered.petal }),
@@ -592,7 +664,9 @@ export function createTableau({
     hole?: Axial
     rotation?: number
     landing?: { cell: Axial, spec: TileSpec }
+    seat?: Seat
   }): (cell: Axial) => TileSpec | undefined {
+    const seat = move.seat ?? SOLO_SEAT
     const arriving = new Map<string, TileSpec>()
     if (move.landing) arriving.set(axialKey(move.landing.cell), move.landing.spec)
     if (move.plateId !== undefined && move.hole !== undefined) {
@@ -606,10 +680,10 @@ export function createTableau({
       const key = axialKey(cell)
       const incoming = arriving.get(key)
       if (incoming) return incoming
-      const covered = coverage.get(key)
+      const covered = coverage.get(coverKey(cell, seat))
       // Everything the moving plate used to cover is empty now — it has gone.
       if (!covered || covered.plateId === move.plateId) return undefined
-      const settled = settledTileAt(cell)
+      const settled = settledTileAt(cell, seat)
       return settled === undefined || settled.id === move.tileId ? undefined : settled
     }
   }
@@ -628,10 +702,10 @@ export function createTableau({
   }
 
   /** Drawer slots holding neither a tile nor a stem, in order. */
-  function freeDrawerSlotList(): number[] {
+  function freeDrawerSlotList(seat: Seat = SOLO_SEAT): number[] {
     const free: number[] = []
     for (let slot = 0; slot < drawerSlots; slot++) {
-      if (!occupants.has(tileLocationKey({ kind: 'drawer', slot }))) free.push(slot)
+      if (!occupants.has(tileLocationKey(drawerSlot(slot, seat)))) free.push(slot)
     }
     return free
   }
@@ -710,11 +784,22 @@ export function createTableau({
     occupied: Axial[]
   }
 
-  function boardPlatesWith(move?: PlateMove): { id: string, hole: Axial, rotation: number }[] {
+  /**
+   * The plates standing on one seat's board, with a move imagined as already made.
+   *
+   * The single place the anchor and enclosure machinery reads the board, which is why the seat filter
+   * lives here: everything downstream — rings, rewards, whether a placement is enclosed — is scoped
+   * by this one `continue`. Another player's plates are on another board and must not count towards
+   * enclosing yours.
+   */
+  function boardPlatesWith(
+    move?: PlateMove,
+    seat: Seat = SOLO_SEAT,
+  ): { id: string, hole: Axial, rotation: number }[] {
     const list: { id: string, hole: Axial, rotation: number }[] = []
     for (const plate of platesById.values()) {
       if (plate.id === move?.plateId) continue
-      if (plate.location.kind === 'board') {
+      if (plate.location.kind === 'board' && seatOf(plate.location) === seat) {
         list.push({ id: plate.id, hole: plate.location.hole, rotation: plate.rotation })
       }
     }
@@ -726,8 +811,8 @@ export function createTableau({
   interface TileMove { movingId: string, cell: Axial, spec: TileSpec }
 
   /** The board as it is, or as one move would leave it. */
-  function viewOf(move?: { tile?: TileMove, plate?: PlateMove }): BoardView {
-    const plates = boardPlatesWith(move?.plate)
+  function viewOf(move?: { tile?: TileMove, plate?: PlateMove }, seat: Seat = SOLO_SEAT): BoardView {
+    const plates = boardPlatesWith(move?.plate, seat)
     const owner = new Map<string, string>()
     const occupied: Axial[] = []
     for (const plate of plates) {
@@ -899,7 +984,10 @@ export function createTableau({
 
   function canPlacePlate(location: PlateLocation, movingId?: string): boolean {
     if (location.kind === 'board') {
-      if (!plateFits(location.hole, movingId) || !plateConnects(location.hole, movingId)) return false
+      // Every board question is asked of the destination's own board, not of "the" board.
+      const seat = seatOf(location)
+      if (!plateFits(location.hole, movingId, seat)) return false
+      if (!plateConnects(location.hole, movingId, seat)) return false
       // Dealt plates have no id to look tiles up by; only a *move* is a player's placement.
       if (movingId === undefined) return true
       if (!plateRewardFits(location.hole, movingId)) return false
@@ -950,13 +1038,19 @@ export function createTableau({
 
     tiles: () => [...tilesById.values()],
 
-    tilesOnBoard() {
-      return [...tilesById.values()].filter(tile =>
-        tile.location.kind === 'onPlate'
-        && platesById.get(tile.location.plateId)?.location.kind === 'board')
+    tilesOnBoard(seat = SOLO_SEAT) {
+      return [...tilesById.values()].filter((tile) => {
+        if (tile.location.kind !== 'onPlate') return false
+        const plate = platesById.get(tile.location.plateId)
+        return plate?.location.kind === 'board' && seatOf(plate.location) === seat
+      })
     },
 
     plates: () => [...platesById.values()],
+
+    platesOnBoard: (seat = SOLO_SEAT) => [...platesById.values()].filter(
+      plate => plate.location.kind === 'board' && seatOf(plate.location) === seat,
+    ),
     plate: id => platesById.get(id),
     tile: id => tilesById.get(id),
 
@@ -975,27 +1069,28 @@ export function createTableau({
       return found
     },
 
-    stems: () => [...stemsById.values()],
+    stems: (seat = SOLO_SEAT) => [...stemsById.values()].filter(stem => stem.seat === seat),
 
-    addStem(slot) {
+    addStem(slot, seat = SOLO_SEAT) {
       if (!inRange(slot, drawerSlots)) return undefined
       // The same key a tile would use, so the slot cannot hold both.
-      const key = tileLocationKey({ kind: 'drawer', slot })
+      const key = tileLocationKey({ kind: 'drawer', slot, seat })
       if (occupants.has(key)) return undefined
-      const stem: Stem = { id: `s${nextId++}`, slot }
+      const stem: Stem = { id: `s${nextId++}`, slot, seat }
       stemsById.set(stem.id, stem)
       occupants.set(key, stem.id)
       return stem
     },
 
+    /* A stem stays in the drawer it was minted in; there is no move that changes seat. */
     moveStem(id, slot) {
       const stem = stemsById.get(id)
       if (!stem || !inRange(slot, drawerSlots)) return false
-      const key = tileLocationKey({ kind: 'drawer', slot })
+      const key = tileLocationKey({ kind: 'drawer', slot, seat: stem.seat })
       const occupant = occupants.get(key)
       if (occupant !== undefined && occupant !== id) return false
-      occupants.delete(tileLocationKey({ kind: 'drawer', slot: stem.slot }))
-      stemsById.set(id, { id, slot })
+      occupants.delete(tileLocationKey({ kind: 'drawer', slot: stem.slot, seat: stem.seat }))
+      stemsById.set(id, { id, slot, seat: stem.seat })
       occupants.set(key, id)
       return true
     },
@@ -1009,7 +1104,7 @@ export function createTableau({
       return undefined
     },
 
-    coverageAt: cell => coverage.get(axialKey(cell)),
+    coverageAt: (cell, seat = SOLO_SEAT) => coverage.get(coverKey(cell, seat)),
 
     cellOfTile(id) {
       const tile = tilesById.get(id)
@@ -1091,7 +1186,7 @@ export function createTableau({
     plateIsEnclosed,
     plateEnclosureIsStrict,
 
-    anchors: () => anchorsIn(viewOf()),
+    anchors: (seat = SOLO_SEAT) => anchorsIn(viewOf(undefined, seat)),
     anchorIsEnclosed: cell => ringAround(cell, viewOf()) !== null,
     anchorRingIsStrict(cell) {
       const ring = ringAround(cell, viewOf())
@@ -1186,8 +1281,8 @@ export function createTableau({
       return null
     },
 
-    petalAt(cell) {
-      const covered = coverage.get(axialKey(cell))
+    petalAt(cell, seat = SOLO_SEAT) {
+      const covered = coverage.get(coverKey(cell, seat))
       if (!covered || covered.petal === null) return null
       return { kind: 'onPlate', plateId: covered.plateId, petal: covered.petal }
     },
