@@ -30,7 +30,7 @@
  */
 import { shallowRef } from 'vue'
 import type { LogEntry } from '@hexnome/rules/gameLog'
-import type { CommandView, GameView } from '@hexnome/rules/wire'
+import type { CommandView, GameView, Head } from '@hexnome/rules/wire'
 import { ApiError, getCommands, getGame, submitCommand } from '@/api/games'
 import { seatIn } from '@/composables/useSeat'
 
@@ -71,6 +71,21 @@ export interface GameSync {
    * caller should stop playing and let the page rebuild.
    */
   submit: (effects: readonly LogEntry[]) => Promise<readonly LogEntry[] | null>
+  /**
+   * Where the log ends and whose turn it is, kept current.
+   *
+   * Reactive because it changes without this browser doing anything — somebody else takes a turn and
+   * the action bar has to notice. Read it rather than the head that came with the game, which is
+   * only ever true at the moment it loaded.
+   */
+  readonly head: () => Head
+  /**
+   * Fetch anything newer than the last thing seen, and hand it over.
+   *
+   * Safe to call for no reason: with nothing new it returns an empty list, which is what makes the
+   * socket allowed to be approximate.
+   */
+  catchUp: () => Promise<readonly CommandView[]>
 }
 
 /**
@@ -90,6 +105,7 @@ export function useGameSync(): GameSync {
 
   let gameId = ''
   let head = 0
+  const at = shallowRef<Head>({ seq: 0, awaiting: null })
   /** The seat token for this game, looked up when it loads. Without one you are a spectator. */
   let token = ''
 
@@ -108,6 +124,7 @@ export function useGameSync(): GameSync {
     try {
       const [game, slice] = await Promise.all([getGame(id, token), getCommands(id, 0)])
       head = slice.head.seq
+      at.value = slice.head
       status.value = 'ready'
       return { game, head, commands: slice.commands }
     }
@@ -138,6 +155,7 @@ export function useGameSync(): GameSync {
       try {
         const result = await submitCommand(gameId, turn, token)
         head = result.command.seq
+        at.value = { seq: result.command.seq, awaiting: result.command.awaiting }
         status.value = 'ready'
         /*
          * `effects` are this client's own and are already on its board; applying them again would
@@ -169,5 +187,37 @@ export function useGameSync(): GameSync {
     return null
   }
 
-  return { status: () => status.value, problem: () => problem.value, load, submit }
+  /**
+   * Everything since the last thing this client saw.
+   *
+   * The cursor moves only on a successful read, so a failed request changes nothing and the next
+   * attempt asks for the same range again. Errors are swallowed on purpose: this runs on a timer and
+   * a flaky network is not worth a banner — the next tick tries again.
+   */
+  async function catchUp(): Promise<readonly CommandView[]> {
+    if (!gameId || status.value === 'diverged') return []
+    try {
+      const slice = await getCommands(gameId, head)
+      if (slice.commands.length === 0) {
+        // Still worth taking the head: `awaiting` can move without this client having anything new.
+        at.value = slice.head
+        return []
+      }
+      head = slice.head.seq
+      at.value = slice.head
+      return slice.commands
+    }
+    catch {
+      return []
+    }
+  }
+
+  return {
+    status: () => status.value,
+    problem: () => problem.value,
+    head: () => at.value,
+    load,
+    submit,
+    catchUp,
+  }
 }

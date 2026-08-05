@@ -67,6 +67,7 @@ import {
   type TableauOptions,
   type TileLocation,
 } from '@hexnome/rules/tableau'
+import { watchHead, type HeadWatch } from '@/composables/useHeadWatch'
 import { seatView } from '@hexnome/rules/seatView'
 import { tableauOptionsFor } from '@hexnome/rules/setup'
 import {
@@ -158,7 +159,32 @@ const modeLabel = computed(() => {
   return s ? modeInfo(s.mode)?.label ?? s.mode : ''
 })
 
+/**
+ * Other players' turns, arriving while this one waits.
+ *
+ * Applied to the **inner** tableau, not the recording one: they already happened and are already in
+ * the server's log, so journalling them would send the whole table's moves back as if this browser
+ * had made them.
+ *
+ * `watchHead` nudges on a socket message or a poll tick, and `catchUp` decides whether there was
+ * anything to it. Both are allowed to fire for nothing.
+ */
+let watching: HeadWatch | null = null
+
+async function absorbOthers(): Promise<void> {
+  const arrived = await props.sync.catchUp()
+  if (arrived.length === 0) return
+  for (const command of arrived) {
+    for (const entry of replayOf(command)) applyEntry(unrecorded, entry)
+  }
+  revision.value++
+}
+
+onBeforeUnmount(() => watching?.stop())
+
 onMounted(() => {
+  watching = watchHead(props.game.id, () => { void absorbOthers() })
+
   /*
    * Every arrival is announced, including a reload — the two cards are how the board introduces
    * itself, and coming back to a game deserves that as much as starting one.
@@ -422,7 +448,7 @@ const freeBays = computed(() => {
  * same answer said early enough to grey a button instead of swallowing a click.
  */
 const canAct = computed(() =>
-  isMyBoard.value && props.game.head.awaiting === props.mySeat)
+  isMyBoard.value && props.sync.head().awaiting === props.mySeat)
 
 const options = computed(() => turnOptions({
   sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
@@ -443,7 +469,7 @@ const waitingFor = computed(() => {
     const seat = props.game.seats[props.viewedSeat]
     return `Watching ${seat?.name || `Player ${props.viewedSeat + 1}`}`
   }
-  const awaiting = props.game.head.awaiting
+  const awaiting = props.sync.head().awaiting
   if (awaiting === null) return 'The game is over'
   const seat = props.game.seats[awaiting]
   return `Waiting for ${seat?.name || `Player ${awaiting + 1}`}`

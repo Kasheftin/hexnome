@@ -13,6 +13,7 @@ import type { Tableau } from '@hexnome/rules/tableau'
 import { PrismaService } from '../prisma.service'
 import { replayOf } from './dto'
 import { GamesService } from './games.service'
+import { HeadsGateway } from './heads.gateway'
 
 /**
  * The games service, against the real database.
@@ -25,7 +26,11 @@ import { GamesService } from './games.service'
  */
 
 const prisma = new PrismaService()
-const games = new GamesService(prisma)
+/*
+ * A real gateway with nothing attached. `moved` finds no room and returns, so the service's
+ * announcements are exercised rather than stubbed out — a broadcast that threw would fail here.
+ */
+const games = new GamesService(prisma, new HeadsGateway())
 const made: string[] = []
 const SETTINGS = defaultGameSettings(1700000000000)
 

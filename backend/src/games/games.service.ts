@@ -24,6 +24,7 @@ import { openingPosition, tableauOptionsFor } from '@hexnome/rules/setup'
 import { shouldRefill } from '@hexnome/rules/source'
 import { createTableau, type Tableau } from '@hexnome/rules/tableau'
 import { PrismaService } from '../prisma.service'
+import { HeadsGateway } from './heads.gateway'
 import {
   GENESIS,
   SERVER_SEAT,
@@ -90,7 +91,10 @@ function isUniqueViolation(error: unknown): boolean {
 
 @Injectable()
 export class GamesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly heads: HeadsGateway,
+  ) {}
 
   /**
    * Start a game, and write its opening position as the first command.
@@ -218,7 +222,10 @@ export class GamesService {
       if (!isUniqueViolation(error)) throw error
     }
 
-    return this.find(id, token)
+    // A table that just filled has a genesis command, and everyone waiting wants to know.
+    const started = await this.find(id, token)
+    this.heads.moved(id, started.head.seq)
+    return started
   }
 
   /**
@@ -377,6 +384,11 @@ export class GamesService {
           response: response as unknown as object,
         },
       })
+      /*
+       * Announced only once the row is safely stored. Watchers are told the head moved and fetch it
+       * themselves — the socket carries a number, so a client that misses it is merely slower.
+       */
+      this.heads.moved(id, row.seq)
       return { command: toCommandView(row), duplicate: false }
     }
     catch (error) {

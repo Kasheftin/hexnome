@@ -36,6 +36,8 @@ export default defineConfig({
     proxy: {
       '/games': 'http://localhost:3000',
       '/health': 'http://localhost:3000',
+      // The head-moved socket. `ws` makes Vite forward the upgrade rather than the request.
+      '/watch': { target: 'ws://localhost:3000', ws: true },
     },
   },
   test: {
