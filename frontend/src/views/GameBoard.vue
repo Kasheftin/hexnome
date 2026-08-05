@@ -146,14 +146,28 @@ const modeLabel = computed(() => {
   return s ? modeInfo(s.mode)?.label ?? s.mode : ''
 })
 
+/**
+ * Whether this game was already under way when it was opened.
+ *
+ * True once any seat has taken a turn — the server's own commands do not count, since a game that
+ * has only been dealt has not been played. A reload is the ordinary way to arrive here.
+ */
+const resumed = props.commands.some(command => command.author !== SERVER_SEAT)
+
 onMounted(() => {
   /*
-   * The first turn is announced like any other. Its lot is dealt just before the card rather than behind
-   * it — see `cardWork`. The board's starting plate and the player's stems are part of neither: they are
-   * the tableau, not a deal.
+   * A game that is *starting* opens with its ceremony: the round card, then the first turn card.
+   * A game that is being *resumed* opens with the board, and nothing else.
+   *
+   * Announcing on a reload was wrong twice over. `announceRound` always names turn 1 — right for a
+   * new round, which begins at one, and a lie for a board six turns in. And the ceremony means "this
+   * is beginning now", which a reload is not: the player is picking up where they left off, and
+   * being told the game has started again undercuts the restore rather than celebrating it.
+   *
+   * Nothing is dealt here any more either. The opening lot arrives in the server's genesis command
+   * and is already on the board by the time this runs.
    */
-  beginTurn()
-  announceRound(count.value.round)
+  if (!resumed) announceRound(count.value.round)
 })
 
 /**
