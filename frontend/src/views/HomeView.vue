@@ -454,7 +454,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
           leave it and each table falls back to the seat's own label.
         -->
         <label class="who">
-          <span class="who-label">You are</span>
+          <span class="who-label">Your Name</span>
           <input
             v-model="name"
             type="text"
@@ -1012,7 +1012,7 @@ legend {
 }
 
 .who input {
-  width: 160px;
+  flex: 1 1 auto;
   padding: 7px 10px;
   border: 1px solid #33383f;
   border-radius: 3px;
@@ -1020,7 +1020,6 @@ legend {
   color: #cfd4dd;
   font: inherit;
   font-size: 13px;
-  text-align: center;
 }
 
 .who input:focus-visible {

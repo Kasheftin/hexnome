@@ -16,6 +16,25 @@ const KEY = 'hexnome:seats'
 /** The player's name, which belongs to the person rather than to any one game. */
 const NAME_KEY = 'hexnome:name'
 
+/**
+ * Names to arrive under, so nobody starts as "Player".
+ *
+ * Alchemical apparatus and clockwork, which is the register the whole game is already in — and
+ * deliberately **not** colours. The palette is Orange, Lime, Green, Blue, Indigo and Magenta, so a
+ * player called Indigo would collide with the tiles every time the board mentioned one: "Indigo took
+ * the indigos" is a sentence nobody should have to parse.
+ *
+ * They are also all one word and short enough to sit in a seat row without wrapping.
+ */
+export const SUGGESTED_NAMES: readonly string[] = [
+  'Alembic', 'Athanor', 'Crucible', 'Retort', 'Aludel',
+  'Cucurbit', 'Bellows', 'Azoth', 'Vitriol', 'Quintessence',
+  'Bismuth', 'Antimony', 'Quicksilver', 'Lodestone', 'Tincture',
+  'Amalgam', 'Ember', 'Flux', 'Cinder', 'Filigree',
+  'Ratchet', 'Pinion', 'Escapement', 'Flywheel', 'Gimbal',
+  'Sprocket', 'Gasket', 'Cogwheel', 'Vernier', 'Armature',
+]
+
 export interface SeatHolding {
   readonly seat: number
   readonly token: string
@@ -47,10 +66,24 @@ export function rememberSeat(gameId: string, holding: SeatHolding): void {
   }
 }
 
-/** What to call yourself. Empty is allowed — the table falls back to the seat's own label. */
+/**
+ * What to call yourself, minting one on the first visit.
+ *
+ * A name is picked and **kept**, so you are the same person next time rather than somebody new every
+ * visit. It is a suggestion, not an identity: the field on the menu is there to be typed over.
+ *
+ * Note the difference between *never set* and *set to empty*. Only the first mints a name; clearing
+ * the field is a decision and is left alone, and the table falls back to the seat's own label. A
+ * getter that could not tell them apart would overwrite that choice on the next page load.
+ */
 export function playerName(): string {
   try {
-    return globalThis.localStorage?.getItem(NAME_KEY) ?? ''
+    const stored = globalThis.localStorage?.getItem(NAME_KEY)
+    if (stored !== null && stored !== undefined) return stored
+
+    const minted = SUGGESTED_NAMES[Math.floor(Math.random() * SUGGESTED_NAMES.length)]!
+    rememberName(minted)
+    return minted
   }
   catch {
     return ''
