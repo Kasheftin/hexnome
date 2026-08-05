@@ -21,6 +21,7 @@ import { DEFAULT_PLACEMENT_RULE } from './placement'
 const valid = {
   kind: 'singleplayer',
   mode: 'classic',
+  players: 3,
   platesPerRound: 5,
   tileSlots: 18,
   plateSlots: 1,
@@ -57,9 +58,25 @@ describe('parsing settings that came back from storage', () => {
     expect(parseGameSettings({ ...valid, mode: 42 })).toBeNull()
   })
 
+  /*
+   * Every game stored before there were seats was played by one person, and there are such rows in
+   * the database. Reading one must produce a playable solo game rather than a null.
+   */
+  it('reads a game stored before seats existed as a solo game', () => {
+    const { players, ...before } = valid
+    void players
+    expect(parseGameSettings(before)?.players).toBe(1)
+  })
+
+  it('falls back rather than failing on a bad seat count', () => {
+    for (const bad of [0, 5, 2.5, -1, '2', null, NaN]) {
+      expect(parseGameSettings({ ...valid, players: bad })?.players).toBe(1)
+    }
+  })
+
   it('falls back rather than failing on a bad plate count', () => {
     // A dial, not an identity: worth repairing instead of discarding the game.
-    for (const bad of [0, 2, 7, 4.5, -4, '4', null, undefined, NaN]) {
+    for (const bad of [0, 2, 8, 4.5, -4, '4', null, undefined, NaN]) {
       const parsed = parseGameSettings({ ...valid, platesPerRound: bad })
       expect(parsed?.platesPerRound).toBe(DEFAULT_PLATES_PER_ROUND)
     }

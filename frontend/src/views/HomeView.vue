@@ -14,12 +14,15 @@
  * which is what lets a refresh come back as the same game (composables/useSavedGames.ts).
  */
 import { mdiCog } from '@mdi/js'
-import { computed, nextTick, ref, shallowRef, type Ref } from 'vue'
+import { computed, nextTick, ref, shallowRef, type Ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
   GAME_KINDS,
+  PLAYER_COUNT_CHOICES,
+  DEFAULT_PLAYERS,
+  defaultPlatesPerRound,
   PLATES_PER_ROUND_CHOICES,
   PLATE_SLOT_CHOICES,
   TILE_SLOT_CHOICES,
@@ -71,7 +74,26 @@ const startError = shallowRef('')
 const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
+const players = ref<number>(DEFAULT_PLAYERS)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
+
+/**
+ * The round supply follows the table size — until somebody sets it themselves.
+ *
+ * A shared supply grows with the headcount rather than multiplying by it, so `defaultPlatesPerRound`
+ * owns the arithmetic and this only decides *when* to apply it. Once the dial has been touched it is
+ * left alone: silently overwriting a deliberate choice because another dial moved is the sort of
+ * helpfulness that feels like a bug.
+ */
+const platesPerRoundTouched = ref(false)
+
+watch(players, (count) => {
+  if (!platesPerRoundTouched.value) platesPerRound.value = defaultPlatesPerRound(count)
+})
+
+watch(platesPerRound, (value) => {
+  if (value !== defaultPlatesPerRound(players.value)) platesPerRoundTouched.value = true
+})
 const tileSlots = ref<number>(DEFAULT_TILE_SLOTS)
 const plateSlots = ref<number>(DEFAULT_PLATE_SLOTS)
 const initialStems = ref<number>(DEFAULT_STEM_COUNT)
@@ -134,6 +156,17 @@ interface Dial {
   /** Omitted from the readout strip, which would otherwise run to a dozen pills. */
   readonly minor?: boolean
 }
+
+/** Asked first, because everything else about a game's size follows from it. */
+const TABLE_DIALS: readonly Dial[] = [
+  {
+    key: 'players',
+    legend: 'Players',
+    short: 'players',
+    choices: PLAYER_COUNT_CHOICES,
+    model: players,
+  },
+]
 
 const SUPPLY_DIALS: readonly Dial[] = [
   {
@@ -269,6 +302,7 @@ interface DialSection {
 }
 
 const SECTIONS: readonly DialSection[] = [
+  { key: 'table', dials: TABLE_DIALS },
   { key: 'supply', dials: SUPPLY_DIALS },
   { key: 'drawer', title: 'Drawer', dials: DRAWER_DIALS },
   { key: 'stems', title: 'Receiving stems', dials: STEM_DIALS },
@@ -346,7 +380,8 @@ async function startGame(): Promise<void> {
     const game = await createGame({
     kind: 'singleplayer',
     mode: mode.value,
-    platesPerRound: platesPerRound.value,
+      players: players.value,
+      platesPerRound: platesPerRound.value,
     tileSlots: tileSlots.value,
     plateSlots: plateSlots.value,
     initialStems: initialStems.value,

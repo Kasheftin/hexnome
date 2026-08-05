@@ -58,8 +58,32 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
   },
 ]
 
-export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6]
+/**
+ * How many people are playing, and the first thing the setup screen asks.
+ *
+ * Part of the settings rather than a column beside them because it is a property of the *game* — it
+ * decides how much is dealt and how long a round is, and a replay of the log has to know it. One is
+ * an ordinary value here, not a special case: a solo game is a game with one seat.
+ */
+export const PLAYER_COUNT_CHOICES: readonly number[] = [1, 2, 3, 4]
+export const DEFAULT_PLAYERS = 1
+
+// Seven, because a four-player game wants that many. See `defaultPlatesPerRound`.
+export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6, 7]
 export const DEFAULT_PLATES_PER_ROUND = 4
+
+/**
+ * The round supply a table of this size wants: one plate each, plus three.
+ *
+ * A **shared** supply, not a per-player one — everyone drafts from the same column, so it grows with
+ * the table rather than multiplying by it. Three over the headcount keeps a round from being exactly
+ * one plate per player, which would leave the last player no choice at all.
+ *
+ * A default, not a rule: the dial is still there, and `PLATES_PER_ROUND_CHOICES` bounds it.
+ */
+export function defaultPlatesPerRound(players: number): number {
+  return players + 3
+}
 
 /**
  * How big the player's drawer is.
@@ -160,6 +184,8 @@ export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 export interface GameSettings {
   readonly kind: GameKind
   readonly mode: SingleplayerMode
+  /** Seats at this table, 1–4. The game starts once they are all claimed. */
+  readonly players: number
   readonly platesPerRound: number
   /** Tile slots in the player's drawer. Stems share them. */
   readonly tileSlots: number
@@ -201,6 +227,10 @@ export function isSingleplayerMode(value: unknown): value is SingleplayerMode {
 
 export function isGameKind(value: unknown): value is GameKind {
   return GAME_KINDS.some(k => k.id === value)
+}
+
+export function isPlayerCount(value: unknown): boolean {
+  return typeof value === 'number' && PLAYER_COUNT_CHOICES.includes(value)
 }
 
 export function isPlatesPerRound(value: unknown): boolean {
@@ -289,6 +319,7 @@ export function defaultGameSettings(createdAt: number): GameSettings {
   return {
     kind: 'singleplayer',
     mode: DEFAULT_SINGLEPLAYER_MODE,
+    players: DEFAULT_PLAYERS,
     platesPerRound: DEFAULT_PLATES_PER_ROUND,
     tileSlots: DEFAULT_TILE_SLOTS,
     plateSlots: DEFAULT_PLATE_SLOTS,
@@ -332,6 +363,8 @@ export function parseGameSettings(value: unknown): GameSettings | null {
   return {
     kind: raw.kind,
     mode: raw.mode,
+    // Games stored before there were seats have none, and were played by one person.
+    players: isPlayerCount(raw.players) ? (raw.players as number) : DEFAULT_PLAYERS,
     platesPerRound: isPlatesPerRound(raw.platesPerRound)
       ? (raw.platesPerRound as number)
       : DEFAULT_PLATES_PER_ROUND,
