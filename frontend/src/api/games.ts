@@ -91,8 +91,9 @@ export function createGame(
   })
 }
 
-export function getGame(id: string): Promise<GameView> {
-  return request(`/games/${encodeURIComponent(id)}`)
+/** The token is optional: without one the answer comes back with `you: null`, which is a spectator. */
+export function getGame(id: string, token = ''): Promise<GameView> {
+  return request(`/games/${encodeURIComponent(id)}`, { seatToken: token })
 }
 
 export function getCommands(id: string, since = 0): Promise<CommandSlice> {

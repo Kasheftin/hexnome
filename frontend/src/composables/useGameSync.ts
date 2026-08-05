@@ -106,7 +106,7 @@ export function useGameSync(): GameSync {
     problem.value = ''
 
     try {
-      const [game, slice] = await Promise.all([getGame(id), getCommands(id, 0)])
+      const [game, slice] = await Promise.all([getGame(id, token), getCommands(id, 0)])
       head = slice.head.seq
       status.value = 'ready'
       return { game, head, commands: slice.commands }

@@ -58,7 +58,7 @@ import {
 } from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { createGame } from '@/api/games'
-import { playerName, rememberSeat } from '@/composables/useSeat'
+import { playerName, rememberName, rememberSeat } from '@/composables/useSeat'
 
 type Step = 'title' | 'kind' | 'singleplayer'
 
@@ -75,6 +75,9 @@ const startError = shallowRef('')
 const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
+/** What to call yourself at any table. Remembered between visits; empty is allowed. */
+const name = ref(playerName())
+
 const players = ref<number>(DEFAULT_PLAYERS)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
 
@@ -397,7 +400,7 @@ async function startGame(): Promise<void> {
     groupBonuses: groupBonuses.value,
       fineUnplaced: fineUnplaced.value === 1,
       rewardStems: rewardStems.value === 1,
-    }, playerName())
+    }, name.value)
     rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
     await router.push({ path: '/game', query: { id: claim.game.id } })
   }
@@ -445,6 +448,22 @@ const selectedMode = computed(() => modeInfo(mode.value))
     >
       <!-- Step 1 -->
       <template v-if="step === 'title'">
+        <!--
+          Asked once, here, and kept. A name belongs to the person rather than to any one game, so it
+          is deliberately not a game setting — those are frozen into a row and replayed. Optional:
+          leave it and each table falls back to the seat's own label.
+        -->
+        <label class="who">
+          <span class="who-label">You are</span>
+          <input
+            v-model="name"
+            type="text"
+            maxlength="40"
+            placeholder="Player"
+            @change="rememberName(name)"
+          >
+        </label>
+
         <button
           type="button"
           class="option"
@@ -975,6 +994,38 @@ legend {
   :is(.option, .count, .settings) {
     transition: none;
   }
+}
+
+.who {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.who-label {
+  color: #79808f;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.who input {
+  width: 160px;
+  padding: 7px 10px;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  background: #1b1e24;
+  color: #cfd4dd;
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
+}
+
+.who input:focus-visible {
+  border-color: #7d6a41;
+  outline: none;
 }
 
 .start-error {

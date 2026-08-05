@@ -138,7 +138,7 @@ export class GamesService {
       },
     })
 
-    return { seat: CREATOR_SEAT, token, game: await this.startIfFull(id) }
+    return { seat: CREATOR_SEAT, token, game: await this.startIfFull(id, token) }
   }
 
   /**
@@ -166,7 +166,7 @@ export class GamesService {
         data: { token, name: cleanName(body?.name), joined: new Date() },
       })
       // Zero rows means somebody else took it between the read and the write. Try the next.
-      if (taken.count === 1) return { seat: seat.seat, token, game: await this.startIfFull(id) }
+      if (taken.count === 1) return { seat: seat.seat, token, game: await this.startIfFull(id, token) }
     }
 
     throw new ConflictException('every seat at this table is taken')
@@ -181,14 +181,14 @@ export class GamesService {
    * Racing joins may both arrive here. The chain settles it: the genesis names `prevSeq: 0`, and
    * `@@unique([gameId, prevSeq])` lets exactly one of them write it.
    */
-  private async startIfFull(id: string): Promise<GameView> {
+  private async startIfFull(id: string, token = ''): Promise<GameView> {
     const game = await this.prisma.game.findUnique({
       where: { id },
       include: { seats: true, commands: { orderBy: { seq: 'desc' }, take: 1 } },
     })
     if (!game) throw new NotFoundException(`no game ${id}`)
     if (game.status !== 'lobby' || game.seats.some(seat => seat.token === null)) {
-      return this.toView(game)
+      return this.toView(game, token)
     }
 
     const settings = parseGameSettings(game.settings)
@@ -218,7 +218,7 @@ export class GamesService {
       if (!isUniqueViolation(error)) throw error
     }
 
-    return this.find(id)
+    return this.find(id, token)
   }
 
   /**
@@ -254,13 +254,13 @@ export class GamesService {
     return entries
   }
 
-  async find(id: string): Promise<GameView> {
+  async find(id: string, token = ''): Promise<GameView> {
     const game = await this.prisma.game.findUnique({
       where: { id },
       include: { seats: true, commands: { orderBy: { seq: 'desc' }, take: 1 } },
     })
     if (!game) throw new NotFoundException(`no game ${id}`)
-    return this.toView(game)
+    return this.toView(game, token)
   }
 
   /**
@@ -488,7 +488,7 @@ export class GamesService {
     status: string
     seats?: { seat: number, name: string | null, token: string | null, joined: Date | null }[]
     commands?: CommandRow[]
-  }): GameView {
+  }, token = ''): GameView {
     const settings = parseGameSettings(game.settings)
     if (!settings) throw new ConflictException(`game ${game.id} has settings this server cannot read`)
     return {
@@ -504,6 +504,7 @@ export class GamesService {
       seats: [...(game.seats ?? [])]
         .sort((a, b) => a.seat - b.seat)
         .map(seat => ({ seat: seat.seat, name: seat.name ?? '', joined: seat.token !== null })),
+      you: token ? game.seats?.find(seat => seat.token === token)?.seat ?? null : null,
       head: headOf(game.commands ?? []),
     }
   }

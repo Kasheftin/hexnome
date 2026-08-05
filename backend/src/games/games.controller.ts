@@ -59,9 +59,13 @@ export class GamesController {
     return this.games.join(id, body ?? {})
   }
 
+  /** Optionally authenticated: a token names which seat is yours, and its absence means spectator. */
   @Get(':id')
-  find(@Param('id') id: string): Promise<GameView> {
-    return this.games.find(id)
+  find(
+    @Param('id') id: string,
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<GameView> {
+    return this.games.find(id, seatToken(authorization))
   }
 
   @Get(':id/commands')

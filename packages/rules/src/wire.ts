@@ -93,6 +93,15 @@ export interface GameView {
   readonly status: GameStatus
   /** Every seat, claimed or not, so a waiting room can show who is still missing. */
   readonly seats: readonly SeatView[]
+  /**
+   * Which of them is the caller's, worked out from the token they sent — or null for a spectator.
+   *
+   * Answered by the server rather than remembered by the client, because the token is the truth and
+   * a seat number kept beside it is a second copy that can go stale. A client that trusted its own
+   * copy could render one board while submitting as another seat, which would look like the game
+   * losing its mind rather than like a stale value.
+   */
+  readonly you: number | null
   readonly head: Head
 }
 

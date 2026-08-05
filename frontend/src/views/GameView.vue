@@ -15,10 +15,12 @@
  * that starts again — and this way the rebuild path is the same code as the ordinary load path, so
  * it cannot rot unnoticed.
  */
-import { computed, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { joinGame, ApiError } from '@/api/games'
 import { useGameSync, type LoadedGame } from '@/composables/useGameSync'
-import { seatIn } from '@/composables/useSeat'
+import { playerName, rememberName, rememberSeat } from '@/composables/useSeat'
+import LobbyPanel from '@/ui/LobbyPanel.vue'
 import GameBoard from './GameBoard.vue'
 
 const route = useRoute()
@@ -40,6 +42,14 @@ const generation = shallowRef(0)
  */
 const mySeat = shallowRef<number | null>(null)
 
+/** How often a waiting room asks whether the last player has arrived. */
+const LOBBY_POLL_MS = 1500
+
+const name = shallowRef(playerName())
+const joining = shallowRef(false)
+const joinProblem = shallowRef('')
+let lobbyTimer: ReturnType<typeof setTimeout> | null = null
+
 /**
  * Whose board is on screen.
  *
@@ -56,11 +66,60 @@ async function open(): Promise<void> {
     return
   }
   const game = await sync.load(gameId.value)
-  if (game) {
-    mySeat.value = seatIn(gameId.value)?.seat ?? null
-    viewedSeat.value = mySeat.value ?? 0
-    loaded.value = game
-    generation.value++
+  if (!game) return
+
+  /*
+   * Which seat is mine comes from the server, worked out from the token we sent — not from the seat
+   * number stored beside it. The token is the truth; a copy of the seat kept locally is a second
+   * answer that can go stale, and a client trusting it could draw one board while playing another.
+   */
+  mySeat.value = game.game.you
+  viewedSeat.value = mySeat.value ?? 0
+  loaded.value = game
+  generation.value++
+
+  if (game.game.status === 'lobby') waitForTable()
+}
+
+/**
+ * Watch a lobby until the last seat is taken.
+ *
+ * A poll rather than a socket, and the shape is the same either way: something says the game moved
+ * and we reload. Replacing the timer later changes this function and nothing else.
+ */
+function waitForTable(): void {
+  stopWaiting()
+  lobbyTimer = setTimeout(() => { void open() }, LOBBY_POLL_MS)
+}
+
+function stopWaiting(): void {
+  if (lobbyTimer !== null) clearTimeout(lobbyTimer)
+  lobbyTimer = null
+}
+
+onBeforeUnmount(stopWaiting)
+
+/** Sit down, and remember the seat well enough to come back to it after a refresh. */
+async function takeSeat(): Promise<void> {
+  if (joining.value) return
+  joining.value = true
+  joinProblem.value = ''
+  rememberName(name.value)
+
+  try {
+    const claim = await joinGame(gameId.value, name.value)
+    rememberSeat(gameId.value, { seat: claim.seat, token: claim.token })
+    await open()
+  }
+  catch (error) {
+    joinProblem.value = error instanceof ApiError && error.status === 409
+      ? 'Somebody took the last seat first. You can still watch.'
+      : 'Could not reach the table. Try again.'
+    // Whatever happened, the truth about the table has moved on — go and look.
+    await open()
+  }
+  finally {
+    joining.value = false
   }
 }
 
@@ -79,8 +138,18 @@ const problem = computed(() => sync.problem())
 </script>
 
 <template>
+  <!-- A table still filling up. Nobody plays until every seat is taken. -->
+  <LobbyPanel
+    v-if="loaded && loaded.game.status === 'lobby'"
+    v-model:name="name"
+    :game="loaded.game"
+    :joining="joining"
+    :problem="joinProblem"
+    @join="takeSeat"
+  />
+
   <GameBoard
-    v-if="loaded"
+    v-else-if="loaded"
     :key="`${generation}:${viewedSeat}`"
     :game="loaded.game"
     :commands="loaded.commands"
@@ -95,7 +164,7 @@ const problem = computed(() => sync.problem())
     board — the key includes it — and a control cannot survive unmounting itself.
   -->
   <nav
-    v-if="loaded && loaded.game.seats.length > 1"
+    v-if="loaded && loaded.game.status !== 'lobby' && loaded.game.seats.length > 1"
     class="seats"
     aria-label="Whose board to watch"
   >
@@ -115,7 +184,7 @@ const problem = computed(() => sync.problem())
   </nav>
 
   <div
-    v-else
+    v-if="!loaded"
     class="curtain"
   >
     <p
