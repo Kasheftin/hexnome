@@ -2,7 +2,20 @@
 //
 // There are only two tables, because there is only one kind of state. A game is its journal — see
 // packages/rules/src/gameLog.ts — so the board, the drawer, the source and the score are all derived
-// by replaying entries rather than stored anywhere.
+// by replaying commands rather than stored anywhere.
+//
+// ## The log is a chain, and that is load-bearing
+//
+// Every command names the command it was built on, and `@@unique([gameId, prevSeq])` makes the
+// database refuse two children of the same parent. That single constraint is the whole concurrency
+// design: there is no sequence to allocate, no row to lock and no transaction, because the insert
+// itself adjudicates. The service reads the head to *reason* — whose turn, what the deck owes — and
+// that read is allowed to be stale.
+//
+// An earlier version allocated a dense 1…N per game inside a transaction holding `SELECT … FOR
+// UPDATE`. Producing a dense sequence means knowing the current one, which means read-then-write,
+// which means holding a lock. Letting the numbers be sparse removes the read, and letting the
+// constraint do the checking removes the lock.
 
 // Prisma 7 generates into the project rather than into node_modules, so the client is ordinary
 // source the compiler can see.
@@ -42,41 +55,69 @@ model Game {
   /// replaying every game.
   status    String   @default("running") @db.VarChar(16)
 
-  /// The head of the log. Lets a client ask "is there anything new?" by reading one row, and is the
-  /// counter the append transaction increments.
-  lastSeq   Int      @default(0)
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  entries   LogEntry[]
+  commands  Command[]
 
   @@index([status, updatedAt])
 }
 
-model LogEntry {
-  gameId String @db.VarChar(64)
-
-  /// Monotonic within a game, starting at 1.
+/// One step of the game loop: a turn a seat committed, and everything that followed from it.
+model Command {
+  /// Globally unique and ascending. Only the *order* means anything.
   ///
-  /// A sequence rather than a timestamp: two rows can share a millisecond and clocks step backwards,
-  /// so `?since=<time>` would silently skip entries. An integer is exact, and it lets a client notice
-  /// a gap instead of diverging quietly.
-  seq    Int
+  /// Allocated by the database, which is the point — there is nothing to read first, so nothing to
+  /// lock. Numbers are sparse within a game and may jump by any amount; a cursor only ever needs
+  /// "bigger than what I have".
+  ///
+  /// Sparse autoincrement is only safe because the chain is. Left alone it has a nasty failure: A
+  /// takes 10 and has not committed, B takes 11 and commits, a poller advances its cursor to 11,
+  /// then A commits 10 and `> 11` never returns it. The unique `prevSeq` below is what stops two
+  /// writes to one game from ever being in flight together, so that window cannot open.
+  seq      Int      @id @default(autoincrement())
 
-  /// player | server. Which side appended it — the server deals and reveals, the player moves.
-  origin String @db.VarChar(8)
+  gameId   String   @db.VarChar(64)
 
-  /// The LogEntry op from @hexnome/rules, duplicated out of `data` so the table is readable by eye
-  /// and so a query can count deals without parsing JSON.
-  kind   String @db.VarChar(24)
+  /// The `seq` this command was built on, and the concurrency guard.
+  ///
+  /// `0` for the genesis command — not NULL, which MySQL permits repeatedly in a unique index and
+  /// which would therefore let the chain fork at its root.
+  prevSeq  Int
 
-  /// The entry itself, exactly as the rules package defines it.
-  data   Json
+  /// The seat that submitted this, or `server`. Authorization only: it cannot serve as the
+  /// concurrency guard, because two commands from the *same* seat both pass it — and a duplicate is
+  /// far more often a retry or a double-tap than a second player.
+  author   String   @db.VarChar(32)
 
-  at     DateTime @default(now())
+  /// The seat that may act next; empty once the game is over. Read from the head to gate the next
+  /// command without replaying anything.
+  awaiting String   @db.VarChar(32)
 
-  game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  /// Client-minted, and the deduplication guard.
+  ///
+  /// Earns its index on the retry path: the server commits, the response is lost, the client
+  /// resends. Without this the resend collides on `prevSeq` and the client cannot tell "refused"
+  /// from "already applied". With it, the conflict is recognised and the original row returned.
+  cmdId    String   @db.VarChar(64)
 
-  @@id([gameId, seq])
+  /// `LogEntry[]` from @hexnome/rules — the player's effects and whatever the server owed in
+  /// response, in one array.
+  ///
+  /// One command is one row so that it is one INSERT, which InnoDB makes atomic without a
+  /// transaction. A client must never be able to observe a move landing without its restock.
+  effects  Json
+
+  at       DateTime @default(now())
+
+  game     Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  /// Two commands cannot share a parent. This is the concurrency design, in one line.
+  @@unique([gameId, prevSeq])
+
+  /// A retry is not a second command.
+  @@unique([gameId, cmdId])
+
+  /// The cursor, and the head.
+  @@index([gameId, seq])
 }

@@ -69,7 +69,7 @@ import {
   type TileLocation,
   type TileSpec,
 } from '@hexnome/rules/tableau'
-import { DEFAULT_PLACEMENT_RULE } from '@hexnome/rules/placement'
+import { openingPosition, tableauOptionsFor } from '@hexnome/rules/setup'
 import {
   FIRST_TURN,
   IDLE,
@@ -99,7 +99,6 @@ import {
   BOARD_HALF_ROWS,
   COLORS,
   HEX_SIZE,
-  SOURCE_TILES_PER_LOT,
 } from '@/scene/constants'
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
 import {
@@ -111,11 +110,6 @@ import {
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
   DEFAULT_TILE_SLOTS,
-  DEFAULT_STEM_COUNT,
-  DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
-  DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
-  DEFAULT_STRICT_ENCLOSURE_BONUS,
-  effectiveStrictBonus,
   modeInfo,
   roundsOf,
   type GameSettings,
@@ -180,9 +174,6 @@ const drawerShape: DrawerShape = {
   plateSlots: settings.value?.plateSlots ?? DEFAULT_PLATE_SLOTS,
 }
 
-/** Where the player's tableau starts. The board is a rectangle centred here. */
-const BOARD_CENTRE = { q: 0, r: 0 } as const
-
 /**
  * One source slot per plate the round deals.
  *
@@ -200,35 +191,21 @@ const platesPerRound = settings.value?.platesPerRound ?? DEFAULT_PLATES_PER_ROUN
  */
 const agenda = createAgenda(seed.value, settings.value?.mode ?? DEFAULT_SINGLEPLAYER_MODE)
 
-/** Stems paid for enclosing a plate. Fixed for the game, so the tableau can hold it too. */
-const stemsPerInternalAnchor =
-  settings.value?.stemsPerInternalAnchor ?? DEFAULT_STEMS_PER_INTERNAL_ANCHOR
-
-/** Stems paid for enclosing a bare cell the plates have wrapped. */
-const stemsPerExternalAnchor =
-  settings.value?.stemsPerExternalAnchor ?? DEFAULT_STEMS_PER_EXTERNAL_ANCHOR
-
 /**
- * Extra stems when the enclosure is strict all the way round.
+ * Built by the rules package, not here.
  *
- * Read through `effectiveStrictBonus` rather than straight off the settings, so the "zero under strict
- * placement" rule holds even for a stored game that predates it or was edited by hand.
+ * The server derives the same options from the same settings to replay the log; two derivations would
+ * be free to disagree, and the disagreement would show up as a replay that quietly produces a
+ * different board rather than as an error. So there is exactly one, and it lives in `rules/setup.ts`.
+ *
+ * The other branch is **not** a second derivation and must not be maintained as one. Settings are
+ * missing only for a game that cannot be read, and `onMounted` navigates away from those before a
+ * turn begins — so this tableau is never played on. It exists because the setup below needs
+ * *something* to construct, and it only has to be valid.
  */
-const strictEnclosureBonus = settings.value
-  ? effectiveStrictBonus(settings.value)
-  : DEFAULT_STRICT_ENCLOSURE_BONUS
-
-const tableauOptions: TableauOptions = {
-  cells,
-  drawerSlots: drawerShape.tileSlots,
-  plateSlots: drawerShape.plateSlots,
-  sourceLots: platesPerRound,
-  sourceTilesPerLot: SOURCE_TILES_PER_LOT,
-  placementRule: settings.value?.placementRule ?? DEFAULT_PLACEMENT_RULE,
-  stemsPerInternalAnchor,
-  stemsPerExternalAnchor,
-  strictEnclosureBonus,
-}
+const tableauOptions: TableauOptions = settings.value
+  ? tableauOptionsFor(settings.value)
+  : { cells, drawerSlots: drawerShape.tileSlots, plateSlots: drawerShape.plateSlots }
 
 /**
  * Everything that happens to the board, written down.
@@ -328,25 +305,7 @@ function dealLot(): boolean {
  *
  * Everything here happens once, before the first turn.
  */
-{
-  const start = opening.starting[0]
-  const centre = tableau.addPlate({ kind: 'board', hole: BOARD_CENTRE })
-  if (start && centre) {
-    // `fixed`: the plate's own tile, part of the plate and never separable from it.
-    tableau.addTile(
-      { color: start.color, value: start.value },
-      { kind: 'onPlate', plateId: centre.id, petal: start.petal },
-      { fixed: true },
-    )
-  }
-
-  const stems = settings.value?.initialStems ?? DEFAULT_STEM_COUNT
-  for (let i = 0; i < stems; i++) {
-    const slot = tableau.freeDrawerSlots()[0]
-    if (slot === undefined) break
-    tableau.addStem(slot)
-  }
-}
+if (settings.value) openingPosition(tableau, settings.value, opening.starting[0])
 
 const targetCells = shallowRef<Axial[]>([])
 const targetValid = shallowRef(false)

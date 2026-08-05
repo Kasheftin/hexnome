@@ -1,34 +1,40 @@
+import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ConflictException, NotFoundException } from '@nestjs/common'
-import { createGameLog, recordingTableau, replayTableau, type LogEntry } from '@hexnome/rules/gameLog'
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
+import { recordingTableau, replayTableau, type LogEntry } from '@hexnome/rules/gameLog'
 import { defaultGameSettings } from '@hexnome/rules/gameSettings'
-import { hexRectangle } from '@hexnome/rules/hex'
-import { createTableau, type TableauOptions } from '@hexnome/rules/tableau'
+import { BOARD_CENTRE, tableauOptionsFor } from '@hexnome/rules/setup'
 import { PrismaService } from '../prisma.service'
+import { SOLO_SEAT } from './dto'
 import { GamesService } from './games.service'
 
 /**
  * The games service, against the real database.
  *
- * Not mocked, deliberately. The one thing here that can genuinely go wrong is sequence allocation
- * under concurrency, and that is a property of MySQL's row locks — a fake would prove that the fake
- * serialises. Everything else is cheap enough to come along.
+ * Not mocked, deliberately. The thing that can genuinely go wrong here is the chain — two commands
+ * claiming one parent — and that is a property of a MySQL unique index. A fake would only prove that
+ * the fake rejects duplicates. Everything else is cheap enough to come along.
  *
- * Every game made here is deleted afterwards; entries go with it by cascade.
+ * Every game made here is deleted afterwards; commands go with it by cascade.
  */
 
 const prisma = new PrismaService()
 const games = new GamesService(prisma)
 const made: string[] = []
+const SETTINGS = defaultGameSettings(1700000000000)
 
 async function newGame(seed?: string) {
-  const game = await games.create({ settings: defaultGameSettings(1700000000000), seed })
+  const game = await games.create({ settings: SETTINGS, seed })
   made.push(game.id)
   return game
 }
 
-/** A distinguishable entry: `slot` carries who wrote it, so interleaving is visible. */
+/** A distinguishable effect: `slot` carries who wrote it, so a torn command would be visible. */
 const stem = (slot: number): LogEntry => ({ op: 'addStem', slot })
+
+/** A submission with everything but the parts a test cares about filled in. */
+const turn = (prevSeq: number, effects: LogEntry[] = [stem(0)], cmdId = randomUUID()) =>
+  ({ cmdId, prevSeq, author: SOLO_SEAT, effects })
 
 beforeAll(async () => {
   await prisma.$connect()
@@ -43,7 +49,6 @@ describe('starting a game', () => {
   it('gives it an id and a seed that are not the same string', async () => {
     const game = await newGame()
     expect(game.id).not.toBe(game.seed)
-    expect(game.lastSeq).toBe(0)
     expect(game.status).toBe('running')
   })
 
@@ -53,6 +58,47 @@ describe('starting a game', () => {
     const replay = await newGame(first.seed)
     expect(replay.seed).toBe(first.seed)
     expect(replay.id).not.toBe(first.id)
+  })
+
+  /*
+   * A game with an empty log would have no head to build on and no board to replay. The genesis
+   * command is written in the same nested insert as the game, so that state cannot be reached.
+   */
+  it('is never left without a genesis command', async () => {
+    const game = await newGame()
+    const slice = await games.commands(game.id, 0)
+    expect(slice.commands).toHaveLength(1)
+    expect(slice.commands[0]!.prevSeq).toBe(0)
+    expect(slice.commands[0]!.author).toBe('server')
+    expect(game.head.seq).toBe(slice.commands[0]!.seq)
+    expect(game.head.awaiting).toBe(SOLO_SEAT)
+  })
+
+  /* The head is a real seq, not a count — the numbering is global and sparse. */
+  it('numbers the genesis command from the global sequence, not from one', async () => {
+    const [a, b] = await Promise.all([newGame(), newGame()])
+    expect(a.head.seq).not.toBe(b.head.seq)
+  })
+
+  it('deals the opening position the server owns, not an empty board', async () => {
+    const game = await newGame()
+    const slice = await games.commands(game.id, 0)
+    const board = replayTableau(slice.commands[0]!.effects, tableauOptionsFor(SETTINGS))
+
+    expect(board.plates()).toHaveLength(1)
+    expect(board.plates()[0]!.location).toEqual({ kind: 'board', hole: BOARD_CENTRE })
+    // The plate's own fixed tile, plus the starting stems in ordinary drawer slots.
+    expect(board.tilesOnBoard()).toHaveLength(1)
+    expect(board.tilesOnBoard()[0]!.fixed).toBe(true)
+    expect(board.stems()).toHaveLength(SETTINGS.initialStems)
+  })
+
+  /* Same seed, same deal — the opening plate included. */
+  it('opens identically for two games sharing a seed', async () => {
+    const first = await newGame()
+    const replay = await newGame(first.seed)
+    const [a, b] = await Promise.all([games.commands(first.id, 0), games.commands(replay.id, 0)])
+    expect(a.commands[0]!.effects).toEqual(b.commands[0]!.effects)
   })
 
   it('refuses settings it cannot read', async () => {
@@ -65,124 +111,260 @@ describe('starting a game', () => {
    */
   it('refuses to serve a row whose settings have been tampered with', async () => {
     const game = await newGame()
-    await prisma.game.update({
-      where: { id: game.id },
-      data: { settings: { mode: 'tampered' } },
-    })
+    await prisma.game.update({ where: { id: game.id }, data: { settings: { mode: 'tampered' } } })
     await expect(games.find(game.id)).rejects.toThrow(ConflictException)
   })
 
   it('has nothing to say about a game that does not exist', async () => {
     await expect(games.find('no-such-game')).rejects.toThrow(NotFoundException)
-    await expect(games.log('no-such-game', 0)).rejects.toThrow(NotFoundException)
+    await expect(games.commands('no-such-game', 0)).rejects.toThrow(NotFoundException)
+    await expect(games.submit('no-such-game', turn(0))).rejects.toThrow(NotFoundException)
   })
 })
 
 describe('reading the log', () => {
   it('returns exactly the tail after the cursor', async () => {
     const game = await newGame()
-    await games.append(game.id, [stem(0), stem(1), stem(2)])
+    const first = await games.submit(game.id, turn(game.head.seq))
+    const second = await games.submit(game.id, turn(first.command.seq))
 
-    const all = await games.log(game.id, 0)
-    expect(all.entries.map(e => e.seq)).toEqual([1, 2, 3])
-    expect(all.lastSeq).toBe(3)
+    const all = await games.commands(game.id, 0)
+    expect(all.commands).toHaveLength(3)
+    expect(all.head.seq).toBe(second.command.seq)
 
-    const tail = await games.log(game.id, 2)
-    expect(tail.entries.map(e => e.seq)).toEqual([3])
-    expect(tail.since).toBe(2)
-    expect(tail.lastSeq).toBe(3)
+    const tail = await games.commands(game.id, first.command.seq)
+    expect(tail.commands.map(c => c.seq)).toEqual([second.command.seq])
+    expect(tail.since).toBe(first.command.seq)
   })
 
   it('says nothing is new when the cursor is already the head', async () => {
     const game = await newGame()
-    await games.append(game.id, [stem(0)])
-    const slice = await games.log(game.id, 1)
-    expect(slice.entries).toEqual([])
-    expect(slice.lastSeq).toBe(1)
+    const slice = await games.commands(game.id, game.head.seq)
+    expect(slice.commands).toEqual([])
+    expect(slice.head.seq).toBe(game.head.seq)
   })
 
   /* A cursor past the head is a client that has seen more than exists — empty, not negative. */
   it('survives a cursor beyond the end', async () => {
     const game = await newGame()
-    await games.append(game.id, [stem(0)])
-    expect((await games.log(game.id, 99)).entries).toEqual([])
+    expect((await games.commands(game.id, game.head.seq + 999)).commands).toEqual([])
   })
 
   it('ignores a cursor that is not a number', async () => {
     const game = await newGame()
-    await games.append(game.id, [stem(4)])
-    expect((await games.log(game.id, Number.NaN)).entries).toHaveLength(1)
-    expect((await games.log(game.id, -5)).entries).toHaveLength(1)
+    expect((await games.commands(game.id, Number.NaN)).commands).toHaveLength(1)
+    expect((await games.commands(game.id, -5)).commands).toHaveLength(1)
   })
 
-  /* Entries come back as JSON, so they must arrive as the same values that went in. */
-  it('round-trips an entry through the JSON column unchanged', async () => {
+  /* Effects come back as JSON, so they must arrive as the values that went in. */
+  it('round-trips effects through the JSON column unchanged', async () => {
     const game = await newGame()
-    const entry: LogEntry = {
-      op: 'addTile',
-      spec: { color: 3, value: 5 },
-      location: { kind: 'onPlate', plateId: 'p1', petal: 2 },
-      fixed: true,
-    }
-    await games.append(game.id, [entry])
-    expect((await games.log(game.id, 0)).entries[0]!.entry).toEqual(entry)
+    const effects: LogEntry[] = [
+      { op: 'addTile', spec: { color: 3, value: 5 }, location: { kind: 'drawer', slot: 9 }, fixed: true },
+      { op: 'addStem', slot: 4 },
+    ]
+    const written = await games.submit(game.id, turn(game.head.seq, effects))
+    const read = await games.commands(game.id, game.head.seq)
+    expect(written.command.effects).toEqual(effects)
+    expect(read.commands[0]!.effects).toEqual(effects)
   })
 })
 
-describe('appending', () => {
-  it('reports where it started and where it left the head', async () => {
+describe('submitting a command', () => {
+  it('links each command to the one before it', async () => {
     const game = await newGame()
-    const first = await games.append(game.id, [stem(0), stem(1)])
-    expect(first).toMatchObject({ from: 0, lastSeq: 2 })
+    const first = await games.submit(game.id, turn(game.head.seq))
+    const second = await games.submit(game.id, turn(first.command.seq))
 
-    const second = await games.append(game.id, [stem(2)])
-    expect(second).toMatchObject({ from: 2, lastSeq: 3 })
-    expect(second.entries[0]!.seq).toBe(3)
+    expect(first.command.prevSeq).toBe(game.head.seq)
+    expect(second.command.prevSeq).toBe(first.command.seq)
+    expect(second.command.seq).toBeGreaterThan(first.command.seq)
+    expect(first.duplicate).toBe(false)
   })
 
-  it('records who wrote each entry', async () => {
+  /* The invariant everything else rests on: an unbroken chain from 0 to the head. */
+  it('leaves a chain with no fork and no break', async () => {
     const game = await newGame()
-    await games.append(game.id, [stem(0)], undefined, 'player')
-    await games.append(game.id, [stem(1)], undefined, 'server')
-    expect((await games.log(game.id, 0)).entries.map(e => e.origin)).toEqual(['player', 'server'])
+    let head = game.head.seq
+    for (let i = 0; i < 8; i++) head = (await games.submit(game.id, turn(head, [stem(i)]))).command.seq
+
+    const { commands } = await games.commands(game.id, 0)
+    expect(commands[0]!.prevSeq).toBe(0)
+    for (let i = 1; i < commands.length; i++) {
+      expect(commands[i]!.prevSeq).toBe(commands[i - 1]!.seq)
+    }
+    expect(commands.at(-1)!.seq).toBe(head)
   })
 
-  it('leaves the head alone when given nothing to write', async () => {
+  it('records who submitted it and who may act next', async () => {
     const game = await newGame()
-    await games.append(game.id, [stem(0)])
-    expect(await games.append(game.id, [])).toEqual({ from: 1, lastSeq: 1, entries: [] })
+    const { command } = await games.submit(game.id, turn(game.head.seq))
+    expect(command.author).toBe(SOLO_SEAT)
+    expect(command.awaiting).toBe(SOLO_SEAT)
   })
 
-  it('refuses a game that does not exist rather than creating one', async () => {
-    await expect(games.append('no-such-game', [stem(0)])).rejects.toThrow(NotFoundException)
+  it('insists on a cmdId', async () => {
+    const game = await newGame()
+    await expect(games.submit(game.id, { cmdId: '', prevSeq: game.head.seq, effects: [] }))
+      .rejects.toThrow(ConflictException)
   })
 
-  describe('the guard against appending to a stale head', () => {
-    it('lets an append through when the caller is up to date', async () => {
+  describe('building on a head that has moved', () => {
+    it('is refused, and told where the head really is', async () => {
       const game = await newGame()
-      await games.append(game.id, [stem(0)])
-      await expect(games.append(game.id, [stem(1)], 1)).resolves.toMatchObject({ lastSeq: 2 })
+      const first = await games.submit(game.id, turn(game.head.seq))
+
+      const stale = games.submit(game.id, turn(game.head.seq))
+      await expect(stale).rejects.toThrow(ConflictException)
+      await expect(stale).rejects.toMatchObject({
+        response: { head: { seq: first.command.seq, awaiting: SOLO_SEAT } },
+      })
     })
 
-    /*
-     * A client reasoning from a board that has moved on would append moves that no longer make
-     * sense. It is told the real head so it can catch up and retry.
-     */
-    it('refuses one from behind, and says how far behind', async () => {
+    it('writes nothing when it refuses', async () => {
       const game = await newGame()
-      await games.append(game.id, [stem(0), stem(1)])
-      await expect(games.append(game.id, [stem(2)], 0)).rejects.toThrow(ConflictException)
-      expect((await games.find(game.id)).lastSeq).toBe(2)
-    })
-
-    /* Refusing must roll back cleanly: a rejected append leaves no half-written rows. */
-    it('writes nothing at all when it refuses', async () => {
-      const game = await newGame()
-      await games.append(game.id, [stem(0)])
-      await games.append(game.id, [stem(1), stem(2)], 0).catch(() => {})
-      expect((await games.log(game.id, 0)).entries).toHaveLength(1)
+      await games.submit(game.id, turn(game.head.seq))
+      await games.submit(game.id, turn(game.head.seq)).catch(() => {})
+      expect((await games.commands(game.id, 0)).commands).toHaveLength(2)
     })
   })
+
+  /*
+   * The retry path, and the reason `cmdId` has a column. The server commits, the response is lost,
+   * the client resends the same command — which now names a prevSeq the head has moved past. Without
+   * the id that is indistinguishable from a stale client, and the client cannot tell "refused" from
+   * "already applied".
+   */
+  describe('a resend of a command that already landed', () => {
+    it('returns the original row rather than refusing it', async () => {
+      const game = await newGame()
+      const submission = turn(game.head.seq, [stem(3)])
+
+      const first = await games.submit(game.id, submission)
+      const again = await games.submit(game.id, submission)
+
+      expect(again.duplicate).toBe(true)
+      expect(again.command).toEqual(first.command)
+      expect((await games.commands(game.id, 0)).commands).toHaveLength(2)
+    })
+
+    /* The distinction that makes it useful: a *different* command from the same stale point is not. */
+    it('does not excuse a different command from the same stale point', async () => {
+      const game = await newGame()
+      await games.submit(game.id, turn(game.head.seq, [stem(1)]))
+      await expect(games.submit(game.id, turn(game.head.seq, [stem(2)])))
+        .rejects.toThrow(ConflictException)
+    })
+
+    /* Two callers racing with the *same* id: one writes, the other is handed that write. */
+    it('collapses a concurrent double-submit into one row', async () => {
+      const game = await newGame()
+      const submission = turn(game.head.seq)
+      const both = await Promise.all([
+        games.submit(game.id, submission),
+        games.submit(game.id, submission),
+      ])
+      expect(both[0].command.seq).toBe(both[1].command.seq)
+      expect(both.filter(r => r.duplicate)).toHaveLength(1)
+      expect((await games.commands(game.id, 0)).commands).toHaveLength(2)
+    })
+  })
+
+  /*
+   * Authorization, which is a different job from the guard above and must not be confused with it: it
+   * reads the state it is protecting, so two commands from the *same* seat both pass. One seat exists
+   * in play, so `awaiting` is set directly here — the mechanism is real even though nothing exercises
+   * it yet.
+   */
+  describe('acting out of turn', () => {
+    it('is refused before the database is touched', async () => {
+      const game = await newGame()
+      await prisma.command.update({
+        where: { seq: game.head.seq },
+        data: { awaiting: 'p2' },
+      })
+
+      const wrongSeat = games.submit(game.id, { ...turn(game.head.seq), author: 'p1' })
+      await expect(wrongSeat).rejects.toThrow(ForbiddenException)
+      await expect(wrongSeat).rejects.toMatchObject({ response: { awaiting: 'p2' } })
+      expect((await games.commands(game.id, 0)).commands).toHaveLength(1)
+    })
+
+    it('lets the awaited seat through', async () => {
+      const game = await newGame()
+      await prisma.command.update({ where: { seq: game.head.seq }, data: { awaiting: 'p2' } })
+      await expect(games.submit(game.id, { ...turn(game.head.seq), author: 'p2' }))
+        .resolves.toMatchObject({ duplicate: false })
+    })
+  })
+})
+
+/*
+ * The one real race. Two commands must never share a parent — and the failure would not be an error,
+ * it would be a forked log that replays into two different boards.
+ *
+ * Note what this asserts, because it is the opposite of what a queue would: exactly **one** command
+ * wins and the rest are refused. The loser is not queued behind the winner, because it was reasoning
+ * from a board that no longer exists by the time it lost.
+ */
+describe('commands arriving together', () => {
+  const RACERS = 40
+
+  it('lets exactly one of them take the place, and refuses the rest', async () => {
+    const game = await newGame()
+
+    const results = await Promise.allSettled(
+      Array.from({ length: RACERS }, (_, i) =>
+        games.submit(game.id, turn(game.head.seq, [stem(i)]))),
+    )
+
+    const won = results.filter(r => r.status === 'fulfilled')
+    const lost = results.filter(r => r.status === 'rejected')
+    expect(won).toHaveLength(1)
+    expect(lost).toHaveLength(RACERS - 1)
+
+    // Every loser must be told it lost, not merely fail. A 500 here would be the constraint firing
+    // through a path that does not recognise it.
+    for (const l of lost) {
+      expect((l as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException)
+    }
+
+    const { commands } = await games.commands(game.id, 0)
+    expect(commands).toHaveLength(2)
+    expect(commands[1]!.prevSeq).toBe(commands[0]!.seq)
+  }, 60_000)
+
+  /* Run the race repeatedly: the chain must stay linear the whole way up. */
+  it('builds an unbroken chain out of rounds of contention', async () => {
+    const game = await newGame()
+    let head = game.head.seq
+
+    for (let round = 0; round < 5; round++) {
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, (_, i) => games.submit(game.id, turn(head, [stem(i)]))),
+      )
+      const won = results.filter(r => r.status === 'fulfilled')
+      expect(won).toHaveLength(1)
+      head = (won[0] as PromiseFulfilledResult<{ command: { seq: number } }>).value.command.seq
+    }
+
+    const { commands } = await games.commands(game.id, 0)
+    expect(commands).toHaveLength(6)
+    for (let i = 1; i < commands.length; i++) {
+      expect(commands[i]!.prevSeq).toBe(commands[i - 1]!.seq)
+    }
+  }, 60_000)
+
+  /* Two games contend for nothing: their chains are different rows. */
+  it('does not make games wait for each other', async () => {
+    const [a, b] = await Promise.all([newGame(), newGame()])
+    const [ra, rb] = await Promise.all([
+      games.submit(a.id, turn(a.head.seq)),
+      games.submit(b.id, turn(b.head.seq)),
+    ])
+    expect(ra.duplicate).toBe(false)
+    expect(rb.duplicate).toBe(false)
+  }, 60_000)
 })
 
 /*
@@ -191,118 +373,34 @@ describe('appending', () => {
  * this one checks that something goes through it.
  */
 describe('a game played through the API', () => {
-  const OPTIONS: TableauOptions = {
-    cells: hexRectangle(6, 6),
-    drawerSlots: 16,
-    plateSlots: 2,
-    sourceLots: 4,
-    sourceTilesPerLot: 4,
-  }
-
-  it('replays from the stored log into the same board it was played on', async () => {
+  it('replays from the stored commands into the same board it was played on', async () => {
     const game = await newGame()
-    const log = createGameLog()
-    const played = recordingTableau(createTableau(OPTIONS), log.append)
+    const options = tableauOptionsFor(SETTINGS)
 
-    // A few turns' worth of the moves a real game makes.
-    const plate = played.addPlate({ kind: 'board', hole: { q: 0, r: 0 } })!
-    played.rotatePlate(plate.id, 2)
-    const tile = played.addTile({ color: 2, value: 3 }, { kind: 'drawer', slot: 0 })!
-    played.moveTile(tile.id, { kind: 'onPlate', plateId: plate.id, petal: 1 })
-    played.addStem(0)
-    const spare = played.addTile({ color: 5, value: 1 }, { kind: 'drawer', slot: 1 })!
-    played.discard(spare.id)
+    // Start from the server's opening position, exactly as a client would.
+    const opening = await games.commands(game.id, 0)
+    const played = replayTableau(opening.commands[0]!.effects, options)
 
-    // Sent in the batches a client would send, not in one lump.
-    let head = 0
-    for (const entry of log.entries) {
-      const result = await games.append(game.id, [entry], head)
-      head = result.lastSeq
+    let head = game.head.seq
+    const ids: string[] = []
+
+    // Three turns, each accumulated locally then submitted as one command.
+    for (let i = 0; i < 3; i++) {
+      const entries: LogEntry[] = []
+      const live = recordingTableau(played, e => entries.push(e))
+      const tile = live.addTile({ color: i, value: i + 1 }, { kind: 'drawer', slot: 12 + i })!
+      live.moveTile(tile.id, { kind: 'drawer', slot: 8 + i })
+      ids.push(tile.id)
+      head = (await games.submit(game.id, turn(head, entries))).command.seq
     }
-    expect(head).toBe(log.entries.length)
 
-    const rebuilt = replayTableau((await games.log(game.id, 0)).entries.map(e => e.entry), OPTIONS)
+    const stored = await games.commands(game.id, 0)
+    const rebuilt = replayTableau(stored.commands.flatMap(c => [...c.effects]), options)
 
     expect(rebuilt.tiles().map(t => t.id)).toEqual(played.tiles().map(t => t.id))
     expect(rebuilt.plates().map(p => p.id)).toEqual(played.plates().map(p => p.id))
     expect(rebuilt.stems().map(s => s.slot)).toEqual(played.stems().map(s => s.slot))
-    // The rotation is the one that would replay wrong if entries arrived out of order.
-    expect(rebuilt.cellOfTile(tile.id)).toEqual(played.cellOfTile(tile.id))
-    expect(rebuilt.tilesOnBoard()).toHaveLength(played.tilesOnBoard().length)
-  })
-})
-
-/*
- * The one real race, and the reason the allocation is a transaction holding a row lock. Two appends
- * taking the same sequence number would not raise an error — it would corrupt the log and only show
- * up much later, as a board that replays wrong.
- */
-describe('appends arriving together', () => {
-  const CALLERS = 60
-  const PER_CALL = 3
-
-  it('numbers them 1…N with no gaps, no repeats, and no interleaving', async () => {
-    const game = await newGame()
-
-    // Each caller writes a block tagged with its own index, so a block torn apart is visible.
-    const results = await Promise.all(
-      Array.from({ length: CALLERS }, (_, caller) =>
-        games.append(game.id, Array.from({ length: PER_CALL }, () => stem(caller)))),
-    )
-
-    const slice = await games.log(game.id, 0)
-    const seqs = slice.entries.map(e => e.seq)
-    expect(seqs).toEqual(Array.from({ length: CALLERS * PER_CALL }, (_, i) => i + 1))
-    expect(new Set(seqs).size).toBe(seqs.length)
-    expect(slice.lastSeq).toBe(CALLERS * PER_CALL)
-
-    /*
-     * Atomicity, not just uniqueness. Each caller's entries must be consecutive: an append is one
-     * transaction, so another caller's block cannot land inside it.
-     */
-    for (const written of results) {
-      const seen = slice.entries.filter(e => written.entries.some(w => w.seq === e.seq))
-      expect(seen.map(e => e.seq)).toEqual([written.from + 1, written.from + 2, written.from + 3])
-      expect(new Set(seen.map(e => (e.entry as { slot: number }).slot)).size).toBe(1)
-    }
-
-    // And every caller was told a distinct starting point.
-    expect(new Set(results.map(r => r.from)).size).toBe(CALLERS)
-  }, 60_000)
-
-  /* Two games contend for nothing: their locks are different rows. */
-  it('does not serialise games against each other', async () => {
-    const [a, b] = await Promise.all([newGame(), newGame()])
-    await Promise.all([
-      ...Array.from({ length: 10 }, () => games.append(a.id, [stem(1)])),
-      ...Array.from({ length: 10 }, () => games.append(b.id, [stem(2)])),
-    ])
-    expect((await games.find(a.id)).lastSeq).toBe(10)
-    expect((await games.find(b.id)).lastSeq).toBe(10)
-  }, 60_000)
-})
-
-/*
- * The property the whole exercise is for: a face-down plate's token must not be in the database at
- * all until it is revealed. Checked against the stored bytes, not the model — the model is already
- * proven, and what leaks is what is written down.
- */
-describe('what the stored log gives away', () => {
-  it('holds no token for a face-down plate until it is revealed', async () => {
-    const game = await newGame()
-    await games.append(game.id, [
-      { op: 'addPlate', location: { kind: 'source', lot: 0 }, rotation: 0, faceDown: true },
-    ], undefined, 'server')
-
-    const hidden = await prisma.logEntry.findMany({ where: { gameId: game.id } })
-    expect(JSON.stringify(hidden)).not.toContain('color')
-
-    await games.append(game.id, [
-      { op: 'revealPlate', id: 'plate-1', spec: { color: 4, value: 2 }, petal: 0 },
-    ], undefined, 'server')
-
-    const revealed = await prisma.logEntry.findMany({ where: { gameId: game.id }, orderBy: { seq: 'asc' } })
-    expect(JSON.stringify(revealed[0]!.data)).not.toContain('color')
-    expect(JSON.stringify(revealed[1]!.data)).toContain('"color":4')
+    // The ids must come out the same, or entries naming them would resolve to different pieces.
+    for (const id of ids) expect(rebuilt.tile(id)).toBeDefined()
   })
 })

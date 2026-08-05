@@ -39,15 +39,14 @@ export const VIEW_HEIGHT_MIN = 4
 export const VIEW_HEIGHT_MAX = 70
 
 /**
- * Half-extent of the board, in cells, measured from the centre.
+ * Half-extent of the board, and the tiles heaped on a lot.
  *
- * The playfield is a **rectangle** in world space, not a hex disc: 20 cells in every
- * direction comes to 1661 plates. Large enough that, with panning
- * clamped by PAN_MARGIN_CELLS, the edge can never be reached — so the board reads as
- * endless without pretending to be infinite.
+ * Re-exported rather than defined here: they read like rendering constants and they are not. How many
+ * cells exist decides what is legal, and how many tiles a lot holds decides what a draft is worth — so
+ * they live in `@hexnome/rules/setup`, where the server can see them too. Kept on this file's surface
+ * because everything in the scene already reads its numbers from here.
  */
-export const BOARD_HALF_COLS = 20
-export const BOARD_HALF_ROWS = 20
+export { BOARD_HALF_COLS, BOARD_HALF_ROWS, SOURCE_TILES_PER_LOT } from '@hexnome/rules/setup'
 
 /**
  * How many cells of board to keep beyond the viewport at all times.
@@ -215,9 +214,6 @@ export const PLATE_SLOT_FILL = 0.92
  * wider than the board and would fight the drawer for the bottom of the screen. Vertical also matches
  * what it is — a stack you work down, newest on top.
  */
-
-/** Loose tiles heaped on each lot's face-down plate. */
-export const SOURCE_TILES_PER_LOT = 4
 
 export const SOURCE_LEFT_PX = 14
 /** Clear of the title panel, which is 14px down and about 40px tall. */

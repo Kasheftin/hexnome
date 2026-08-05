@@ -5,9 +5,22 @@
  * and a generator would be more machinery than contract. Anything describing the *game* — settings,
  * log entries — comes from `@hexnome/rules`, so client and server cannot disagree about what a move
  * is.
+ *
+ * Note the layering. A **command** is a step of the game loop; the `LogEntry` values it carries are
+ * the effects that step had. The rules package owns the second and knows nothing of the first, which
+ * is what lets the server take over computing effects later without touching the wire format.
  */
 import type { LogEntry } from '@hexnome/rules/gameLog'
 import type { GameSettings } from '@hexnome/rules/gameSettings'
+
+/** The only seat there is, until there are seats. */
+export const SOLO_SEAT = 'p1'
+
+/** The author of anything the server writes on its own account. */
+export const SERVER_SEAT = 'server'
+
+/** The predecessor of the first command. Zero rather than null — see the schema. */
+export const GENESIS = 0
 
 export interface CreateGameBody {
   readonly settings: unknown
@@ -20,47 +33,71 @@ export interface CreateGameBody {
   readonly seed?: string
 }
 
+/** Where a game's log currently ends, and who may write next. */
+export interface Head {
+  /** The `seq` a new command must name as its `prevSeq`. */
+  readonly seq: number
+  /** The seat that may act. Empty once the game is over. */
+  readonly awaiting: string
+}
+
 /** A game's identity and setup. Never its deck: that is the server's alone. */
 export interface GameView {
   readonly id: string
   readonly seed: string
   readonly settings: GameSettings
   readonly status: string
-  readonly lastSeq: number
+  readonly head: Head
 }
 
-/** A journal entry with its place in the sequence. */
-export interface SeqEntry {
+/** A stored command, as anyone reading the log sees it. */
+export interface CommandView {
   readonly seq: number
-  readonly origin: 'player' | 'server'
-  readonly entry: LogEntry
+  readonly prevSeq: number
+  readonly author: string
+  readonly awaiting: string
+  readonly cmdId: string
+  readonly effects: readonly LogEntry[]
 }
 
-export interface LogSlice {
+export interface CommandSlice {
   /** The cursor the caller passed, echoed so a response is self-describing. */
   readonly since: number
-  /** The head at the moment of reading. Equal to `since` when there is nothing new. */
-  readonly lastSeq: number
-  readonly entries: readonly SeqEntry[]
+  /** The head at the moment of reading. `seq` equals `since` when there is nothing new. */
+  readonly head: Head
+  readonly commands: readonly CommandView[]
 }
 
-export interface AppendBody {
-  readonly entries: readonly LogEntry[]
+export interface SubmitBody {
   /**
-   * The head the client believed it was appending to.
+   * The caller's own id for this command, and the reason a retry is safe.
    *
-   * Optional, and a guard rather than a lock: supplied and stale, the append is refused with the real
-   * head so the client can catch up first. Without it, a client that had fallen behind would append
-   * moves reasoned from a board that no longer exists.
+   * Minted by the client, stable across resends of the *same* command. A second submission carrying
+   * an id already stored is answered with the stored row rather than refused, which is the
+   * difference between "your retry worked" and an error the client cannot interpret.
    */
-  readonly expectedSeq?: number
+  readonly cmdId: string
+  /**
+   * The `seq` the caller built this on, and the concurrency guard.
+   *
+   * `0` for the first command of a game. Naming a predecessor that already has a child is refused
+   * with the real head, so a client that fell behind can catch up in one round trip.
+   */
+  readonly prevSeq: number
+  /** The seat submitting. Refused unless it matches the head's `awaiting`. */
+  readonly author?: string
+  /** What the player's turn did. Server-owned effects are appended to these, in the same row. */
+  readonly effects: readonly LogEntry[]
 }
 
-export interface AppendResult {
-  /** The head before this append. */
-  readonly from: number
-  /** The head after it. */
-  readonly lastSeq: number
-  /** Everything this call wrote. */
-  readonly entries: readonly SeqEntry[]
+/** What a submission returns: the row as stored, and whether it was already there. */
+export interface SubmitResult {
+  readonly command: CommandView
+  /**
+   * True when this `cmdId` had already been stored and the row is the original.
+   *
+   * Worth telling apart from a fresh write: an idempotent replay means the client's optimistic state
+   * is already correct, and there is nothing new to animate.
+   */
+  readonly duplicate: boolean
 }
