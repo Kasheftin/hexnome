@@ -61,7 +61,23 @@ const OPENING_PLATE = 'p1'
 const FIRST_FREE_SLOT = 3
 
 /** A legal move with no side effects worth tracking, repeatable without limit. */
-const nudge = (): LogEntry => ({ op: 'rotatePlate', id: OPENING_PLATE, steps: 1 })
+const nudge = (id = OPENING_PLATE): LogEntry => ({ op: 'rotatePlate', id, steps: 1 })
+
+/**
+ * The plate a seat opened with.
+ *
+ * Not `p1` for anybody but seat 0: the ids come from one counter across the whole table, so each
+ * player's opening plate is numbered after the last one dealt. A test that assumed otherwise was
+ * rotating somebody else's plate — which the seat guard now correctly refuses.
+ */
+async function openingPlateOf(gameId: string, seat: number, players: number): Promise<string> {
+  const slice = await games.commands(gameId, 0)
+  const board = replayTableau(
+    slice.commands.flatMap(replayOf),
+    tableauOptionsFor({ ...SETTINGS, players }),
+  )
+  return board.platesOnBoard(seat)[0]!.id
+}
 
 /** A distinguishable effect: `slot` carries who wrote it, so a torn command would be visible. */
 const stem = (n: number): LogEntry => ({ op: 'addStem', slot: FIRST_FREE_SLOT + n })
@@ -343,11 +359,18 @@ describe('submitting a command', () => {
       const guest = await games.join(host.game.id, { name: 'Guest' })
       const head = guest.game.head.seq
 
-      const first = await games.submit(host.game.id, turn(head), host.token)
+      const mine = await openingPlateOf(host.game.id, 0, 2)
+      const theirs = await openingPlateOf(host.game.id, 1, 2)
+
+      const first = await games.submit(host.game.id, turn(head, [nudge(mine)]), host.token)
       expect(first.command.author).toBe(0)
       expect(first.command.awaiting).toBe(1)
 
-      const second = await games.submit(host.game.id, turn(first.command.seq), guest.token)
+      const second = await games.submit(
+        host.game.id,
+        turn(first.command.seq, [nudge(theirs)]),
+        guest.token,
+      )
       expect(second.command.author).toBe(1)
       // Round the table and back to the start.
       expect(second.command.awaiting).toBe(0)
@@ -739,5 +762,62 @@ describe('what a seat token is allowed to reach', () => {
       .rejects.toThrow(ForbiddenException)
     await expect(games.submit(host.game.id, turn(host.game.head.seq), ''))
       .rejects.toThrow(ForbiddenException)
+  })
+})
+
+/*
+ * Passing. A pass is not a skipped turn — a player who passes is out until the round ends, and the
+ * round ends once everybody has. That rule needs to know about all the seats, so the server owns it:
+ * one pass closes a solo round and closes nothing in a game of two.
+ */
+describe('passing', () => {
+  const pass = (seat: number): LogEntry => ({ op: 'pass', seat })
+
+  it('closes the round at once when there is only one player', async () => {
+    const game = await newGame()
+    const { command } = await play(game, turn(game.head.seq, [pass(0)]))
+
+    expect(command.response.map(e => e.op)).toEqual(['endRound'])
+    expect(command.response[0]).toMatchObject({ round: 1 })
+  })
+
+  it('does not close it while somebody is still playing', async () => {
+    const host = await newTable(2)
+    const guest = await games.join(host.game.id, { name: 'Ada' })
+
+    const first = await games.submit(host.game.id, turn(guest.game.head.seq, [pass(0)]), host.token)
+    expect(first.command.response.some(e => e.op === 'endRound')).toBe(false)
+    // And the turn moves on, which is the thing a pass writing no command used to prevent.
+    expect(first.command.awaiting).toBe(1)
+
+    const second = await games.submit(host.game.id, turn(first.command.seq, [pass(1)]), guest.token)
+    expect(second.command.response.map(e => e.op)).toEqual(['endRound'])
+  })
+
+  /* The bookmark has to be stored, or a reload loses every round the panel draws. */
+  it('is in the log afterwards, so a reload still knows the round ended', async () => {
+    const game = await newGame()
+    await play(game, turn(game.head.seq, [pass(0)]))
+
+    const stored = JSON.stringify((await games.commands(game.id, 0)).commands)
+    expect(stored).toContain('"pass"')
+    expect(stored).toContain('"endRound"')
+  })
+
+  it('starts counting again for the next round', async () => {
+    const game = await newGame()
+    const first = await play(game, turn(game.head.seq, [pass(0)]))
+    const second = await play(game, turn(first.command.seq, [pass(0)]))
+
+    expect(second.command.response[0]).toMatchObject({ op: 'endRound', round: 2 })
+  })
+
+  /* A seat may not pass on somebody else's behalf — the same guard as any other effect. */
+  it('cannot be done for another seat', async () => {
+    const host = await newTable(2)
+    // The head moves when the table fills — the genesis is written then, not at creation.
+    const guest = await games.join(host.game.id, { name: 'Ada' })
+    await expect(games.submit(host.game.id, turn(guest.game.head.seq, [pass(1)]), host.token))
+      .rejects.toThrow(UnprocessableEntityException)
   })
 })

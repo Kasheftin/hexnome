@@ -10,6 +10,7 @@ import { createDeck, dealStartingPlates } from '@hexnome/rules/deck'
 import {
   applyCommand,
   createDealer,
+  passedThisRound,
   replayDealer,
   type Dealer,
   type ReplayedGame,
@@ -45,6 +46,11 @@ const CREATOR_SEAT = 0
 
 /** And plays first. Turn order is seat order. */
 const FIRST_SEAT = 0
+
+/** How many rounds the log has already closed. The next one is this plus one. */
+function roundsSoFar(history: readonly (readonly LogEntry[])[]): number {
+  return history.flat().filter(entry => entry.op === 'endRound').length
+}
 
 /** Names are shown to strangers, so they are trimmed and bounded. Empty means "did not say". */
 function cleanName(name: string | undefined): string {
@@ -354,10 +360,12 @@ export class GamesService {
      * the deck in step as it goes, and refuses the first entry the board will not take — so "is this
      * legal" and "what does it do to the deck" cannot drift apart into two opinions.
      */
-    const { tableau, dealer } = await this.replay(id, settings)
+    const { tableau, dealer, history } = await this.replay(id, settings)
     const effects = body.effects ?? []
 
-    const outcome = applyCommand(tableau, dealer, effects)
+    // `author` is passed, so an effect reaching another seat's board is refused here and not merely
+    // in a function somebody has to remember to call.
+    const outcome = applyCommand(tableau, dealer, effects, author)
     if (!outcome.ok) {
       const refused = effects[outcome.refusedAt]
       throw new UnprocessableEntityException({
@@ -367,7 +375,15 @@ export class GamesService {
       })
     }
 
-    const response = this.dealerResponse(tableau, dealer, settings)
+    /*
+     * A round closes when every seat has passed, and the server is what decides it — the rule needs
+     * to know about all the players, and only this side does. A client that passed and closed the
+     * round itself would be right in a solo game and wrong in every other.
+     */
+    const passed = passedThisRound([...history, effects])
+    const closing = passed.size >= settings.players
+
+    const response = this.dealerResponse(tableau, dealer, settings, closing, roundsSoFar(history) + 1)
 
     try {
       const row = await this.prisma.command.create({
@@ -422,9 +438,22 @@ export class GamesService {
    * Recorded off a wrapper so the dealer's own mutations are journalled as ordinary entries. A client
    * applies them without needing to know or care that the server made them.
    */
-  private dealerResponse(tableau: Tableau, dealer: Dealer, settings: GameSettings): LogEntry[] {
+  private dealerResponse(
+    tableau: Tableau,
+    dealer: Dealer,
+    settings: GameSettings,
+    closing: boolean,
+    round: number,
+  ): LogEntry[] {
     const response: LogEntry[] = []
     const recorder = recordingTableau(tableau, entry => response.push(entry))
+
+    /*
+     * The bookmark goes in before anything else the server owes, and that ordering is the point: the
+     * scoring panel cuts the log at `endRound` and shows the board as it stood then, so a lot dealt
+     * for the next round must fall on the far side of the cut.
+     */
+    if (closing) return [{ op: 'endRound', round }]
 
     // Turn over anything the turn just picked clean, before restocking on top of it.
     dealer.reveal(recorder)
@@ -445,7 +474,10 @@ export class GamesService {
    * worth measuring before it is worth caching — a snapshot every N commands is the obvious fix, and
    * an unnecessary one until the numbers say so.
    */
-  private async replay(gameId: string, settings: GameSettings): Promise<ReplayedGame> {
+  private async replay(
+    gameId: string,
+    settings: GameSettings,
+  ): Promise<ReplayedGame & { history: LogEntry[][] }> {
     const game = await this.prisma.game.findUnique({ where: { id: gameId }, select: { seed: true } })
     const rows = await this.prisma.command.findMany({
       where: { gameId },
@@ -458,7 +490,7 @@ export class GamesService {
      * produces a deck that is subtly, permanently wrong from the first reshuffle.
      */
     const commands = rows.map(r => [...(r.effects as LogEntry[]), ...(r.response as LogEntry[])])
-    return replayDealer(game?.seed ?? '', settings, commands)
+    return { ...replayDealer(game?.seed ?? '', settings, commands), history: commands }
   }
 
   /**

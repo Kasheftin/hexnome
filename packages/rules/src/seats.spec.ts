@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reachesAnotherSeat } from './dealer'
+import { applyCommand, createDealer } from './dealer'
 import { applyEntry, createGameLog, recordingTableau, replayTableau, type LogEntry } from './gameLog'
 import { hexRectangle } from './hex'
 import {
@@ -227,6 +227,13 @@ describe('a turn may only reach its own seat', () => {
     t.addPlate(boardHole(CENTRE, 1))
     return t
   }
+
+  /*
+   * Through `applyCommand`, which is the only way a command reaches a board — the check used to be a
+   * separate function that the server never got round to calling.
+   */
+  const reachesAnotherSeat = (t: ReturnType<typeof board>, entries: LogEntry[], seat: number) =>
+    applyCommand(t, createDealer('seed'), entries, seat).refusedAt
 
   it('allows a turn that stays at home', () => {
     expect(reachesAnotherSeat(board(), [{ op: 'addStem', slot: 4, seat: 1 }], 1)).toBe(-1)

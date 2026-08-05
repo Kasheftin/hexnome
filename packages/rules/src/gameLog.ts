@@ -63,6 +63,17 @@ export type LogEntry =
   | { readonly op: 'discard', readonly id: string }
   | { readonly op: 'revealPlate', readonly id: string, readonly spec: TileSpec, readonly petal: number }
   | { readonly op: 'swapDrawerItems', readonly a: string, readonly b: string }
+  /**
+   * A seat declaring itself done for the round.
+   *
+   * Not a skipped turn: a player who passes is out until the round ends, and the round ends once
+   * everyone has. Recorded rather than derived, because it is a *choice* — a player may pass with
+   * moves still available, and nothing can tell that from the board.
+   *
+   * Changes nothing on the table, which is why it applies as a no-op. It exists so the turn can move
+   * on and so a refresh knows who is still playing.
+   */
+  | { readonly op: 'pass', readonly seat: number }
   /** Not a mutation — a bookmark, so a prefix can be cut at the end of a round. */
   | { readonly op: 'endRound', readonly round: number }
 
@@ -203,7 +214,8 @@ export function applyEntry(tableau: Tableau, entry: LogEntry): boolean {
     case 'discard': return !!tableau.discard(entry.id)
     case 'revealPlate': return !!tableau.revealPlate(entry.id, entry.spec, entry.petal)
     case 'swapDrawerItems': return !!tableau.swapDrawerItems(entry.a, entry.b)
-    // A bookmark. Nothing to apply, and nothing that can be refused.
+    // Bookmarks. Nothing to apply, and nothing that can be refused.
+    case 'pass':
     case 'endRound': return true
   }
 }

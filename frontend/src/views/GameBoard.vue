@@ -573,11 +573,21 @@ function chooseAction(action: TurnAction): void {
  * whenever the panel asks. Marking the boundary at the moment the player passes is what makes the
  * derivation right — the sweep of the source happens later, and a prefix cut here does not include it.
  */
-function endRoundByPassing(): void {
+async function endRoundByPassing(): Promise<void> {
+  if (props.mySeat === null) return
   phase.value = IDLE
-  log.append({ op: 'endRound', round: count.value.round })
-  roundsFinished.value = log.rounds()
-  showResults.value = true
+
+  /*
+   * A pass is submitted like any other turn, and that is the fix for a bug that was quietly there in
+   * singleplayer too: the bookmark used to be appended straight to the local journal, so it never
+   * reached the server and a refresh lost every round boundary the panel draws.
+   *
+   * **The server decides whether the round is over**, not this. One seat passing ends a solo game's
+   * round and ends nothing in a four-player one, and only the side that knows about all the seats can
+   * tell the difference. What comes back is `endRound` — or nothing, and the turn simply moves on.
+   */
+  batch.push({ op: 'pass', seat: props.mySeat })
+  await endTurn()
 }
 
 /* ── the end of a round ───────────────────────────────────────────────────────── */
@@ -864,6 +874,19 @@ async function endTurn(): Promise<void> {
     return
   }
   dealtByServer = [...answer]
+
+  /*
+   * The round closed. Everything the answer holds is the bookmark, so it is applied at once rather
+   * than behind a turn card — there is no next turn to announce, and the results panel is what
+   * happens instead.
+   */
+  if (answer.some(entry => entry.op === 'endRound')) {
+    for (const entry of dealtByServer) log.append(entry)
+    dealtByServer = []
+    roundsFinished.value = log.rounds()
+    showResults.value = true
+    return
+  }
 
   announceTurn(count.value.turn, beginTurn)
 }

@@ -185,6 +185,24 @@ export function replayDealer(
   return { tableau, dealer }
 }
 
+/**
+ * The seats that have passed since the round last closed.
+ *
+ * A round ends when everyone has said they are done, so this is what the server counts before
+ * writing the bookmark. Read from the log rather than tracked, so it survives a restart and cannot
+ * disagree with the history.
+ */
+export function passedThisRound(commands: readonly (readonly LogEntry[])[]): Set<number> {
+  const passed = new Set<number>()
+  for (const entries of commands) {
+    for (const entry of entries) {
+      if (entry.op === 'endRound') passed.clear()
+      else if (entry.op === 'pass') passed.add(entry.seat)
+    }
+  }
+  return passed
+}
+
 /** Where a command stopped, when it stopped early. */
 export interface CommandOutcome {
   readonly ok: boolean
@@ -208,12 +226,26 @@ export function applyCommand(
   tableau: Tableau,
   dealer: Dealer,
   entries: readonly LogEntry[],
+  /**
+   * The seat that submitted this, when there is one. Given, every entry must belong to it.
+   *
+   * **Folded in here rather than offered as a separate check**, and for a reason learned the hard
+   * way: it *was* a separate function, `reachesAnotherSeat`, which was written, unit-tested, and then
+   * never called from the server. It passed its own tests and guarded nothing. A check that has to
+   * be remembered is a check that will be forgotten, so it now lives on the only path a command has
+   * into the board.
+   *
+   * Omitted for the server's own writes, which answer to nobody's seat.
+   */
+  seat?: Seat,
 ): CommandOutcome {
   // A payment is one event, and a turn holds at most one, so a command's spend is one batch.
   const spentTiles: TileSpec[] = []
   const spentPlates: PlateSpec[] = []
 
   for (const [index, entry] of entries.entries()) {
+    if (seat !== undefined && reaches(tableau, entry, seat)) return { ok: false, refusedAt: index }
+
     if (entry.op === 'discard') {
       /*
        * Read the piece before applying, because applying is what destroys it. A face-down plate has
@@ -269,46 +301,39 @@ export function seatOfPiece(tableau: Tableau, id: string): Seat | undefined {
 }
 
 /**
- * Everything a turn touches must belong to the seat that submitted it.
+ * Whether one entry reaches somewhere this seat has no business.
  *
- * **A token proves who you are; it does not stop you naming somebody else's board.** Nothing bounds
- * the seat in a location, so without this check a player can submit a perfectly legal placement onto
- * an opponent's board, or move one of their tiles into their own drawer — and verification would
- * accept it, because it *is* legal, just not theirs to do.
+ * A token proves who you are; nothing bounds the seat named in a *location*, so without this a player
+ * can submit a perfectly legal placement onto an opponent's board — legal, just not theirs to make.
  *
- * Read against the board as it stands before the turn, so a piece drafted out of the shared source
- * during the turn is unowned when it is taken and this seat's by the time it lands.
- *
- * Returns the index of the first effect that reaches somewhere it should not, or −1.
+ * Judged against the board as it stands part-way through the turn, which is what lets a tile drafted
+ * out of the shared source be unowned when it is taken and this seat's by the time it lands.
  */
-export function reachesAnotherSeat(
-  tableau: Tableau,
-  entries: readonly LogEntry[],
-  seat: Seat,
-): number {
-  const mine = (where: Seat | undefined) => where === undefined || where === seat
+function reaches(tableau: Tableau, entry: LogEntry, seat: Seat): boolean {
+  const foreign = (where: Seat | undefined) => where !== undefined && where !== seat
 
-  for (const [index, entry] of entries.entries()) {
-    switch (entry.op) {
-      case 'addTile':
-      case 'moveTile':
-        if (!mine(seatOfLocation(tableau, entry.location))) return index
-        break
-      case 'addPlate':
-      case 'movePlate':
-        if (entry.location.kind !== 'source' && seatOf(entry.location) !== seat) return index
-        break
-      case 'addStem':
-        if ((entry.seat ?? SOLO_SEAT) !== seat) return index
-        break
-      default:
-        break
-    }
-    // Whatever it names must also be a piece this seat is allowed to touch.
-    if ('id' in entry && !mine(seatOfPiece(tableau, entry.id))) return index
-    applyEntry(tableau, entry)
+  switch (entry.op) {
+    case 'addTile':
+    case 'moveTile':
+      if (foreign(seatOfLocation(tableau, entry.location))) return true
+      break
+    case 'addPlate':
+    case 'movePlate':
+      if (entry.location.kind !== 'source' && seatOf(entry.location) !== seat) return true
+      break
+    case 'addStem':
+      if ((entry.seat ?? SOLO_SEAT) !== seat) return true
+      break
+    // Declaring somebody else done for the round would end it early, and on their behalf.
+    case 'pass':
+      if (entry.seat !== seat) return true
+      break
+    default:
+      break
   }
-  return -1
+
+  // And whatever it names must be a piece this seat may touch.
+  return 'id' in entry && foreign(seatOfPiece(tableau, entry.id))
 }
 
 function seatOfLocation(tableau: Tableau, location: TileLocation): Seat | undefined {
