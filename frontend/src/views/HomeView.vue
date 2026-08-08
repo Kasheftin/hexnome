@@ -1,19 +1,22 @@
 <script setup lang="ts">
 /**
- * The main menu: a drill-down from the title screen to a startable game.
+ * The main menu: who you are, which game, then how it is set up.
  *
- * Three steps, and the path taken stays on screen beside them. Drilling down is genuinely a
- * sequence here — you cannot pick a mode before picking singleplayer — so recording the trail
- * carries real information rather than decorating the page, and it means the choices already
- * made are legible without going back.
+ * Two steps. There was a third — a title screen offering "New game" and "Settings" — and it is
+ * gone: there are no application settings to reach, so it was one press that only ever led to the
+ * same place. The kinds now stand on the first screen, which is also what makes the shape of the
+ * game legible on arrival.
  *
- * Kinds that are not playable yet are shown and disabled rather than hidden, so the shape of the
- * game is visible from the menu.
+ * The path taken stays on screen beside the panel. Drilling down is genuinely a sequence here — you
+ * cannot pick a mode before picking singleplayer — so the trail carries real information rather than
+ * decorating the page.
+ *
+ * Kinds that are not playable yet are shown and disabled rather than hidden, for the same reason.
  *
  * Starting a game mints an id, stores its settings against it, and navigates to `/game?id=…` —
  * which is what lets a refresh come back as the same game (composables/useSavedGames.ts).
  */
-import { mdiCog } from '@mdi/js'
+import { mdiCog, mdiDiceMultiple } from '@mdi/js'
 import { computed, nextTick, ref, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -54,9 +57,10 @@ import {
   type PlacementRule,
 } from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
+import { playerName, rememberName, suggestName } from '@/composables/playerName'
 import { useSavedGames } from '@/composables/useSavedGames'
 
-type Step = 'title' | 'kind' | 'singleplayer'
+type Step = 'title' | 'singleplayer'
 
 /** A yes/no dial, as the numbers the dial machinery expects and the words a player should read. */
 const SWITCH_CHOICES: readonly number[] = [0, 1]
@@ -64,6 +68,21 @@ const SWITCH_LABELS: readonly string[] = ['No', 'Yes']
 
 const router = useRouter()
 const savedGames = useSavedGames()
+
+/** Read once on mount, so the field arrives filled rather than empty and then populated. */
+const name = ref(playerName())
+
+/**
+ * Another name from the pool, kept immediately.
+ *
+ * Stored on the press rather than waiting for a `change` the input will never emit — `v-model` sets
+ * the value programmatically, and that fires no user event. Leaving it to the field would lose the
+ * rolled name on the next reload.
+ */
+function reroll(): void {
+  name.value = suggestName(name.value)
+  rememberName(name.value)
+}
 
 const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
@@ -307,13 +326,12 @@ function closeSettings(): void {
   void nextTick(() => gear.value?.focus())
 }
 
-/** The choices made so far, newest last. Empty on the title screen. */
+/** The choices made so far, newest last. Empty on the first screen. */
 const trail = computed(() => {
   const out: { label: string, value: string }[] = []
-  if (step.value !== 'title') out.push({ label: 'Game', value: 'New' })
   if (kind.value) {
     out.push({
-      label: 'Players',
+      label: 'Game',
       value: GAME_KINDS.find(k => k.id === kind.value)?.label ?? '',
     })
   }
@@ -326,12 +344,8 @@ function chooseKind(id: GameKind): void {
 }
 
 function back(): void {
-  if (step.value === 'singleplayer') {
-    step.value = 'kind'
-    kind.value = null
-  } else {
-    step.value = 'title'
-  }
+  step.value = 'title'
+  kind.value = null
 }
 
 function startGame(): void {
@@ -385,46 +399,72 @@ const selectedMode = computed(() => modeInfo(mode.value))
 
     <section
       class="panel"
-      :aria-label="step === 'title' ? 'Main menu' : step === 'kind' ? 'Choose players' : 'Game setup'"
+      :aria-label="step === 'title' ? 'Main menu' : 'Game setup'"
     >
       <!-- Step 1 -->
       <template v-if="step === 'title'">
-        <button
-          type="button"
-          class="option"
-          @click="step = 'kind'"
-        >
-          <span class="option-label">New game</span>
-        </button>
-        <button
-          type="button"
-          class="option"
-          disabled
-        >
-          <span class="option-label">Settings</span>
-          <span class="soon">Soon</span>
-        </button>
+        <!--
+          Asked once, here, and kept. A name belongs to the person rather than to any one game, so it
+          sits above the kinds rather than inside their settings — those are frozen against a game id.
+          Optional: clear it and nothing insists.
+
+          Stored on `change` rather than on every keystroke, so a half-typed name is not what gets
+          remembered if the tab is closed mid-word.
+        -->
+        <div class="who">
+          <label
+            class="who-label"
+            for="player-name"
+          >Your name</label>
+          <input
+            id="player-name"
+            v-model="name"
+            type="text"
+            maxlength="40"
+            placeholder="Player"
+            @change="rememberName(name)"
+          >
+          <!--
+            Deliberately outside the label: a button nested in one is also a click on the label, so
+            every reroll would drag focus into the field it just filled.
+          -->
+          <button
+            type="button"
+            class="reroll"
+            aria-label="Suggest another name"
+            title="Suggest another name"
+            @click="reroll"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path :d="mdiDiceMultiple" />
+            </svg>
+          </button>
+        </div>
+
+        <fieldset class="group kinds">
+          <legend>New game</legend>
+          <button
+            v-for="entry in GAME_KINDS"
+            :key="entry.id"
+            type="button"
+            class="option"
+            :disabled="!entry.available"
+            @click="chooseKind(entry.id)"
+          >
+            <span class="option-label">{{ entry.label }}</span>
+            <span
+              v-if="!entry.available"
+              class="soon"
+            >Soon</span>
+          </button>
+        </fieldset>
       </template>
 
       <!-- Step 2 -->
-      <template v-else-if="step === 'kind'">
-        <button
-          v-for="entry in GAME_KINDS"
-          :key="entry.id"
-          type="button"
-          class="option"
-          :disabled="!entry.available"
-          @click="chooseKind(entry.id)"
-        >
-          <span class="option-label">{{ entry.label }}</span>
-          <span
-            v-if="!entry.available"
-            class="soon"
-          >Soon</span>
-        </button>
-      </template>
-
-      <!-- Step 3 -->
       <template v-else>
         <fieldset class="group">
           <legend>Mode</legend>
@@ -883,6 +923,93 @@ legend {
   color: #e8c878;
 }
 
+/* ── who you are ───────────────────────────────────────────────────────────── */
+
+/*
+ * The rule sits under the name row rather than over the kinds below it, which is a fieldset: a
+ * legend cuts its own border, so the same line drawn there would start halfway across the panel.
+ */
+.who {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #22252b;
+}
+
+.kinds {
+  margin-top: 14px;
+}
+
+.who-label {
+  color: #6b7382;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.who input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  background: #1b1e24;
+  color: #cfd4de;
+  font: inherit;
+  font-size: 13px;
+}
+
+.who input::placeholder {
+  color: #575d68;
+}
+
+.who input:focus-visible {
+  border-color: #7d6a41;
+  outline: none;
+}
+
+/* Square, and the same height as the field, so the row reads as one control with a handle on it. */
+.reroll {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 33px;
+  height: 33px;
+  padding: 0;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  background: transparent;
+  color: #6b7382;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms;
+}
+
+.reroll:hover {
+  border-color: #7d6a41;
+  color: #e8c878;
+}
+
+.reroll svg {
+  width: 16px;
+  height: 16px;
+  fill: currentcolor;
+  /* The die tumbles a sixth of a turn on press — the shortest way to say "that did something". */
+  transition: transform 220ms ease-out;
+}
+
+.reroll:active svg {
+  transform: rotate(60deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reroll svg {
+    transition: none;
+  }
+}
+
 .back {
   align-self: flex-start;
   margin-top: 6px;
@@ -901,7 +1028,7 @@ legend {
   color: #e8c878;
 }
 
-:is(.option, .count, .back, .settings):focus-visible {
+:is(.option, .count, .back, .settings, .reroll):focus-visible {
   outline: 2px solid #8fe6c0;
   outline-offset: 2px;
 }
