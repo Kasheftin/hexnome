@@ -174,8 +174,21 @@ let watching: HeadWatch | null = null
 async function absorbOthers(): Promise<void> {
   const arrived = await props.sync.catchUp()
   if (arrived.length === 0) return
+
   for (const command of arrived) {
-    for (const entry of replayOf(command)) applyEntry(unrecorded, entry)
+    const entries = replayOf(command)
+    for (const entry of entries) applyEntry(unrecorded, entry)
+    // The journal has to grow with them, or the results panel replays a game missing everyone else.
+    for (const entry of entries) log.append(entry)
+
+    /*
+     * And the counter. It is derived from the log at setup and would otherwise stay at the turn this
+     * screen opened on — so a player watching would see the board fill up under a heading that still
+     * said turn one. Counted the way `countFromLog` counts it: the server's own commands are not
+     * turns, and a closed round starts again.
+     */
+    if (entries.some(entry => entry.op === 'endRound')) count.value = nextRound(count.value)
+    else if (command.author !== SERVER_SEAT) count.value = nextTurn(count.value)
   }
   revision.value++
 }

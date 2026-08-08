@@ -58,6 +58,15 @@ let watcher: HeadWatch | null = null
 const viewedSeat = shallowRef(0)
 
 /**
+ * A board the player deliberately chose to watch, or null while they are simply watching their own.
+ *
+ * Without this there is nothing to tell "the view happens to be seat 0" from "I asked for seat 0", so
+ * the view either never follows the seat you are given or overrides a choice you made. It follows
+ * until you choose; after that it is yours.
+ */
+const chosenSeat = shallowRef<number | null>(null)
+
+/**
  * Load the game from scratch: the curtain, then the board.
  *
  * Only for arriving, or for starting again after a divergence. Everything that merely *updates* goes
@@ -94,8 +103,13 @@ async function refresh(): Promise<boolean> {
    * answer that can go stale, and a client trusting it could draw one board while playing another.
    */
   mySeat.value = game.game.you
-  // Only on arrival: a refresh must not yank the view back from a board you chose to watch.
-  if (loaded.value === null) viewedSeat.value = game.game.you ?? 0
+  /*
+   * Watch your own board unless you said otherwise — including the moment you *acquire* a seat, which
+   * is what this used to miss: joining from the waiting room left the view on the board it had been
+   * showing before there was a seat to show, so a player who had just sat down was watching somebody
+   * else's game.
+   */
+  if (chosenSeat.value === null) viewedSeat.value = game.game.you ?? 0
   loaded.value = game
 
   if (game.game.status === 'lobby') watchTable()
@@ -113,6 +127,21 @@ async function refresh(): Promise<boolean> {
 function watchTable(): void {
   if (watcher !== null) return
   watcher = watchHead(gameId.value, () => { void refresh() })
+}
+
+/**
+ * Look at somebody's board.
+ *
+ * **Fetches before switching**, and that is the fix rather than the flourish: changing the seat
+ * remounts the board, and a remount rebuilds it from the commands this component is holding — which
+ * only grow when it fetches. The board absorbs other players' turns into its *own* tableau as they
+ * arrive, so what is held here goes stale the moment anybody else moves. Switching seats then rebuilt
+ * from that stale copy, and the game reappeared as it had been several turns ago.
+ */
+async function watchSeat(seat: number): Promise<void> {
+  await refresh()
+  chosenSeat.value = seat
+  viewedSeat.value = seat
 }
 
 function stopWatching(): void {
@@ -197,7 +226,7 @@ const problem = computed(() => sync.problem())
       type="button"
       :class="{ watching: seat.seat === viewedSeat }"
       :aria-pressed="seat.seat === viewedSeat"
-      @click="viewedSeat = seat.seat"
+      @click="watchSeat(seat.seat)"
     >
       {{ seat.name || `Player ${seat.seat + 1}` }}<span
         v-if="seat.seat === mySeat"
