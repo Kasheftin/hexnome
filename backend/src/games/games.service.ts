@@ -10,6 +10,7 @@ import { createDeck, dealStartingPlates } from '@hexnome/rules/deck'
 import {
   applyCommand,
   createDealer,
+  nextActiveSeat,
   passedThisRound,
   replayDealer,
   type Dealer,
@@ -401,8 +402,14 @@ export class GamesService {
           gameId: id,
           prevSeq: body.prevSeq,
           author,
-          // Round the table. Seat order is join order, and seat zero plays first.
-          awaiting: (author + 1) % settings.players,
+          /*
+           * Round the table, skipping anyone who has passed — they are out until the round ends, so
+           * handing them a turn would stall the game on somebody who cannot take it. When the round
+           * closes everyone is back in, and it starts again with the first seat.
+           */
+          awaiting: closing
+            ? FIRST_SEAT
+            : nextActiveSeat(author, settings.players, passed) ?? FIRST_SEAT,
           cmdId: body.cmdId,
           // Both halves in one row, and therefore one INSERT: a client must never be able to observe
           // a move landing without the deal it triggered.

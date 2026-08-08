@@ -812,6 +812,51 @@ describe('passing', () => {
     expect(second.command.response[0]).toMatchObject({ op: 'endRound', round: 2 })
   })
 
+  /*
+   * The rule a rotation gets wrong. A player who has passed is out for the round, so the turn does
+   * not come back to them — it goes to whoever is still in, even if that is the same person again.
+   */
+  it('hands every remaining turn to the last player still in', async () => {
+    const host = await newTable(2)
+    const guest = await games.join(host.game.id, { name: 'Ada' })
+    const mine = await openingPlateOf(host.game.id, 0, 2)
+
+    // Seat 0 plays, then seat 1 passes and is done for the round.
+    const first = await games.submit(host.game.id, turn(guest.game.head.seq, [nudge(mine)]), host.token)
+    expect(first.command.awaiting).toBe(1)
+
+    const passed = await games.submit(host.game.id, turn(first.command.seq, [pass(1)]), guest.token)
+    expect(passed.command.response.some(e => e.op === 'endRound')).toBe(false)
+    // Back to seat 0 rather than round-robin onwards, because seat 1 is out.
+    expect(passed.command.awaiting).toBe(0)
+
+    // And it stays with seat 0, turn after turn, until they pass too.
+    let head = passed.command.seq
+    for (let i = 0; i < 3; i++) {
+      const again = await games.submit(host.game.id, turn(head, [nudge(mine)]), host.token)
+      expect(again.command.awaiting).toBe(0)
+      head = again.command.seq
+    }
+
+    const over = await games.submit(host.game.id, turn(head, [pass(0)]), host.token)
+    expect(over.command.response.map(e => e.op)).toEqual(['endRound'])
+    // A new round: everybody is back in, starting with the first seat.
+    expect(over.command.awaiting).toBe(0)
+  })
+
+  /* A passed player must not be handed a turn they are not allowed to take. */
+  it('refuses a passed player who tries to play again', async () => {
+    const host = await newTable(2)
+    const guest = await games.join(host.game.id, { name: 'Ada' })
+    const mine = await openingPlateOf(host.game.id, 0, 2)
+
+    const first = await games.submit(host.game.id, turn(guest.game.head.seq, [nudge(mine)]), host.token)
+    const passed = await games.submit(host.game.id, turn(first.command.seq, [pass(1)]), guest.token)
+
+    await expect(games.submit(host.game.id, turn(passed.command.seq, []), guest.token))
+      .rejects.toThrow(ForbiddenException)
+  })
+
   /* A seat may not pass on somebody else's behalf — the same guard as any other effect. */
   it('cannot be done for another seat', async () => {
     const host = await newTable(2)

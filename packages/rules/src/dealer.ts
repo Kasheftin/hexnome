@@ -203,6 +203,28 @@ export function passedThisRound(commands: readonly (readonly LogEntry[])[]): Set
   return passed
 }
 
+/**
+ * Whose turn it is after this one, or null when nobody is left to play.
+ *
+ * **A pass is not a skipped turn.** A player who passes is finished for the round, so the turn never
+ * comes back to them — which means the order is not a rotation but a walk over whoever is still in.
+ * With one player left it hands them every turn in a row until they pass too, and that is the rule
+ * rather than an edge case: they are the only one who can still do anything.
+ *
+ * Pairs with {@link passedThisRound}; the set it takes is what that returns.
+ */
+export function nextActiveSeat(
+  after: Seat,
+  players: number,
+  passed: ReadonlySet<Seat>,
+): Seat | null {
+  for (let step = 1; step <= players; step++) {
+    const seat = (after + step) % players
+    if (!passed.has(seat)) return seat
+  }
+  return null
+}
+
 /** Where a command stopped, when it stopped early. */
 export interface CommandOutcome {
   readonly ok: boolean
