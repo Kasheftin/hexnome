@@ -31,7 +31,7 @@
 import { shallowRef } from 'vue'
 import type { LogEntry } from '@hexnome/rules/gameLog'
 import type { CommandView, GameView, Head } from '@hexnome/rules/wire'
-import { ApiError, getCommands, getGame, submitCommand } from '@/api/games'
+import { ApiError, getCommands, getGame, submitCommand, type SubmitTurn } from '@/api/games'
 import { seatIn } from '@/composables/useSeat'
 
 /** How many times to resend a turn whose response never arrived. */
@@ -105,6 +105,20 @@ export function useGameSync(): GameSync {
 
   let gameId = ''
   let head = 0
+
+  /**
+   * True while a turn is in flight, and the reason is a race worth naming.
+   *
+   * The server announces a command the moment it is *stored*, which can reach this browser before the
+   * reply to the request that made it. `catchUp` would then fetch that command — the cursor has not
+   * moved yet, because the reply carrying its `seq` has not arrived — and hand it over to be applied.
+   * Moments later the reply lands and the caller applies it a second time.
+   *
+   * Applying a move twice is mostly invisible; applying an `endRound` twice is not, and it read as a
+   * player finishing one round and instantly finishing another. Only the author of a command can hit
+   * it, which is why it looked like one screen being wrong rather than a race.
+   */
+  let submitting = false
   const at = shallowRef<Head>({ seq: 0, awaiting: null })
   /** The seat token for this game, looked up when it loads. Without one you are a spectator. */
   let token = ''
@@ -150,7 +164,18 @@ export function useGameSync(): GameSync {
 
     const turn = { cmdId: newCommandId(), prevSeq: head, effects }
     status.value = 'saving'
+    submitting = true
 
+    try {
+      return await send(turn)
+    }
+    finally {
+      // Every exit clears it, or one failed turn silences every notification from then on.
+      submitting = false
+    }
+  }
+
+  async function send(turn: SubmitTurn): Promise<readonly LogEntry[] | null> {
     for (let attempt = 0; attempt < RETRIES; attempt++) {
       try {
         const result = await submitCommand(gameId, turn, token)
@@ -195,17 +220,30 @@ export function useGameSync(): GameSync {
    * a flaky network is not worth a banner — the next tick tries again.
    */
   async function catchUp(): Promise<readonly CommandView[]> {
-    if (!gameId || status.value === 'diverged') return []
+    /*
+     * Nothing while a turn of our own is in flight — see `submitting`. The notification that provoked
+     * this will still be true afterwards, and the next tick asks again from a cursor that has moved.
+     */
+    if (!gameId || submitting || status.value === 'diverged') return []
+    const asked = head
     try {
-      const slice = await getCommands(gameId, head)
-      if (slice.commands.length === 0) {
+      const slice = await getCommands(gameId, asked)
+
+      /*
+       * Filtered against the cursor as it stands *now*, not as it was when the request went out. A
+       * turn submitted while this was in flight moves the cursor past its own command, and returning
+       * it here would hand the caller something it has already applied — which for an `endRound` reads
+       * as a round finishing twice.
+       */
+      const fresh = slice.commands.filter(command => command.seq > head)
+      if (fresh.length === 0) {
         // Still worth taking the head: `awaiting` can move without this client having anything new.
-        at.value = slice.head
+        if (slice.head.seq >= head) at.value = slice.head
         return []
       }
-      head = slice.head.seq
+      head = Math.max(head, slice.head.seq)
       at.value = slice.head
-      return slice.commands
+      return fresh
     }
     catch {
       return []
