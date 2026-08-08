@@ -291,3 +291,59 @@ describe('a turn may only reach its own seat', () => {
     expect(reachesAnotherSeat(t, turn, 1)).toBe(1)
   })
 })
+
+/*
+ * What the hover asks. Dragging a tile over a cell asks whether it may land there, and that question
+ * is about one board — the one being dragged over. Answered for seat zero whoever asked, a second
+ * player saw the first player's board's answers: green where their own board forbade it and red
+ * where it allowed it.
+ */
+describe('whether a tile may land here', () => {
+  /** Two players, each with a plate and a tile in the same petal, so the boards differ by colour. */
+  function facing() {
+    const t = createTableau({ ...OPTIONS, placementRule: 'strict' })
+    const mine = t.addPlate(boardHole(CENTRE, 0))!
+    const yours = t.addPlate(boardHole(CENTRE, 1))!
+    t.addTile({ color: 1, value: 1 }, { kind: 'onPlate', plateId: mine.id, petal: 0 })
+    t.addTile({ color: 4, value: 4 }, { kind: 'onPlate', plateId: yours.id, petal: 0 })
+    return { t, mine, yours }
+  }
+
+  it('judges the move against the board it is being made on', () => {
+    const { t, mine, yours } = facing()
+    // A tile that agrees with seat 0's neighbour and not with seat 1's.
+    const held = t.addTile({ color: 1, value: 5 }, drawerSlot(6, 0))!
+
+    const onMine = t.canPlaceTile({ kind: 'onPlate', plateId: mine.id, petal: 1 }, held.id)
+    const onYours = t.canPlaceTile({ kind: 'onPlate', plateId: yours.id, petal: 1 }, held.id)
+    // The two boards hold different neighbours, so they must not give the same answer.
+    expect(onMine).not.toBe(onYours)
+  })
+
+  /* The reward is paid into a drawer, so "is there room for it" is per-seat as well. */
+  it('counts room for the reward in the placing player\'s own drawer', () => {
+    const t = createTableau(OPTIONS)
+    t.addPlate(boardHole(CENTRE, 1))
+    // Seat 0's drawer is full; seat 1's is empty. Nothing about seat 0 should reach seat 1's move.
+    for (let slot = 0; slot < OPTIONS.drawerSlots; slot++) t.addStem(slot, 0)
+    expect(t.freeDrawerSlots(0)).toHaveLength(0)
+    expect(t.freeDrawerSlots(1)).toHaveLength(OPTIONS.drawerSlots)
+  })
+
+  /*
+   * Spending a stem frees the slot it was actually in — and it has to be a seat *other* than zero to
+   * mean anything, because an unstated seat and seat zero produce the same key. Seat zero's own
+   * discard worked all along, which is why nothing noticed.
+   */
+  it('frees the right player\'s slot when a stem is spent', () => {
+    const t = createTableau(OPTIONS)
+    t.addStem(4, 0)
+    const theirs = t.addStem(4, 1)!
+
+    t.discard(theirs.id)
+    expect(t.freeDrawerSlots(1)).toContain(4)
+    // Seat 0's stem is untouched, and its slot is still taken.
+    expect(t.freeDrawerSlots(0)).not.toContain(4)
+    expect(t.stems(0)).toHaveLength(1)
+  })
+})

@@ -892,14 +892,14 @@ export function createTableau({
    * An anchor that did not exist before the move counts as newly closed, which is what makes a plate
    * that creates *and* immediately encloses an external anchor pay out.
    */
-  function rewardOfMove(move: { tile?: TileMove, plate?: PlateMove }): number {
-    const before = viewOf()
+  function rewardOfMove(move: { tile?: TileMove, plate?: PlateMove }, seat: Seat = SOLO_SEAT): number {
+    const before = viewOf(undefined, seat)
     const enclosedBefore = new Set(
       anchorsIn(before)
         .filter(anchor => ringAround(anchor.cell, before) !== null)
         .map(anchor => axialKey(anchor.cell)),
     )
-    const after = viewOf(move)
+    const after = viewOf(move, seat)
     let total = 0
     for (const anchor of anchorsIn(after)) {
       if (enclosedBefore.has(axialKey(anchor.cell))) continue
@@ -909,8 +909,8 @@ export function createTableau({
   }
 
   /** Is there room in the drawer for what this move pays? `vacating` counts the slot it empties. */
-  function rewardHasRoom(reward: number, vacating: number): boolean {
-    return reward <= 0 || freeDrawerSlotList().length + vacating >= reward
+  function rewardHasRoom(reward: number, vacating: number, seat: Seat = SOLO_SEAT): boolean {
+    return reward <= 0 || freeDrawerSlotList(seat).length + vacating >= reward
   }
 
   /**
@@ -928,8 +928,10 @@ export function createTableau({
     const plate = platesById.get(location.plateId)
     const tile = tilesById.get(movingId)
     if (!tile || plate?.location.kind !== 'board') return true
+    // Whose board this is, taken from the plate rather than assumed. Everything below is about it.
+    const seat = seatOf(plate.location)
     const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
-    const reward = rewardOfMove({ tile: { movingId, cell, spec: tile } })
+    const reward = rewardOfMove({ tile: { movingId, cell, spec: tile } }, seat)
     const vacating = tile.location.kind === 'drawer' ? 1 : 0
     return rewardHasRoom(reward, vacating)
   }
@@ -944,11 +946,11 @@ export function createTableau({
    *
    * Nothing is vacated: a plate leaves a *bay*, not a tile slot, so the stems gain no room from it.
    */
-  function plateRewardFits(hole: Axial, movingId: string): boolean {
+  function plateRewardFits(hole: Axial, movingId: string, seat: Seat = SOLO_SEAT): boolean {
     const plate = platesById.get(movingId)
     if (!plate) return true
-    const reward = rewardOfMove({ plate: { plateId: movingId, hole, rotation: plate.rotation } })
-    return rewardHasRoom(reward, 0)
+    const reward = rewardOfMove({ plate: { plateId: movingId, hole, rotation: plate.rotation } }, seat)
+    return rewardHasRoom(reward, 0, seat)
   }
 
   /** The board cell a plate's petal would occupy, given where and how the plate sits. */
@@ -991,7 +993,7 @@ export function createTableau({
       if (!plateConnects(location.hole, movingId, seat)) return false
       // Dealt plates have no id to look tiles up by; only a *move* is a player's placement.
       if (movingId === undefined) return true
-      if (!plateRewardFits(location.hole, movingId)) return false
+      if (!plateRewardFits(location.hole, movingId, seat)) return false
       const plate = platesById.get(movingId)
       return plate === undefined || plateTilesAgree(location.hole, movingId, plate.rotation)
     }
@@ -1027,8 +1029,14 @@ export function createTableau({
     const plate = platesById.get(location.plateId)
     if (!tile || plate?.location.kind !== 'board') return true
     if (!tileRewardFits(location, movingId)) return false
+    /*
+     * Which board the rules are about, read off the plate being landed on rather than defaulted. It
+     * was defaulted, so a second player dragging over their own board was told whether the move
+     * would be legal on the *first* player's — the highlight said yes and no in the wrong places.
+     */
+    const seat = seatOf(plate.location)
     const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
-    return tileIsWelcome(cell, tile, boardAfter({ tileId: movingId }))
+    return tileIsWelcome(cell, tile, boardAfter({ tileId: movingId, seat }))
   }
 
   return {
@@ -1243,7 +1251,8 @@ export function createTableau({
     discard(id) {
       const stem = stemsById.get(id)
       if (stem) {
-        occupants.delete(tileLocationKey({ kind: 'drawer', slot: stem.slot }))
+        // The stem's own seat, not the default: spending seat 1's stem must not free seat 0's slot.
+        occupants.delete(tileLocationKey(drawerSlot(stem.slot, stem.seat)))
         stemsById.delete(id)
         // Removed, but nothing to recycle: a stem is minted by an anchor, not drawn from a bag.
         return { kind: 'stem', plate: null, tiles: [] }
