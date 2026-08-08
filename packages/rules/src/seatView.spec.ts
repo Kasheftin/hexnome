@@ -198,3 +198,45 @@ describe('asking a slot what is in it', () => {
     expect(seatView(game, 1).plateSlotOccupant(0)).toBeUndefined()
   })
 })
+
+/*
+ * A renderer adds what it can see and sweeps what the model "no longer has". Both halves have to be
+ * asked of the *view*, or the sweep keeps objects the additive pass would never have made — which is
+ * how a tile drafted by one player stayed on another's screen and was redrawn at the slot it had
+ * moved to, two tiles deep, until a reload.
+ */
+describe('looking a piece up by id', () => {
+  it('does not admit a piece belonging to somebody else', () => {
+    const game = createTableau(OPTIONS)
+    const mine = game.addTile({ color: 1, value: 1 }, drawerSlot(0, 0))!
+    const yours = game.addTile({ color: 2, value: 2 }, drawerSlot(0, 1))!
+
+    expect(seatView(game, 0).tile(mine.id)).toBeDefined()
+    expect(seatView(game, 0).tile(yours.id)).toBeUndefined()
+    expect(seatView(game, 1).tile(yours.id)).toBeDefined()
+    expect(seatView(game, 1).tile(mine.id)).toBeUndefined()
+  })
+
+  it('agrees with what the same view lists', () => {
+    const game = createTableau(OPTIONS)
+    game.addPlate(boardHole(CENTRE, 0))
+    const theirs = game.addPlate(boardHole(CENTRE, 1))!
+
+    const view = seatView(game, 0)
+    // The sweep's question and the additive pass's question must have one answer.
+    for (const plate of view.plates()) expect(view.plate(plate.id)).toBeDefined()
+    expect(view.plate(theirs.id)).toBeUndefined()
+  })
+
+  /* The shared source is in everyone's view, so a lot's pieces stay findable from any seat. */
+  it('still finds what is in the shared source', () => {
+    const game = createTableau(OPTIONS)
+    const plate = game.addPlate({ kind: 'source', lot: 0 }, { faceDown: true })!
+    const loose = game.addTile({ color: 3, value: 3 }, { kind: 'source', lot: 0, index: 0 })!
+
+    for (const seat of [0, 1]) {
+      expect(seatView(game, seat).plate(plate.id)).toBeDefined()
+      expect(seatView(game, seat).tile(loose.id)).toBeDefined()
+    }
+  })
+})

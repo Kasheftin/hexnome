@@ -76,6 +76,27 @@ export function seatView(inner: Tableau, seat: Seat, writable = true): Tableau {
     plates: () => inner.plates().filter(platePresent),
     tiles: () => inner.tiles().filter(tilePresent),
 
+    /*
+     * **A view must not hand back a piece it does not contain**, and this is the rule the other
+     * scoping follows from rather than a fourth patch beside it.
+     *
+     * A renderer adds objects from `tiles()` and sweeps the ones the model "no longer has" by asking
+     * `tile(id)`. Unscoped, that answered yes for every seat — so a tile drafted into somebody else's
+     * drawer was never swept, kept its mesh, and was then positioned at the slot it had moved to: two
+     * tiles in one slot, on the wrong player's screen, until a reload rebuilt the scene from scratch.
+     *
+     * Scoping the lookup makes "does this exist" and "is this mine to draw" the same question, so a
+     * caller cannot ask the wrong one. Anything wanting the whole table holds the tableau itself.
+     */
+    tile: (id) => {
+      const tile = inner.tile(id)
+      return tile && tilePresent(tile) ? tile : undefined
+    },
+    plate: (id) => {
+      const plate = inner.plate(id)
+      return plate && platePresent(plate) ? plate : undefined
+    },
+
     tilesOnBoard: () => inner.tilesOnBoard(seat),
     platesOnBoard: () => inner.platesOnBoard(seat),
     freeDrawerSlots: () => inner.freeDrawerSlots(seat),
