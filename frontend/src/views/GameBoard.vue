@@ -60,7 +60,6 @@ import {
   type LogEntry,
 } from '@hexnome/rules/gameLog'
 import type { RoundRecord } from '@/ui/roundRecord'
-import { sourceContents } from '@hexnome/rules/source'
 import {
   type Anchor,
   type PlateLocation,
@@ -187,7 +186,16 @@ async function absorbOthers(): Promise<void> {
      * said turn one. Counted the way `countFromLog` counts it: the server's own commands are not
      * turns, and a closed round starts again.
      */
-    if (entries.some(entry => entry.op === 'endRound')) count.value = nextRound(count.value)
+    if (entries.some(entry => entry.op === 'endRound')) {
+      count.value = nextRound(count.value)
+      /*
+       * Somebody else's pass ended the round. The panel used to be raised only by the client that
+       * submitted the closing command, so everyone who had passed earlier got no results at all —
+       * just a new round heading over the old round's board.
+       */
+      roundsFinished.value = log.rounds()
+      showResults.value = true
+    }
     else if (command.author !== SERVER_SEAT) count.value = nextTurn(count.value)
   }
   revision.value++
@@ -632,7 +640,16 @@ function roundRecord(round: number): RoundRecord {
   const cached = derived.get(round)
   if (cached) return cached
 
-  const asItWas = replayTableau(entriesThroughRound(log.entries, round), tableauOptions)
+  /*
+   * Scoped to the seat being looked at. Replayed raw it holds every player's board at once — so the
+   * picture was all of them drawn on top of each other, and the tally counted everybody's tiles as
+   * one player's score.
+   */
+  const asItWas = seatView(
+    replayTableau(entriesThroughRound(log.entries, round), tableauOptions),
+    props.viewedSeat,
+    false,
+  )
   const record: RoundRecord = {
     round,
     board: describeBoard(asItWas, HEX_SIZE),
@@ -678,23 +695,6 @@ const finalGroups = computed(() => {
 
 const isFinalRound = computed(() => count.value.round >= (totalRounds.value || 1))
 
-/**
- * Sweep the shared source into the piles: a round's leftovers do not carry over.
- *
- * Also a fix, not only a rule. Restocking needs `hasRoomToShift` — the *bottom* lot free — so a round
- * that ended with anything still in the bottom lot (the usual way a round ends: nothing left is
- * affordable) would leave the next round unable to push a lot at all.
- *
- * Loose tiles are discarded separately from the plate they are heaped on. A source tile is
- * `kind: 'source'`, not `onPlate`, so discarding the plate does *not* take it.
- */
-function clearSource(): void {
-  const { tiles: loose, plates: standing } = sourceContents(tableau)
-  // Discarding is all this does now; where the pieces go afterwards is the server's business, and it
-  // reads these same entries to find out. A face-down plate is swept without ever being looked at.
-  for (const tile of loose) tableau.discard(tile.id)
-  for (const plate of standing) tableau.discard(plate.id)
-}
 
 /**
  * Bank the round and move on.
@@ -714,10 +714,12 @@ function startNextRound(): void {
   }
 
   showResults.value = false
-  count.value = nextRound(count.value)
+  /*
+   * The counter and the sweep both come from the server now. It closed the round: it wrote the
+   * bookmark, cleared the source and dealt the new round's first lot, and those arrived as ordinary
+   * entries. Doing any of it here as well would clear one source twice.
+   */
   announceRound(count.value.round, count.value.turn, () => {
-    // Behind the card, and in this order: empty the column before the new round's quota is opened.
-    clearSource()
     revision.value++
     beginTurn()
   })

@@ -777,8 +777,8 @@ describe('passing', () => {
     const game = await newGame()
     const { command } = await play(game, turn(game.head.seq, [pass(0)]))
 
-    expect(command.response.map(e => e.op)).toEqual(['endRound'])
-    expect(command.response[0]).toMatchObject({ round: 1 })
+    // The bookmark, and then everything the new round needs — see "what closing a round writes".
+    expect(command.response[0]).toMatchObject({ op: 'endRound', round: 1 })
   })
 
   it('does not close it while somebody is still playing', async () => {
@@ -791,7 +791,7 @@ describe('passing', () => {
     expect(first.command.awaiting).toBe(1)
 
     const second = await games.submit(host.game.id, turn(first.command.seq, [pass(1)]), guest.token)
-    expect(second.command.response.map(e => e.op)).toEqual(['endRound'])
+    expect(second.command.response[0]).toMatchObject({ op: 'endRound' })
   })
 
   /* The bookmark has to be stored, or a reload loses every round the panel draws. */
@@ -839,7 +839,7 @@ describe('passing', () => {
     }
 
     const over = await games.submit(host.game.id, turn(head, [pass(0)]), host.token)
-    expect(over.command.response.map(e => e.op)).toEqual(['endRound'])
+    expect(over.command.response[0]).toMatchObject({ op: 'endRound' })
     // A new round: everybody is back in, starting with the first seat.
     expect(over.command.awaiting).toBe(0)
   })
@@ -864,5 +864,55 @@ describe('passing', () => {
     const guest = await games.join(host.game.id, { name: 'Ada' })
     await expect(games.submit(host.game.id, turn(guest.game.head.seq, [pass(1)]), host.token))
       .rejects.toThrow(UnprocessableEntityException)
+  })
+})
+
+/*
+ * Closing a round. There is one source, so there is one place that may clear it — and the same
+ * applies to dealing the round that follows. The client that happened to submit the last pass used
+ * to do both, which left everybody else looking at the old round's column.
+ */
+describe('what closing a round writes', () => {
+  const pass = (seat: number): LogEntry => ({ op: 'pass', seat })
+
+  it('sweeps the source and deals the next round, all in the closing command', async () => {
+    const game = await newGame()
+    const opening = await games.commands(game.id, 0)
+    const before = replayTableau(replayOf(opening.commands[0]!), tableauOptionsFor(SETTINGS))
+    expect(before.tilesInSourceLot(0)).toHaveLength(4)
+
+    const { command } = await play(game, turn(game.head.seq, [pass(0)]))
+    const ops = command.response.map(e => e.op)
+
+    // The bookmark first, so the panel's cut falls before everything the new round brings.
+    expect(ops[0]).toBe('endRound')
+    expect(ops).toContain('discard')
+    expect(ops).toContain('addPlate')
+
+    // And the board that results has one fresh lot, not last round's leftovers plus a new one.
+    const after = replayTableau(
+      (await games.commands(game.id, 0)).commands.flatMap(replayOf),
+      tableauOptionsFor(SETTINGS),
+    )
+    expect(after.plateInSourceLot(0)).toBeDefined()
+    expect(after.tilesInSourceLot(0)).toHaveLength(4)
+    expect(after.plateInSourceLot(1)).toBeUndefined()
+  })
+
+  /*
+   * The cut the scoring panel makes. Everything the new round brings has to land after the bookmark,
+   * or a finished round is shown with the next round's source already on the table.
+   */
+  it('puts nothing before the bookmark that belongs to the next round', async () => {
+    const game = await newGame()
+    const { command } = await play(game, turn(game.head.seq, [pass(0)]))
+    expect(command.response.findIndex(e => e.op === 'endRound')).toBe(0)
+  })
+
+  it('starts the new round with its quota open again', async () => {
+    const game = await newGame()
+    const first = await play(game, turn(game.head.seq, [pass(0)]))
+    // A round that had already spent its plates would deal nothing here.
+    expect(first.command.response.filter(e => e.op === 'addPlate')).toHaveLength(1)
   })
 })

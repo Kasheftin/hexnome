@@ -23,8 +23,13 @@ import {
   type GameSettings,
 } from '@hexnome/rules/gameSettings'
 import { openingPosition, tableauOptionsFor } from '@hexnome/rules/setup'
-import { shouldRefill } from '@hexnome/rules/source'
-import { createTableau, type Tableau } from '@hexnome/rules/tableau'
+import { shouldRefill, sourceContents } from '@hexnome/rules/source'
+import {
+  createTableau,
+  type PlateSpec,
+  type Tableau,
+  type TileSpec,
+} from '@hexnome/rules/tableau'
 import { PrismaService } from '../prisma.service'
 import { HeadsGateway } from './heads.gateway'
 import {
@@ -466,11 +471,40 @@ export class GamesService {
     const recorder = recordingTableau(tableau, entry => response.push(entry))
 
     /*
-     * The bookmark goes in before anything else the server owes, and that ordering is the point: the
-     * scoring panel cuts the log at `endRound` and shows the board as it stood then, so a lot dealt
-     * for the next round must fall on the far side of the cut.
+     * Closing a round is the server's job in full: the bookmark, sweeping the source, and dealing the
+     * new round's first lot.
+     *
+     * It used to be the client's, and only the client that submitted the closing pass did any of it —
+     * so everyone else was left looking at last round's source under this round's heading. Worse, two
+     * clients each sweeping would each submit the same discards and the second would be refused.
+     * There is one source, so there is one place that may clear it.
+     *
+     * **The bookmark goes first.** The scoring panel cuts the log at `endRound` and shows the board as
+     * it stood then, so everything below has to fall on the far side of that cut.
      */
-    if (closing) return [{ op: 'endRound', round }]
+    if (closing) {
+      response.push({ op: 'endRound', round })
+
+      // Nothing left in the column carries over; the new round deals into an empty one.
+      const { tiles: loose, plates: standing } = sourceContents(recorder)
+      const spentTiles: TileSpec[] = []
+      const spentPlates: PlateSpec[] = []
+      for (const tile of loose) {
+        spentTiles.push({ color: tile.color, value: tile.value })
+        recorder.discard(tile.id)
+      }
+      for (const plate of standing) {
+        const carried = dealer.forget(plate.id)
+        if (carried) spentPlates.push(carried)
+        recorder.discard(plate.id)
+      }
+      // One batch each, however many lots it came from — the pile sorts what it is given.
+      dealer.recycle(spentTiles, spentPlates)
+
+      dealer.newRound()
+      dealer.deal(recorder)
+      return response
+    }
 
     // Turn over anything the turn just picked clean, before restocking on top of it.
     dealer.reveal(recorder)
