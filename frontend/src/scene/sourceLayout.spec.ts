@@ -3,8 +3,8 @@ import { SOURCE_BOTTOM_GAP_PX, SOURCE_LOT_MAX_PX, SOURCE_TOP_PX } from './consta
 import { createDrawerLayout, type DrawerShape } from './drawerLayout'
 import { createSourceLayout } from './sourceLayout'
 
-const DEFAULT: DrawerShape = { tileSlots: 16, plateSlots: 2 }
-const LARGEST: DrawerShape = { tileSlots: 18, plateSlots: 3 }
+const DEFAULT: DrawerShape = { tileSlots: 12, plateSlots: 2 }
+const LARGEST: DrawerShape = { tileSlots: 16, plateSlots: 3 }
 
 /** Windows worth caring about, from a desktop down to something uncomfortably small. */
 const HEIGHTS = [1080, 900, 800, 768, 720, 640, 560, 500]

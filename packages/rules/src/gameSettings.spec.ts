@@ -22,7 +22,7 @@ const valid = {
   kind: 'singleplayer',
   mode: 'classic',
   platesPerRound: 5,
-  tileSlots: 18,
+  tileSlots: 16,
   plateSlots: 1,
   initialStems: 2,
   stemsPerInternalAnchor: 4,
@@ -270,20 +270,22 @@ describe('the end-of-game switches', () => {
 
 describe('the drawer\'s size', () => {
   it('falls back rather than failing on a bad count', () => {
-    for (const bad of [0, 13, 24, 16.5, '16', null, undefined, NaN]) {
+    // 18 is in the list because it *used* to be offered: a stored game from then is not a licence.
+    for (const bad of [0, 13, 18, 24, 16.5, '16', null, undefined, NaN]) {
       expect(parseGameSettings({ ...valid, tileSlots: bad })?.tileSlots).toBe(DEFAULT_TILE_SLOTS)
       expect(parseGameSettings({ ...valid, plateSlots: bad })?.plateSlots).toBe(DEFAULT_PLATE_SLOTS)
     }
   })
 
   it('keeps an offered count', () => {
-    expect(parseGameSettings({ ...valid, tileSlots: 12 })?.tileSlots).toBe(12)
+    // Both offered and *not* the default, so a silent fallback would still fail this.
+    expect(parseGameSettings({ ...valid, tileSlots: 10 })?.tileSlots).toBe(10)
     expect(parseGameSettings({ ...valid, plateSlots: 3 })?.plateSlots).toBe(3)
   })
 
   it('defaults to the drawer the game shipped with', () => {
     const fresh = defaultGameSettings(0)
-    expect([fresh.tileSlots, fresh.plateSlots]).toEqual([16, 2])
+    expect([fresh.tileSlots, fresh.plateSlots]).toEqual([12, 2])
   })
 
   /* Two rows deep, so every offered count has to divide into whole columns. */

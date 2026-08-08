@@ -3,9 +3,9 @@ import { PLATE_SLOT_CHOICES, TILE_SLOT_CHOICES } from '@hexnome/rules/gameSettin
 import { DRAWER_SIDE_GAP_PX } from './constants'
 import { createDrawerLayout, type DrawerShape } from './drawerLayout'
 
-const DEFAULT: DrawerShape = { tileSlots: 16, plateSlots: 2 }
-const LARGEST: DrawerShape = { tileSlots: 18, plateSlots: 3 }
-const SMALLEST: DrawerShape = { tileSlots: 12, plateSlots: 1 }
+const DEFAULT: DrawerShape = { tileSlots: 12, plateSlots: 2 }
+const LARGEST: DrawerShape = { tileSlots: 16, plateSlots: 3 }
+const SMALLEST: DrawerShape = { tileSlots: 10, plateSlots: 1 }
 
 /** Every drawer a player can actually ask for. */
 function everyShape(): DrawerShape[] {
@@ -37,11 +37,11 @@ describe('when the drawer fits', () => {
 })
 
 describe('when it does not fit', () => {
-  /* The case that prompted this: 18 tiles and 3 bays want 1383px, more than a 1366 laptop has. */
+  /* 16 tiles and 3 bays want 1300px, plus the side gaps: 1332 of canvas, more than a 1280 has. */
   it('shrinks the largest drawer onto a laptop', () => {
-    const layout = createDrawerLayout(1366, 768, LARGEST)
+    const layout = createDrawerLayout(1280, 768, LARGEST)
     expect(layout.scale).toBeLessThan(1)
-    expect(layout.width).toBeLessThanOrEqual(1366)
+    expect(layout.width).toBeLessThanOrEqual(1280)
   })
 
   it('fits every drawer a player can choose, at every width worth caring about', () => {

@@ -71,8 +71,8 @@ export const DEFAULT_PLATES_PER_ROUND = 4
  * The tile counts are all **even** because the grid is two rows deep, so each divides exactly into
  * columns — see `scene/drawerLayout.ts`.
  */
-export const TILE_SLOT_CHOICES: readonly number[] = [12, 14, 16, 18]
-export const DEFAULT_TILE_SLOTS = 16
+export const TILE_SLOT_CHOICES: readonly number[] = [10, 12, 14, 16]
+export const DEFAULT_TILE_SLOTS = 12
 
 export const PLATE_SLOT_CHOICES: readonly number[] = [1, 2, 3]
 export const DEFAULT_PLATE_SLOTS = 2

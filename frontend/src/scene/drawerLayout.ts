@@ -82,8 +82,9 @@ export function createDrawerLayout(
   /*
    * The size the drawer wants to be, before the window has a say.
    *
-   * A three-bay, eighteen-tile drawer is 1383px across — wider than a 1366 laptop — and the settings
-   * let a player ask for exactly that. So the panel scales to fit rather than running off the edge.
+   * A three-bay, sixteen-tile drawer is 1300px across and wants 1332 of canvas once the side gaps
+   * are counted — more than a 1280 laptop has, and the settings let a player ask for exactly that.
+   * So the panel scales to fit rather than running off the edge.
    *
    * **Capped at 1:** the constants are the intended sizes, not a minimum, so a big window shows the
    * drawer at its designed size rather than a stretched one. There is no lower cap: below about
