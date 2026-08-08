@@ -84,6 +84,17 @@ export function seatView(inner: Tableau, seat: Seat, writable = true): Tableau {
     coverageAt: cell => inner.coverageAt(cell, seat),
     petalAt: cell => inner.petalAt(cell, seat),
 
+    /*
+     * "What is in slot three?" is a per-seat question, and these were answering it for seat zero
+     * whoever asked. That is what mixed the drawers: everybody's drawer is drawn slot by slot, so a
+     * tile drafted into seat 0's slot three appeared in every player's drawer — invisibly at first,
+     * because all seats open with three stems in slots 0..2 and one seat's stems look exactly like
+     * another's.
+     */
+    drawerSlotOccupant: slot => inner.drawerSlotOccupant(slot, seat),
+    plateSlotOccupant: slot => inner.plateSlotOccupant(slot, seat),
+    freePlateSlots: () => inner.freePlateSlots(seat),
+
     // ── touching ─────────────────────────────────────────────────────────────
     addTile: (spec, location, options) =>
       writable ? inner.addTile(spec, atSeat(location, seat), options) : no(undefined),

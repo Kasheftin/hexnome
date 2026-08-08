@@ -367,9 +367,9 @@ export interface Tableau {
   anchorReward(anchor: Anchor): number
 
   /** Whatever sits in a drawer tile slot — a tile or a stem — by id. */
-  drawerSlotOccupant(slot: number): string | undefined
+  drawerSlotOccupant(slot: number, seat?: Seat): string | undefined
   /** Whichever plate sits in a bay, by id. */
-  plateSlotOccupant(slot: number): string | undefined
+  plateSlotOccupant(slot: number, seat?: Seat): string | undefined
 
   /**
    * Exchange the drawer positions of two items.
@@ -418,7 +418,7 @@ export interface Tableau {
   petalAt(cell: Axial, seat?: Seat): TileLocation | null
 
   freeDrawerSlots(seat?: Seat): number[]
-  freePlateSlots(): number[]
+  freePlateSlots(seat?: Seat): number[]
   isBoardCell(cell: Axial): boolean
 }
 
@@ -1195,12 +1195,12 @@ export function createTableau({
     },
     anchorReward: anchor => rewardOf(anchor, viewOf()),
 
-    drawerSlotOccupant(slot) {
-      return occupants.get(tileLocationKey({ kind: 'drawer', slot }))
+    drawerSlotOccupant(slot, seat = SOLO_SEAT) {
+      return occupants.get(tileLocationKey(drawerSlot(slot, seat)))
     },
 
-    plateSlotOccupant(slot) {
-      return occupants.get(plateLocationKey({ kind: 'plateSlot', slot }))
+    plateSlotOccupant(slot, seat = SOLO_SEAT) {
+      return occupants.get(plateLocationKey(plateBay(slot, seat)))
     },
 
     swapDrawerItems(a, b) {
@@ -1290,10 +1290,10 @@ export function createTableau({
 
     freeDrawerSlots: freeDrawerSlotList,
 
-    freePlateSlots() {
+    freePlateSlots(seat = SOLO_SEAT) {
       const free: number[] = []
       for (let slot = 0; slot < plateSlots; slot++) {
-        if (!occupants.has(plateLocationKey({ kind: 'plateSlot', slot }))) free.push(slot)
+        if (!occupants.has(plateLocationKey(plateBay(slot, seat)))) free.push(slot)
       }
       return free
     },

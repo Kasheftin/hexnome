@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { seatView } from './seatView'
 import { hexRectangle } from './hex'
-import { boardHole, createTableau, drawerSlot, type TableauOptions } from './tableau'
+import { boardHole, createTableau, drawerSlot, plateBay, type TableauOptions } from './tableau'
 
 /**
  * One state, many views. The tableau holds every player's board and drawer at once; a view decides
@@ -153,5 +153,48 @@ describe('a view of somebody else', () => {
     const spectating = seatView(game, 0, false)
     expect(spectating.platesOnBoard()).toHaveLength(1)
     expect(spectating.addStem(0)).toBeUndefined()
+  })
+})
+
+/*
+ * The drawer is drawn slot by slot, not from a list — so "what is in slot three?" is the question
+ * that actually reaches the model, and it was answered for seat zero whoever asked.
+ *
+ * It hid well. Every seat opens with three stems in slots 0..2, and one seat's stems look exactly
+ * like another's, so a freshly loaded game looked right in every window. The first time anybody
+ * drafted, their tile appeared in everyone's drawer.
+ */
+describe('asking a slot what is in it', () => {
+  function drawers() {
+    const game = createTableau(OPTIONS)
+    // What every game opens with: the same stems in the same slots for everybody.
+    for (const seat of [0, 1]) for (const slot of [0, 1, 2]) game.addStem(slot, seat)
+    // And then seat 0 drafts something into slot 3.
+    const drafted = game.addTile({ color: 2, value: 2 }, drawerSlot(3, 0))!
+    return { game, drafted }
+  }
+
+  it('does not show one player the tile another just drafted', () => {
+    const { game, drafted } = drawers()
+    expect(seatView(game, 0).drawerSlotOccupant(3)).toBe(drafted.id)
+    expect(seatView(game, 1).drawerSlotOccupant(3)).toBeUndefined()
+  })
+
+  it('gives each player their own stems, identical though they look', () => {
+    const { game } = drawers()
+    const mine = seatView(game, 0).drawerSlotOccupant(0)
+    const yours = seatView(game, 1).drawerSlotOccupant(0)
+    expect(mine).toBeDefined()
+    expect(yours).toBeDefined()
+    expect(mine).not.toBe(yours)
+  })
+
+  it('counts free bays per player', () => {
+    const game = createTableau(OPTIONS)
+    game.addPlate(plateBay(0, 0))
+    expect(seatView(game, 0).freePlateSlots()).not.toContain(0)
+    expect(seatView(game, 1).freePlateSlots()).toContain(0)
+    expect(seatView(game, 0).plateSlotOccupant(0)).toBeDefined()
+    expect(seatView(game, 1).plateSlotOccupant(0)).toBeUndefined()
   })
 })
