@@ -181,6 +181,17 @@ const props = defineProps<{
    */
   spending?: readonly string[]
   /**
+   * Stems just paid out by an enclosure, so they can be seen arriving.
+   *
+   * Everything that comes to the table comes in from the **left**, and everything spent leaves to the
+   * right. A reward has no origin on screen — it is minted, not moved — so the left edge is where it
+   * comes from, which is at least a consistent lie.
+   *
+   * Told rather than inferred: a stem view appears for the three a game opens with as well, and those
+   * are part of the position rather than something that just happened.
+   */
+  arriving?: readonly string[]
+  /**
    * Bumped by the owner on every model mutation.
    *
    * The tableau is plain mutable data, not reactive, so this is how the view learns that plates or
@@ -560,6 +571,9 @@ function easeScreen(view: View, x: number, y: number, ease: number): void {
 
 /** How long a drafted piece takes to cross from the source column to its drawer slot. */
 const ARRIVE_SECONDS = 0.42
+
+/** Where a minted stem starts, in screen pixels: off the left edge, out of sight. */
+const ARRIVE_FROM_X = -140
 
 /**
  * Restart the scale ease when an object changes container.
@@ -1277,7 +1291,7 @@ onBeforeRender(({ delta }) => {
     } else {
       setRegime(view, 'drawer')
       const c = l.slotCentre(stem.slot)
-      easeScreen(view, c.x, c.y, ease)
+      easeScreen(view, c.x, c.y, easeFor(view, delta, ease))
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, DRAWER_TILE_Y, p.z)
       approachScale(view, drawerTileScale(upp), ease)
@@ -1496,16 +1510,24 @@ function reconcileViews(): void {
     if (stemViews.has(stem.id)) continue
     const coin = createStemVisual()
     const coinDecor = attachCoinDraftDecor(coin)
+
+    /*
+     * A stem an enclosure just paid out comes in from the left, so it is seen arriving rather than
+     * appearing. `fresh` is what makes an ordinary new view snap into place; clearing it and putting
+     * the view off the left edge is the whole of the entrance.
+     */
+    const rewarded = props.arriving?.includes(stem.id) ?? false
     stemViews.set(stem.id, {
       object: coin,
       world: new Vector3(),
-      screenX: 0,
-      screenY: 0,
+      screenX: rewarded ? ARRIVE_FROM_X : 0,
+      screenY: rewarded ? layout.value.slotCentre(stem.slot).y : 0,
       scale: 1,
       spin: 0,
-      regime: '',
+      regime: rewarded ? 'drawer' : '',
       settled: false,
-      fresh: true,
+      fresh: !rewarded,
+      arriving: rewarded ? ARRIVE_SECONDS : undefined,
       decor: coinDecor,
     })
     owners.set(coin, { kind: 'stem', id: stem.id })

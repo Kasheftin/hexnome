@@ -167,11 +167,23 @@ export interface DeskReturns {
 }
 
 export type CommandResult =
-  | { readonly ok: true, readonly toDesk: DeskReturns }
+  | {
+    readonly ok: true
+    readonly toDesk: DeskReturns
+    /**
+     * Stems this command minted, by id — an enclosure paying out.
+     *
+     * Reported rather than left to be noticed. They appear in a drawer from nowhere, and the only
+     * way to tell them from the ones already there is to have been told, which is what lets the view
+     * show them arriving instead of blinking into existence.
+     */
+    readonly awarded: readonly string[]
+  }
   | { readonly ok: false, readonly error: string }
 
 const nothing: DeskReturns = { tiles: [], plates: [] }
-const done = (toDesk: DeskReturns = nothing): CommandResult => ({ ok: true, toDesk })
+const done = (toDesk: DeskReturns = nothing, awarded: readonly string[] = []): CommandResult =>
+  ({ ok: true, toDesk, awarded })
 const refuse = (error: string): CommandResult => ({ ok: false, error })
 
 function specOf(code: number): TileSpec {
@@ -538,11 +550,14 @@ function applyPut(
     if (receipt.kind === 'plate' && receipt.plate) plates.push(receipt.plate)
   }
 
-  awardEnclosedAnchors(seat)
+  const awarded = awardEnclosedAnchors(seat)
 
   const returns = { tiles, plates }
   const after = endTurn(state)
-  return done({ tiles: [...returns.tiles, ...after.tiles], plates: [...returns.plates, ...after.plates] })
+  return done(
+    { tiles: [...returns.tiles, ...after.tiles], plates: [...returns.plates, ...after.plates] },
+    awarded,
+  )
 }
 
 /**
@@ -555,8 +570,9 @@ function applyPut(
  * the award then cannot be missed by some future move that encloses a plate another way.
  * `canPlaceTile` has already refused any placement whose reward would not fit, so the slots are there.
  */
-function awardEnclosedAnchors(seat: SeatState): void {
+function awardEnclosedAnchors(seat: SeatState): string[] {
   const board = seat.tableau
+  const minted: string[] = []
   for (const anchor of board.anchors()) {
     const key = anchor.kind === 'external'
       ? `external:${anchor.cell.q},${anchor.cell.r}`
@@ -568,9 +584,11 @@ function awardEnclosedAnchors(seat: SeatState): void {
     for (let i = 0; i < board.anchorReward(anchor); i++) {
       const slot = board.freeDrawerSlots()[0]
       if (slot === undefined) break
-      board.addStem(slot)
+      const stem = board.addStem(slot)
+      if (stem) minted.push(stem.id)
     }
   }
+  return minted
 }
 
 /** What a drawer tile costs to place. A plate is described by the token it carries. */

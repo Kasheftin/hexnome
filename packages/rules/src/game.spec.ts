@@ -663,6 +663,61 @@ describe('putting something on the board', () => {
     expect(purse.filter(payer => payer.kind === 'stem').length).toBe(seat.tableau.stems().length)
   })
 
+  /*
+   * An enclosure pays in stems, and the view has to be told which ones — they appear in a drawer from
+   * nowhere, and nothing else distinguishes them from the ones already sitting there.
+   *
+   * No early exits: a setup that quietly failed would leave this passing while proving nothing, which
+   * is what the first version of it did.
+   */
+  it('names the stems an enclosure paid out', () => {
+    const state = createGame(options({ players: 1, initialStems: 4 }))
+    const seat = state.seats[0]!
+    const plate = seat.tableau.plates()[0]!
+    const token = seat.tableau.tilesOnBoard()[0]!
+    const tokenPetal = token.location.kind === 'onPlate' ? token.location.petal : 0
+
+    /*
+     * Five petals of one flower filled and the sixth left open: placing into it closes the ring round
+     * the plate's own anchor. All one colour and every value distinct, so no group holds a duplicate —
+     * the token is a 1, so the ring takes 2, 3, 4, 6 and the placement is the 5.
+     */
+    const free = [0, 1, 2, 3, 4, 5].filter(petal => petal !== tokenPetal)
+    const ring = free.slice(0, 4)
+    const last = free[4] as number
+    ring.forEach((petal, at) => {
+      const value = [2, 3, 4, 6][at] as number
+      const added = seat.tableau.addTile(
+        { color: token.color, value },
+        { kind: 'onPlate', plateId: plate.id, petal },
+      )
+      expect(added).toBeDefined()
+    })
+
+    const held = seat.tableau.addTile({ color: token.color, value: 5 }, { kind: 'drawer', slot: 4 })
+    expect(held).toBeDefined()
+    const stems = seat.tableau.stems().map(stem => stem.id)
+    expect(stems).toHaveLength(4)
+
+    const to = { kind: 'onPlate' as const, plateId: plate.id, petal: last }
+    expect(seat.tableau.whyNotPlaceTile(to, held!.id)).toBeNull()
+
+    // A value-5 tile costs four, and four wilds is exactly what the drawer holds.
+    const result = applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held!.id }, to, paying: stems,
+    })
+    expect(result).toMatchObject({ ok: true })
+
+    // The ring is closed, so the anchor pays — and every stem it minted is named.
+    expect(result.ok && result.awarded.length).toBeGreaterThan(0)
+    if (!result.ok) return
+    for (const id of result.awarded) {
+      expect(seat.tableau.stems().some(stem => stem.id === id)).toBe(true)
+      // New ones, not the wilds just spent.
+      expect(stems).not.toContain(id)
+    }
+  })
+
   it('is refused from a seat whose turn it is not', () => {
     const { state, held, to } = holding()
     // The turn moved on after the draft, so seat 0 is not the one playing.

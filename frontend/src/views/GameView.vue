@@ -59,6 +59,7 @@ import {
   paymentPurse,
   replayGame,
   type Command,
+  type CommandResult,
   type GameOptions,
 } from '@hexnome/rules/game'
 import { createDesk, rulesHealth, type Desk } from '@/composables/useDesk'
@@ -455,7 +456,7 @@ async function dealLot(): Promise<boolean> {
     reportDeskTrouble(error)
     return false
   }
-  return commit({ kind: 'deal', plate, tiles })
+  return commit({ kind: 'deal', plate, tiles }) !== null
 }
 
 /**
@@ -468,18 +469,18 @@ async function dealLot(): Promise<boolean> {
  * already left the board, the desk queues the request behind whatever is in flight, and a slow round
  * trip should not hold up the turn.
  */
-function commit(command: Command): boolean {
+function commit(command: Command): Extract<CommandResult, { ok: true }> | null {
   const result = applyCommand(state, command)
   if (!result.ok) {
     console.warn(`[hexnome] ${command.kind} refused: ${result.error}`)
-    return false
+    return null
   }
   log.push(command)
   revision.value++
 
   void tileDesk?.discard(result.toDesk.tiles.map(tileCode)).catch(reportDeskTrouble)
   void plateDesk?.discard(result.toDesk.plates.map(tileCode)).catch(reportDeskTrouble)
-  return true
+  return result
 }
 
 /**
@@ -490,6 +491,9 @@ function commit(command: Command): boolean {
  * attempt failed silently, paying instantly while looking like it waited.
  */
 const spending = shallowRef<readonly string[]>([])
+
+/** Stems an enclosure has just paid out, so the scene can bring them in rather than blink them on. */
+const arriving = shallowRef<readonly string[]>([])
 
 const targetCells = shallowRef<Axial[]>([])
 const targetValid = shallowRef(false)
@@ -1258,13 +1262,14 @@ function applyPayment(): void {
    *
    * `settling` closes Apply while it plays, so a second press cannot pay twice.
    */
+  const seat = activeIndex.value
   settling.value = true
   spending.value = [...current.selected]
   settleTimer = window.setTimeout(() => {
     settleTimer = null
     settling.value = false
     spending.value = []
-    commitPayment(item, to, current.origin, current.selected)
+    commitPayment(seat, item, to, current.origin, current.selected)
   }, departureMillis(current.selected.length))
 }
 
@@ -1276,6 +1281,9 @@ function applyPayment(): void {
  * not feel held up.
  */
 const DRAFT_SETTLE_MS = 520
+
+/** How long the stems an enclosure paid out are given to come in from the left. */
+const AWARD_SETTLE_MS = 560
 
 /** Whether a turn is mid-animation. Nothing else may happen to it until that lands. */
 const settling = shallowRef(false)
@@ -1292,6 +1300,7 @@ onBeforeUnmount(() => {
  * has to start from the same board a replay would.
  */
 function commitPayment(
+  seat: number,
   item: { kind: 'tile' | 'plate', id: string },
   to: TileLocation | PlateLocation,
   origin: TileLocation | PlateLocation,
@@ -1302,7 +1311,7 @@ function commitPayment(
 
   const played = commit({
     kind: 'put',
-    seat: activeIndex.value,
+    seat,
     item,
     to,
     paying: [...paying],
@@ -1315,6 +1324,25 @@ function commitPayment(
     if (item.kind === 'tile') board().moveTile(item.id, to as TileLocation)
     else board().movePlate(item.id, to as PlateLocation)
     revision.value++
+    return
+  }
+
+  /*
+   * An enclosure pays in stems, and they arrive from the left. Same treatment as a draft: the view is
+   * held on the player who earned them long enough to see them come in, because the turn has already
+   * moved on underneath.
+   */
+  if (played.awarded.length > 0) {
+    arriving.value = [...played.awarded]
+    settling.value = true
+    pinnedSeat.value = seat
+    settleTimer = window.setTimeout(() => {
+      settleTimer = null
+      settling.value = false
+      pinnedSeat.value = null
+      arriving.value = []
+      endTurn()
+    }, AWARD_SETTLE_MS)
     return
   }
   endTurn()
@@ -1456,6 +1484,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <TableauView
         :tableau="board()"
         :spending="spending"
+        :arriving="arriving"
         :source="source()"
         :drawer="drawerShape"
         :game-id="gameId"
