@@ -338,8 +338,14 @@ const viewedSeat = computed(() => {
 const board = (): Tableau => (state.seats[viewedSeat.value] ?? state.seats[0]!).tableau
 const source = (): Tableau => state.source
 
-/** Watching somebody else's turn: the table is live, but not for you. */
-const watching = computed(() => viewedSeat.value !== activeIndex.value)
+/**
+ * Watching somebody else's turn: the table is live, but not for you.
+ *
+ * False while a turn is settling. The view is held on the player who just acted so their pieces can
+ * be seen arriving, and the turn has moved on underneath — but "watching" is about reading another
+ * player's board, and calling it that would put a badge on your own turn as it finishes.
+ */
+const watching = computed(() => !settling.value && viewedSeat.value !== activeIndex.value)
 
 /** Every seat, for the score panel: who is playing, who has passed, what they have banked. */
 const seatRows = computed(() => {
@@ -1056,11 +1062,42 @@ function onSelectTile(id: string): void {
     : { kind: 'taking', selected, inferred }
 }
 
+/**
+ * Take the selection, and let it be seen arriving.
+ *
+ * The pieces need no animation of their own: a drafted tile **keeps its id** across the move from the
+ * source's model into this seat's, so the scene finds the same object in a new place and eases it
+ * there — the glide from the column to the drawer already exists.
+ *
+ * What it needed was time. The rules hand the turn on as part of the draft, and the view follows
+ * whoever is playing — so the tiles arrived in a drawer that was already somebody else's, which is to
+ * say they were never seen at all. Holding the view on the drafting seat for the length of the glide
+ * is the whole fix; the turn is announced when it finishes.
+ */
 function confirmTake(): void {
-  if (!canConfirm.value) return
+  if (!canConfirm.value || settling.value) return
+  const seat = activeIndex.value
   // Which slot each takes is the rules' business: the draft crosses from the source's model into this
   // seat's, and only one of them can decide where things land.
-  if (commit({ kind: 'draft', seat: activeIndex.value, ids: [...selectedIds.value] })) endTurn()
+  /*
+   * Held **before** the command, not after. Applying it hands the turn on, and the view follows the
+   * turn — so a pin set afterwards would flip to the next player and back again within the tick.
+   */
+  settling.value = true
+  pinnedSeat.value = seat
+  if (!commit({ kind: 'draft', seat, ids: [...selectedIds.value] })) {
+    settling.value = false
+    pinnedSeat.value = null
+    return
+  }
+
+  settleTimer = window.setTimeout(() => {
+    settleTimer = null
+    settling.value = false
+    // Back to following the turn, which by now belongs to somebody else.
+    pinnedSeat.value = null
+    endTurn()
+  }, DRAFT_SETTLE_MS)
 }
 
 /**
@@ -1231,7 +1268,16 @@ function applyPayment(): void {
   }, departureMillis(current.selected.length))
 }
 
-/** Whether a payment is mid-flight. Nothing else may happen to the turn until it lands. */
+/**
+ * How long the drafted pieces are given to reach the drawer before the turn moves on.
+ *
+ * The glide itself is the scene's ordinary easing, which is quick; this is the pause that lets it be
+ * watched. Long enough to follow a piece from the column to its slot, short enough that a turn does
+ * not feel held up.
+ */
+const DRAFT_SETTLE_MS = 520
+
+/** Whether a turn is mid-animation. Nothing else may happen to it until that lands. */
 const settling = shallowRef(false)
 let settleTimer: number | null = null
 onBeforeUnmount(() => {

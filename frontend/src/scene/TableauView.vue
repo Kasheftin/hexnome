@@ -297,6 +297,14 @@ interface View {
   anchor?: AnchorVisual
   /** Drafting overlays. Tiles only; undefined on plate views. */
   decor?: DraftDecor
+  /**
+   * Seconds left of a slow arrival, after being drafted out of the shared source.
+   *
+   * The ordinary screen ease is deliberately brisk — it carries every drag and every drawer sort, and
+   * a slow one there would feel like lag. A drafted piece is the one journey worth watching, so it
+   * gets its own gentler ease for as long as this is counting down, and rejoins the normal one after.
+   */
+  arriving?: number
 }
 
 /**
@@ -550,11 +558,31 @@ function easeScreen(view: View, x: number, y: number, ease: number): void {
   view.screenY += (y - view.screenY) * ease
 }
 
-/** Restart the scale ease when an object changes container. */
+/** How long a drafted piece takes to cross from the source column to its drawer slot. */
+const ARRIVE_SECONDS = 0.42
+
+/**
+ * Restart the scale ease when an object changes container.
+ *
+ * A move **out of the source** is the draft, and the only container change worth slowing down: it is
+ * the one the player asked for and the one that says what they got. Every other change — picking a
+ * piece up, putting it back, sorting the drawer — is a response to a gesture already in progress and
+ * wants to feel immediate.
+ */
 function setRegime(view: View, regime: string): void {
   if (view.regime === regime) return
+  if (view.regime === 'source' && regime === 'drawer') view.arriving = ARRIVE_SECONDS
   view.regime = regime
   view.settled = false
+}
+
+/** The screen ease for this view this frame: gentle while it is arriving, brisk otherwise. */
+function easeFor(view: View, delta: number, ease: number): number {
+  const left = view.arriving ?? 0
+  if (left <= 0) return ease
+  view.arriving = left - delta
+  // A fixed fraction of the *remaining* time, so it lands as the clock runs out rather than drifting.
+  return Math.min(1, delta / Math.max(delta, left))
 }
 
 /* ── picking ──────────────────────────────────────────────────────────────────── */
@@ -1181,7 +1209,7 @@ onBeforeRender(({ delta }) => {
     } else if (plate.location.kind === 'plateSlot') {
       setRegime(view, 'drawer')
       const c = l.plateSlotCentre(plate.location.slot)
-      easeScreen(view, c.x, c.y, ease)
+      easeScreen(view, c.x, c.y, easeFor(view, delta, ease))
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, DRAWER_TILE_Y, p.z)
       approachScale(view, drawerPlateScale(upp), ease)
@@ -1293,7 +1321,7 @@ onBeforeRender(({ delta }) => {
       setRegime(view, 'drawer')
       reparent(view.object, scene.value)
       const c = l.slotCentre(tile.location.slot)
-      easeScreen(view, c.x, c.y, ease)
+      easeScreen(view, c.x, c.y, easeFor(view, delta, ease))
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
       view.world.set(p.x, DRAWER_TILE_Y, p.z)
       approachScale(view, drawerTileScale(upp), ease)
