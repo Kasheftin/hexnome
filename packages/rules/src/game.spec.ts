@@ -401,6 +401,136 @@ describe('the state is the fold of the log', () => {
   })
 })
 
+/**
+ * Placing something, and paying for it.
+ *
+ * The most intricate command: it moves an item, destroys what pays for it, hands the spent material
+ * back for the desk, awards any enclosure it closed, and ends the turn. Everything but the first of
+ * those is invisible on the board, which is why it is worth spelling out here.
+ */
+describe('putting something on the board', () => {
+  /** A seat holding a value-1 tile — free to place — and a lot showing in the source. */
+  function holding() {
+    const state = createGame(options())
+    play(state, lot(1))
+    const ones = draftItems(state).filter(item => item.value === 1).map(item => item.id)
+    play(state, { kind: 'draft', seat: 0, ids: ones })
+
+    const seat = state.seats[0] as { tableau: Tableau, banked: number[] }
+    const held = seat.tableau.tiles().find(tile => tile.location.kind === 'drawer')!
+    const plate = seat.tableau.plates()[0]!
+    // A free petal beside the opening tile, so the neighbour rule is satisfied.
+    const petal = [0, 1, 2, 3, 4, 5].find(p =>
+      seat.tableau.canPlaceTile({ kind: 'onPlate', plateId: plate.id, petal: p }, held.id))!
+    return { state, seat, held, to: { kind: 'onPlate' as const, plateId: plate.id, petal } }
+  }
+
+  /** Everybody else passes, so the turn comes back to seat 0. */
+  function backToSeatZero(state: GameState): void {
+    while (state.activeSeat !== 0) play(state, { kind: 'pass', seat: state.activeSeat })
+  }
+
+  it('moves the item and ends the turn', () => {
+    const { state, seat, held, to } = holding()
+    backToSeatZero(state)
+    const turn = state.turn
+
+    const result = applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: [],
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(seat.tableau.tile(held.id)?.location).toEqual(to)
+    expect(state.turn).toBeGreaterThan(turn)
+    /*
+     * Still seat 0, and rightly: the others passed to give the turn back, so they are out of the
+     * round. The turn goes to the next seat still *in* it, which is this one again.
+     */
+    expect(state.activeSeat).toBe(0)
+  })
+
+  /* A value-1 tile is free; anything dearer costs `value - 1` items out of the same drawer. */
+  it('insists on the right price, and spends exactly what was offered', () => {
+    const { state, seat, held, to } = holding()
+    backToSeatZero(state)
+    const stems = seat.tableau.stems().map(stem => stem.id)
+
+    // Free: offering payment for it is as wrong as offering none for something dearer.
+    expect(applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: [stems[0] as string],
+    })).toMatchObject({ ok: false })
+
+    expect(applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: [],
+    })).toMatchObject({ ok: true })
+    // Nothing was spent, so the stems are all still there.
+    expect(seat.tableau.stems().map(s => s.id)).toEqual(stems)
+  })
+
+  it('refuses a payment the drawer does not hold, changing nothing', () => {
+    const { state, held, to } = holding()
+    backToSeatZero(state)
+    const before = snapshot(state)
+
+    expect(applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: ['nope'],
+    })).toMatchObject({ ok: false })
+    expect(snapshot(state)).toEqual(before)
+  })
+
+  it('refuses a placement the board does not allow, changing nothing', () => {
+    const { state, seat, held } = holding()
+    backToSeatZero(state)
+    const before = snapshot(state)
+    const occupied = seat.tableau.tilesOnBoard()[0]!.location
+
+    expect(applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to: occupied, paying: [],
+    })).toMatchObject({ ok: false })
+    expect(snapshot(state)).toEqual(before)
+  })
+
+  /* Spent material is owed back to the desk, and the state cannot put it there itself. */
+  it('hands what it spent back to the caller', () => {
+    const state = createGame(options({ initialStems: 0 }))
+    play(state, lot(1))
+    // Two whole lots, so the drawer holds enough to pay for something.
+    const first = draftItems(state).filter(i => i.value === 2).map(i => i.id)
+    play(state, { kind: 'draft', seat: 0, ids: first })
+    while (state.activeSeat !== 0) play(state, { kind: 'pass', seat: state.activeSeat })
+
+    const seat = state.seats[0]!
+    const held = seat.tableau.tiles().find(t => t.location.kind === 'drawer' && t.value === 2)
+    const spare = seat.tableau.tiles().find(t => t.location.kind === 'drawer' && t.id !== held?.id)
+    if (!held || !spare) return
+
+    const plate = seat.tableau.plates()[0]!
+    const petal = [0, 1, 2, 3, 4, 5].find(p =>
+      seat.tableau.canPlaceTile({ kind: 'onPlate', plateId: plate.id, petal: p }, held.id))
+    if (petal === undefined) return
+
+    const result = applyCommand(state, {
+      kind: 'put',
+      seat: 0,
+      item: { kind: 'tile', id: held.id },
+      to: { kind: 'onPlate', plateId: plate.id, petal },
+      paying: [spare.id],
+    })
+    expect(result).toMatchObject({ ok: true })
+    expect(result.ok && result.toDesk.tiles).toHaveLength(1)
+    expect(seat.tableau.tile(spare.id)).toBeUndefined()
+  })
+
+  it('is refused from a seat whose turn it is not', () => {
+    const { state, held, to } = holding()
+    // The turn moved on after the draft, so seat 0 is not the one playing.
+    expect(state.activeSeat).not.toBe(0)
+    expect(applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: [],
+    })).toMatchObject({ ok: false })
+  })
+})
+
 describe('a refused command', () => {
   /*
    * Nothing moves. A half-applied command is worse than a refused one: the log and the board then
