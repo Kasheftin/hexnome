@@ -24,6 +24,20 @@ const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/lobby',
+    name: 'lobby',
+    component: () => import('@/views/LobbyView.vue'),
+    /*
+     * The same guard, for the same reason in miniature: a lobby for a game that is not there is a
+     * form about nothing. It costs one localStorage read, and the component checks again on mount
+     * because a game can be forgotten between the two.
+     */
+    beforeEnter: to => {
+      const id = typeof to.query.id === 'string' ? to.query.id : ''
+      return readSavedGame(id) ? true : { path: '/' }
+    },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     redirect: '/',

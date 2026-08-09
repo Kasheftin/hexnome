@@ -47,6 +47,29 @@ export function suggestName(except?: string): string {
 }
 
 /**
+ * Several suggestions at once, all different from each other and from `except`.
+ *
+ * For the other seats at a table. Distinctness is the whole requirement: two players called Ember is
+ * worse than either of them being called Player 2, and picking one at a time would collide roughly
+ * once every four four-player games.
+ */
+export function suggestNames(count: number, except: readonly string[] = []): string[] {
+  const taken = new Set(except)
+  const pool = SUGGESTED_NAMES.filter(name => !taken.has(name))
+  const picked: string[] = []
+
+  for (let i = 0; i < count; i++) {
+    if (pool.length === 0) break
+    // Swap-remove: the chosen name leaves the pool, so it cannot come up twice.
+    const at = Math.floor(Math.random() * pool.length)
+    picked.push(pool[at] as string)
+    pool[at] = pool[pool.length - 1] as string
+    pool.pop()
+  }
+  return picked
+}
+
+/**
  * The stored name, minting one from {@link SUGGESTED_NAMES} if there has never been one.
  *
  * Note the difference between *never set* and *set to empty*. Only the first mints a name; clearing

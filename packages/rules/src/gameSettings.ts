@@ -26,9 +26,25 @@ export interface GameKindInfo {
 
 export const GAME_KINDS: readonly GameKindInfo[] = [
   { id: 'singleplayer', label: 'Single player', available: true },
-  { id: 'multiplayer', label: 'Multiplayer', available: false },
+  { id: 'multiplayer', label: 'Multiplayer', available: true },
   { id: 'quiz', label: 'Quiz mode', available: false },
 ]
+
+/**
+ * How many people are at the table.
+ *
+ * Two to four on the menu. The ceiling in the rules is six — one opening colour each, see
+ * `deck.ts` — and the gap is a decision about what makes a good game rather than a limit.
+ *
+ * A singleplayer game stores {@link SOLO}, which is not offered as a choice: it follows from the kind
+ * rather than being picked. Both are valid stored values, which is why the guard takes either.
+ */
+export const PLAYER_COUNT_CHOICES: readonly number[] = [2, 3, 4]
+export const DEFAULT_PLAYER_COUNT = 2
+export const SOLO = 1
+
+/** The most characters a player's name may carry, matching the field on the menu. */
+export const MAX_NAME_LENGTH = 40
 
 export interface SingleplayerModeInfo {
   readonly id: SingleplayerMode
@@ -196,6 +212,20 @@ export interface GameSettings {
    * those games were dealt from.
    */
   readonly seed: string
+  /**
+   * How many people are at the table. {@link SOLO} for a singleplayer game.
+   *
+   * Stored rather than derived from `kind`, because it is the number the deal and the turn order are
+   * built from and "multiplayer" does not say how many.
+   */
+  readonly players: number
+  /**
+   * What to call each of them, in seating order. Seat 0 is whoever created the game.
+   *
+   * May be shorter than `players` — a seat with no name falls back to its number. Local names for
+   * now: everyone is at one screen, so there is nobody to ask.
+   */
+  readonly playerNames: readonly string[]
   readonly platesPerRound: number
   /** Copies of each distinct tile in the bag. `× 36` is the total dealt from. */
   readonly tileCopies: number
@@ -245,6 +275,27 @@ export function isGameKind(value: unknown): value is GameKind {
 
 export function isPlatesPerRound(value: unknown): boolean {
   return typeof value === 'number' && PLATES_PER_ROUND_CHOICES.includes(value)
+}
+
+export function isPlayerCount(value: unknown): boolean {
+  return value === SOLO || (typeof value === 'number' && PLAYER_COUNT_CHOICES.includes(value))
+}
+
+/**
+ * Who is at the table, as stored.
+ *
+ * All or nothing, like the bonus table: a list that is the wrong shape is replaced entirely rather
+ * than patched entry by entry, because a half-repaired one would seat somebody under a name they did
+ * not choose and give them no way to see it happened.
+ *
+ * Short is allowed and means "the rest have not been named yet" — the lobby fills those in. Names are
+ * trimmed and bounded here so nothing downstream has to wonder.
+ */
+export function parsePlayerNames(value: unknown, players: number): readonly string[] {
+  if (!Array.isArray(value)) return []
+  if (value.length > players) return []
+  if (!value.every(name => typeof name === 'string')) return []
+  return value.map(name => (name as string).trim().slice(0, MAX_NAME_LENGTH))
 }
 
 export function isTileCopies(value: unknown): boolean {
@@ -338,6 +389,8 @@ export function defaultGameSettings(createdAt: number, seed = ''): GameSettings 
     kind: 'singleplayer',
     mode: DEFAULT_SINGLEPLAYER_MODE,
     seed,
+    players: SOLO,
+    playerNames: [],
     platesPerRound: DEFAULT_PLATES_PER_ROUND,
     tileCopies: DEFAULT_TILE_COPIES,
     plateCopies: DEFAULT_PLATE_COPIES,
@@ -380,12 +433,23 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     ? (raw.minGroupSize as number)
     : DEFAULT_MIN_GROUP_SIZE
 
+  /*
+   * The seat count follows the kind when it is missing or unreadable, rather than taking a default of
+   * its own: a game saved before this existed was a singleplayer game, and every other reading of it
+   * would be wrong. Names are then validated against however many seats that gives.
+   */
+  const players = isPlayerCount(raw.players)
+    ? (raw.players as number)
+    : (raw.kind === 'singleplayer' ? SOLO : DEFAULT_PLAYER_COUNT)
+
   return {
     kind: raw.kind,
     mode: raw.mode,
     // A dial-style fallback rather than a rejection: a game saved before seeds existed is still a
     // game, and the caller knows the id it was dealt from. See {@link GameSettings.seed}.
     seed: typeof raw.seed === 'string' ? raw.seed : '',
+    players,
+    playerNames: parsePlayerNames(raw.playerNames, players),
     platesPerRound: isPlatesPerRound(raw.platesPerRound)
       ? (raw.platesPerRound as number)
       : DEFAULT_PLATES_PER_ROUND,

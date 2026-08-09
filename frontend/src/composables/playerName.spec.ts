@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { playerName, rememberName, suggestName, SUGGESTED_NAMES } from './playerName'
+import { playerName, rememberName, suggestName, suggestNames, SUGGESTED_NAMES } from './playerName'
 
 beforeEach(() => {
   localStorage.clear()
@@ -64,6 +64,25 @@ describe('the name you arrive under', () => {
     expect(SUGGESTED_NAMES).toContain(suggestName('Kasheftin'))
     expect(SUGGESTED_NAMES).toContain(suggestName(''))
     expect(SUGGESTED_NAMES).toContain(suggestName())
+  })
+
+  /*
+   * For the other seats. Picking one at a time and hoping would collide roughly once every four
+   * four-player games, and two players under one name is worse than one called Player 2.
+   */
+  it('suggests a whole table without repeating itself', () => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const names = suggestNames(3, ['Ember'])
+      expect(names).toHaveLength(3)
+      expect(new Set(names).size).toBe(3)
+      expect(names).not.toContain('Ember')
+      for (const name of names) expect(SUGGESTED_NAMES).toContain(name)
+    }
+  })
+
+  it('gives back what it can when asked for more names than it has', () => {
+    expect(suggestNames(SUGGESTED_NAMES.length + 5)).toHaveLength(SUGGESTED_NAMES.length)
+    expect(suggestNames(0)).toEqual([])
   })
 
   it('offers a decent spread of distinct, short names', () => {

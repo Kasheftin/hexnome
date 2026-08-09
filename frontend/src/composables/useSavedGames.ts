@@ -39,6 +39,14 @@ export interface SavedGames {
   get(id: string): GameSettings | null
   /** Store settings under a fresh id and return it. */
   create(settings: Omit<GameSettings, 'createdAt'>): string
+  /**
+   * Change part of a game already stored.
+   *
+   * For the lobby, which names the seats after the game has been minted. Deliberately narrow: it
+   * merges into what is there and re-parses the result, so a patch cannot write a game that would
+   * not have been readable in the first place.
+   */
+  update(id: string, patch: Partial<GameSettings>): void
   /** Ids currently remembered, most recently created first. */
   ids(): string[]
 }
@@ -96,6 +104,17 @@ export function useSavedGames(): SavedGames {
       for (const [key, value] of kept) next[key] = value
       stored.value = next
       return id
+    },
+
+    update(id, patch) {
+      const raw = stored.value
+      if (typeof raw !== 'object' || raw === null) return
+      const current = parseGameSettings(raw[id])
+      if (!current) return
+      // Re-parsed rather than trusted: a patch goes through the same gate a stored blob does, so
+      // there is one definition of what a readable game is.
+      const merged = parseGameSettings({ ...current, ...patch })
+      if (merged) stored.value = { ...raw, [id]: merged }
     },
 
     ids: () => entries().map(([id]) => id),

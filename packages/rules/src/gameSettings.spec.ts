@@ -8,6 +8,9 @@ import {
   DEFAULT_MIN_GROUP_SIZE,
   DEFAULT_PLATE_SLOTS,
   DEFAULT_TILE_SLOTS,
+  DEFAULT_PLAYER_COUNT,
+  MAX_NAME_LENGTH,
+  SOLO,
   DEFAULT_TILE_COPIES,
   DEFAULT_PLATE_COPIES,
   TILE_COPIES_CHOICES,
@@ -28,6 +31,8 @@ import { DEFAULT_PLACEMENT_RULE } from './placement'
 const valid = {
   kind: 'singleplayer',
   mode: 'classic',
+  players: 3,
+  playerNames: ['Ember', 'Flux'],
   seed: '9c1f0b2a-7d3e-4a55-8b61-0f2e3d4c5b6a',
   platesPerRound: 5,
   tileCopies: 4,
@@ -303,6 +308,52 @@ describe('the drawer\'s size', () => {
   /* Two rows deep, so every offered count has to divide into whole columns. */
   it('offers only even tile counts', () => {
     expect(TILE_SLOT_CHOICES.every(count => count % 2 === 0)).toBe(true)
+  })
+})
+
+describe('who is at the table', () => {
+  it('keeps an offered count', () => {
+    for (const players of [2, 3, 4]) {
+      expect(parseGameSettings({ ...valid, players })?.players).toBe(players)
+    }
+    expect(parseGameSettings({ ...valid, players: SOLO })?.players).toBe(SOLO)
+  })
+
+  /*
+   * The fallback follows the *kind* rather than taking a default of its own. A game saved before this
+   * existed was a solo game, and seating two at it would be a different game rather than a repaired
+   * one.
+   */
+  it('falls back to what the kind implies', () => {
+    const { players, ...without } = valid
+    void players
+    expect(parseGameSettings({ ...without, kind: 'singleplayer' })?.players).toBe(SOLO)
+    expect(parseGameSettings({ ...without, kind: 'multiplayer' })?.players)
+      .toBe(DEFAULT_PLAYER_COUNT)
+    for (const bad of [0, 5, 2.5, '2', null]) {
+      expect(parseGameSettings({ ...valid, kind: 'singleplayer', players: bad })?.players).toBe(SOLO)
+    }
+  })
+
+  it('keeps the names it was given, trimmed', () => {
+    const parsed = parseGameSettings({ ...valid, players: 3, playerNames: ['  Ember ', 'Flux'] })
+    expect(parsed?.playerNames).toEqual(['Ember', 'Flux'])
+  })
+
+  /* All or nothing, like the bonus table: a half-repaired list seats someone under a name nobody
+   * chose, and gives them no way to see it happened. */
+  it('drops a list it cannot read rather than patching it', () => {
+    for (const bad of [['a', 2], 'Ember', { 0: 'Ember' }, null]) {
+      expect(parseGameSettings({ ...valid, playerNames: bad })?.playerNames).toEqual([])
+    }
+    // More names than seats is not a shorter table, it is a list from a different game.
+    expect(parseGameSettings({ ...valid, players: 2, playerNames: ['a', 'b', 'c'] })?.playerNames)
+      .toEqual([])
+  })
+
+  it('bounds a name the way the field does', () => {
+    const parsed = parseGameSettings({ ...valid, playerNames: ['x'.repeat(60)] })
+    expect(parsed?.playerNames[0]).toHaveLength(MAX_NAME_LENGTH)
   })
 })
 

@@ -21,8 +21,11 @@ import { computed, nextTick, ref, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   DEFAULT_PLATES_PER_ROUND,
+  DEFAULT_PLAYER_COUNT,
   DEFAULT_SINGLEPLAYER_MODE,
   GAME_KINDS,
+  PLAYER_COUNT_CHOICES,
+  SOLO,
   PLATES_PER_ROUND_CHOICES,
   TILE_COPIES_CHOICES,
   PLATE_COPIES_CHOICES,
@@ -67,7 +70,7 @@ import { createGameId } from '@/composables/createGameId'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
 import { useSavedGames } from '@/composables/useSavedGames'
 
-type Step = 'title' | 'singleplayer'
+type Step = 'title' | 'setup'
 
 /** A yes/no dial, as the numbers the dial machinery expects and the words a player should read. */
 const SWITCH_CHOICES: readonly number[] = [0, 1]
@@ -93,6 +96,8 @@ function reroll(): void {
 
 const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
+/** Only asked for multiplayer; a solo game seats one by definition. */
+const playerCount = ref<number>(DEFAULT_PLAYER_COUNT)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
 /* Held as copies, shown as bag totals — see the dials below. */
@@ -381,7 +386,7 @@ const trail = computed(() => {
 
 function chooseKind(id: GameKind): void {
   kind.value = id
-  step.value = 'singleplayer'
+  step.value = 'setup'
 }
 
 function back(): void {
@@ -389,9 +394,20 @@ function back(): void {
   kind.value = null
 }
 
+/**
+ * Mint the game and go where its kind leads.
+ *
+ * Solo games open on the board. A table has people to name first, so it opens on the lobby — which is
+ * a real screen rather than a step of this one, because it is where a refresh has to land.
+ */
 function startGame(): void {
+  const multiplayer = kind.value === 'multiplayer'
+  const players = multiplayer ? playerCount.value : SOLO
   const id = savedGames.create({
-    kind: 'singleplayer',
+    kind: multiplayer ? 'multiplayer' : 'singleplayer',
+    players,
+    // Seat 0 is whoever made the game. The rest are named in the lobby.
+    playerNames: [name.value],
     mode: mode.value,
     /*
      * Minted here and stored with the game, separately from its id.
@@ -419,7 +435,7 @@ function startGame(): void {
     fineUnplaced: fineUnplaced.value === 1,
     rewardStems: rewardStems.value === 1,
   })
-  void router.push({ path: '/game', query: { id } })
+  void router.push({ path: multiplayer ? '/lobby' : '/game', query: { id } })
 }
 
 const selectedMode = computed(() => modeInfo(mode.value))
@@ -517,6 +533,31 @@ const selectedMode = computed(() => modeInfo(mode.value))
 
       <!-- Step 2 -->
       <template v-else>
+        <!--
+          First, because it is the biggest thing about a table and everything below reads differently
+          once it is set. Absent for a solo game rather than shown as a fixed 1, which would be a
+          control that cannot be used.
+        -->
+        <fieldset
+          v-if="kind === 'multiplayer'"
+          class="group"
+        >
+          <legend>Players</legend>
+          <div class="counts">
+            <button
+              v-for="count in PLAYER_COUNT_CHOICES"
+              :key="count"
+              type="button"
+              class="count"
+              :class="{ chosen: playerCount === count }"
+              :aria-pressed="playerCount === count"
+              @click="playerCount = count"
+            >
+              {{ count }}
+            </button>
+          </div>
+        </fieldset>
+
         <fieldset class="group">
           <legend>Mode</legend>
           <button
