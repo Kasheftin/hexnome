@@ -335,7 +335,21 @@ export interface Tableau {
   addTile(
     spec: TileSpec,
     location: TileLocation,
-    options?: { readonly fixed?: boolean },
+    options?: {
+      readonly fixed?: boolean
+      /**
+       * Keep this id instead of minting one.
+       *
+       * For a **transfer**: drafting takes a tile out of the shared source's tableau and adds it to a
+       * seat's, and those are two different models, so the move is a remove and an add. Without this
+       * the tile would arrive under a new name, and the scene — which tracks pieces by id — would
+       * destroy one and create another where the player sees one tile sliding across.
+       *
+       * The caller owns uniqueness. Ids carry the prefix of the tableau that minted them, so a
+       * transferred id cannot collide with anything the receiving tableau makes for itself.
+       */
+      readonly id?: string
+    },
   ): Tile | undefined
 
   movePlate(id: string, location: PlateLocation): boolean
@@ -421,6 +435,17 @@ export interface TableauOptions {
   cells: readonly Axial[]
   drawerSlots: number
   plateSlots: number
+  /**
+   * Prepended to every id this tableau mints, so several of them can coexist.
+   *
+   * A game is one tableau per seat plus one for the shared source (see `game.ts`), and each counts
+   * from 1 — so without this, seat 0's `t7` and seat 1's `t7` are different tiles with one name. The
+   * prefix makes an id say where it came from, which is also what lets a piece keep its id when it
+   * moves between two of them.
+   *
+   * Empty by default: a lone tableau needs no prefix, and every existing id keeps its shape.
+   */
+  idPrefix?: string
   sourceLots?: number
   sourceTilesPerLot?: number
   /**
@@ -446,6 +471,7 @@ export function createTableau({
   cells,
   drawerSlots,
   plateSlots,
+  idPrefix = '',
   sourceLots = 0,
   sourceTilesPerLot = 0,
   placementRule = DEFAULT_PLACEMENT_RULE,
@@ -462,6 +488,9 @@ export function createTableau({
   /** cellKey → coverage. Derived from the plates; rebuilt whenever they change. */
   let coverage = new Map<string, Coverage>()
   let nextId = 1
+
+  /** The next id of a kind, carrying this tableau's prefix. See {@link TableauOptions.idPrefix}. */
+  const mint = (kind: 'p' | 't' | 's'): string => `${idPrefix}${kind}${nextId++}`
 
   function reindexCoverage(): void {
     const next = new Map<string, Coverage>()
@@ -1044,7 +1073,7 @@ export function createTableau({
       // The same key a tile would use, so the slot cannot hold both.
       const key = tileLocationKey({ kind: 'drawer', slot })
       if (occupants.has(key)) return undefined
-      const stem: Stem = { id: `s${nextId++}`, slot }
+      const stem: Stem = { id: mint('s'), slot }
       stemsById.set(stem.id, stem)
       occupants.set(key, stem.id)
       return stem
@@ -1093,7 +1122,7 @@ export function createTableau({
     addPlate(location, options) {
       if (!canPlacePlate(location)) return undefined
       const plate: Plate = {
-        id: `p${nextId++}`,
+        id: mint('p'),
         location,
         rotation: options?.rotation ?? 0,
         faceDown: options?.faceDown ?? false,
@@ -1108,7 +1137,8 @@ export function createTableau({
       if (!canPlaceTile(location)) return undefined
       const tile: Tile = {
         ...spec,
-        id: `t${nextId++}`,
+        // A transfer keeps the id it arrived with — see the option's note.
+        id: options?.id ?? mint('t'),
         location,
         fixed: options?.fixed ?? false,
       }
@@ -1124,7 +1154,7 @@ export function createTableau({
       if (!canPlaceTile(location)) return false
 
       platesById.set(id, { ...plate, faceDown: false })
-      const tile: Tile = { ...spec, id: `t${nextId++}`, location, fixed: true }
+      const tile: Tile = { ...spec, id: mint('t'), location, fixed: true }
       tilesById.set(tile.id, tile)
       occupants.set(tileLocationKey(location), tile.id)
       return true

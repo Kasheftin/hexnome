@@ -1157,3 +1157,70 @@ describe('tiles on the board', () => {
     expect(t.tilesOnBoard()).toEqual([])
   })
 })
+
+/**
+ * Several tableaux in one game.
+ *
+ * A game is one per seat plus one for the shared source (`game.ts`), and each counts its ids from 1.
+ * These are the two things that makes that safe: ids that cannot collide, and a piece that can move
+ * between two of them without being renamed.
+ */
+describe('a tableau among others', () => {
+  it('stamps every id it mints with its prefix', () => {
+    const t = createTableau({ cells: hexRectangle(6, 6), drawerSlots: 4, plateSlots: 1, idPrefix: '2:' })
+    const plate = t.addPlate(onBoard(0, 0))!
+    const tile = t.addTile(RED, inDrawer(0))!
+    const stem = t.addStem(1)!
+
+    expect(plate.id).toMatch(/^2:p\d+$/)
+    expect(tile.id).toMatch(/^2:t\d+$/)
+    expect(stem.id).toMatch(/^2:s\d+$/)
+  })
+
+  /* The whole point: two seats both start at 1, so without a prefix their first tiles share a name. */
+  it('cannot collide with another tableau, however alike they are', () => {
+    const shape = { cells: hexRectangle(6, 6), drawerSlots: 4, plateSlots: 1 }
+    const one = createTableau({ ...shape, idPrefix: '0:' })
+    const two = createTableau({ ...shape, idPrefix: '1:' })
+
+    const a = one.addTile(RED, inDrawer(0))!
+    const b = two.addTile(RED, inDrawer(0))!
+    expect(a.id).not.toBe(b.id)
+    // And neither knows anything about the other's pieces.
+    expect(one.tile(b.id)).toBeUndefined()
+    expect(two.tile(a.id)).toBeUndefined()
+  })
+
+  /*
+   * A draft is a remove from the source and an add to a drawer, because those are two models. Keeping
+   * the id is what lets the scene animate one tile across rather than destroying one and creating
+   * another.
+   */
+  it('lets a transferred piece keep the id it arrived with', () => {
+    const source = createTableau({
+      cells: [], drawerSlots: 0, plateSlots: 0, sourceLots: 2, sourceTilesPerLot: 4, idPrefix: 'src:',
+    })
+    const seat = createTableau({ cells: hexRectangle(6, 6), drawerSlots: 4, plateSlots: 1, idPrefix: '0:' })
+
+    const loose = source.addTile(RED, { kind: 'source', lot: 0, index: 0 })!
+    const receipt = source.discard(loose.id)!
+    const moved = seat.addTile(receipt.tiles[0]!, inDrawer(0), { id: loose.id })!
+
+    expect(moved.id).toBe(loose.id)
+    expect(source.tile(loose.id)).toBeUndefined()
+    expect(seat.tile(loose.id)).toMatchObject({ color: RED.color, value: RED.value })
+  })
+
+  /* The shared source has no board and no drawer, and nothing should mind. */
+  it('can be nothing but source lots', () => {
+    const source = createTableau({
+      cells: [], drawerSlots: 0, plateSlots: 0, sourceLots: 2, sourceTilesPerLot: 4,
+    })
+    expect(source.addPlate({ kind: 'source', lot: 0 })).toBeDefined()
+    expect(source.addTile(RED, { kind: 'source', lot: 0, index: 0 })).toBeDefined()
+    // Nowhere else to put anything.
+    expect(source.addTile(RED, inDrawer(0))).toBeUndefined()
+    expect(source.addPlate(onBoard(0, 0))).toBeUndefined()
+    expect(source.freeDrawerSlots()).toEqual([])
+  })
+})
