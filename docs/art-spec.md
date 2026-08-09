@@ -36,19 +36,28 @@ fix that; it needs a nudge. As a feel for the units, `0.12` moves a symbol about
 tile.
 
 Scaling never moves a symbol off centre by itself: the plane is built centred on the tile's origin and
-grows about it. Worth knowing, though, that the **source art** is not perfectly centred — ink centres sit up to 2.1%
-off canvas centre (worst: `3.png`, the codon). That is under a pixel at present sizes and grows with
-scale, so if a symbol is pushed much larger and starts to look off, the fix is re-cropping the PNG rather
-than anything in code.
+grows about it. What *is* off centre is the ink inside each canvas, and that is what `SYMBOL_OFFSET_UP`
+answers — which is why the two nudged values are the two with a measurable vertical offset.
 
-| Value | Canvas | Ink centre offset |
-|------:|--------|-------------------|
-| 1 | 178×448 | centred |
-| 2 | 302×448 | −0.7% x, −1.7% y |
-| 3 | 448×435 | **+2.1% x**, −1.4% y |
-| 4 | 448×442 | centred |
-| 5 | 448×409 | +0.7% x, +0.2% y |
-| 6 | 400×448 | +0.1% x, +0.1% y |
+Below, the ink centre is the alpha-weighted centroid, as a percentage of the canvas; **positive y is
+below centre**, so it wants a positive `SYMBOL_OFFSET_UP`. Horizontal offsets are all inside a percent,
+so nothing needs a horizontal knob — if that ever changes, the fix is the source painting rather than
+anything in code.
+
+The canvases are all 400×500 and the ink fills different fractions of them, so `SYMBOL_SCALE` is
+carrying two jobs at once: correcting each motif's apparent weight, *and* correcting how much of its
+frame it happens to occupy. Cropping each file to its ink would separate those, at the cost of retuning
+the table. It was tried and reverted — the table is easier to dial in by eye than the crop is to argue
+about.
+
+| Value | Ink bounding box | Ink centre offset | Nudge |
+|------:|------------------|-------------------|-------|
+| 1 | 206×497 | +0.2% x, +0.4% y | — |
+| 2 | 344×464 | −0.1% x, +0.5% y | — |
+| 3 | 390×343 | −0.0% x, **+6.1% y** | 0.07 |
+| 4 | 396×377 | −0.1% x, +0.3% y | — |
+| 5 | 400×399 | −0.1% x, **+3.6% y** | 0.07 |
+| 6 | 384×434 | +0.6% x, +0.4% y | — |
 
 ## Stem emblem
 
@@ -162,27 +171,52 @@ and is good enough to confirm the material is working. It is a scaffold, not the
 ## Asset 2 — Value symbols (in hand)
 
 **Files:** `frontend/public/textures/symbols/1.png` … `6.png`, prepared from
-`external assets/tiles/`.
+`external assets/tiles2/` — the second painting of the set, stone and copper on a
+dark outline, replacing the gold-and-green originals in `external assets/tiles/`.
 
-Six ornate gold-and-green motifs, one per value. Full colour with their lighting
-painted in, so they are drawn on the tile by an **unlit** material — lighting them
-again would multiply shading twice.
+Six ornate motifs, one per value. Full colour with their lighting painted in, so they
+are drawn on the tile by an **unlit** material — lighting them again would multiply
+shading twice.
 
-**They must be prepared before use.** The originals are 1024 × 1536 with the motif
-occupying a fraction of the frame, at **2.2 MB each — 13.6 MB for six**, which is
-unshippable for a free browser game. The prep step crops to the alpha bounding box
-(threshold 140, plus a 6% margin), scales the long edge to 448 px, and re-encodes:
-**13.6 MB → 1.3 MB**. Re-run it whenever the source art changes.
+**They must be prepared before use**, by
 
-**Do not square-pad them.** Their content aspects range from 0.40 (the tall DNA
-helix) to 1.09 (the pentose), so padding everything to a square would render the
-helix at 40% of the width of its neighbours. Each file keeps its own aspect and the
-renderer sizes the plane from `texture.image` at runtime, fitting the bounding box
-inside the hexagon's inradius by diagonal — no metadata file needed, and the six read
-at comparable visual weight.
+```
+python3 scripts/prepare-symbols.py "external assets/tiles2"
+```
 
-Further compression is available if the budget tightens: 256 px instead of 448, or
-WebP, which suits these gold gradients far better than PNG.
+Re-run it whenever the source art changes; copying the sources across by hand skips
+it, and the difference shows. It touches the alpha channel only — the canvas comes
+out the size it went in, so the tuning tables above stay valid — and the script says
+why each step is there. In short:
+
+**The outline becomes a shadow.** It is painted as one but exported at full opacity,
+which makes it a black slab: a shadow is something you see the surface *through*.
+Dropping the outer band to 60% lets the tile colour come through, so one texture
+reads as a magenta shadow on a magenta tile and an indigo one on indigo. Shadow is
+told from the motif's own dark parts by **chroma** — the outline is a true grey
+around `(8,8,8)` while the ornament's darks are warm, around `(49,24,10)` — and by
+depth from the silhouette, which is what keeps the inner linework opaque.
+
+**The keying halo goes, and the silhouette gains antialiasing.** The paintings were
+matted against something light and cut with a 1-bit alpha, leaving every edge both
+jagged and rimmed with an opaque near-white line. That rim is not art; what is under
+it is the outline, so it is repainted black and folded into the alpha ramp.
+
+**Do not square-pad them.** Their ink aspects range from 0.41 (the tall DNA helix) to
+1.14 (the codon), so padding everything to a square would render the helix at 40% of
+the width of its neighbours. Each file keeps its own aspect and the renderer sizes the
+plane from `texture.image` at runtime, fitting the canvas inside the hexagon's inradius
+by diagonal — no metadata file needed.
+
+The six come out at 1.0 MB together. Further compression is available if the budget
+tightens: half resolution, or WebP, which suits these gradients far better than PNG.
+(The sources are 8-bit palette PNGs and so are smaller than the prepared files. That
+is not a saving to copy: a palette cannot hold the alpha ramp the shadow is made of.)
+
+**Three of the six are clipped by their own canvas** — `1.png` at top and bottom,
+`4.png` and `5.png` at left and right, where the painting runs into the frame edge at
+full opacity. Nothing downstream can recover it. If it ever wants fixing it has to
+happen in the export.
 
 ## Asset 3 — Symbol atlas (superseded, kept for reference)
 

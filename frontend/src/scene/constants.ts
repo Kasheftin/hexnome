@@ -550,7 +550,8 @@ export type ChromePanelTone = keyof typeof CHROME_PANEL_TONES
 
 /**
  * The six value symbols, in value order 1–6. Cropped to content and downscaled from
- * the originals in `external assets/tiles/` — see docs/art-spec.md.
+ * the originals in `external assets/tiles2/` by `scripts/prepare-symbols.py` — see
+ * docs/art-spec.md.
  */
 export const SYMBOL_TEXTURE_URLS = [
   '/textures/symbols/1.png',
@@ -567,7 +568,7 @@ export const SYMBOL_TEXTURE_URLS = [
  * The apothem, not the circumradius: it is the tile's narrow half-width, so fitting to it keeps a symbol
  * clear of the flats as well as the points. This is the knob that moves all six together.
  */
-export const SYMBOL_FIT = 0.84
+export const SYMBOL_FIT = 1
 
 /**
  * Per-symbol size multiplier, indexed by value **1–6** (so `[0]` is the DNA helix, value 1).
@@ -581,12 +582,12 @@ export const SYMBOL_FIT = 0.84
  * is unaffected at any value — the plane is built centred on the tile's origin.
  */
 export const SYMBOL_SCALE: readonly number[] = [
-  1.1, // 1 · DNA helix
-  1.15, // 2 · chromosome pair
-  1.4, // 3 · codon
-  1.52, // 4 · DNA bases
-  1.4, // 5 · pentose sugar
-  1.4, // 6 · benzene ring
+  1, // 1 · DNA helix
+  1, // 2 · chromosome pair
+  1.2, // 3 · codon
+  1.2, // 4 · DNA bases
+  1.2, // 5 · pentose sugar
+  1.2, // 6 · benzene ring
 ]
 
 /**
