@@ -356,6 +356,29 @@ function viewSeat(seat: number): void {
   pinnedSeat.value = pinnedSeat.value === seat ? null : seat
 }
 
+/**
+ * The seats as the results panel wants them, with what each has banked.
+ *
+ * The panel counts one board at a time, so these are tabs across it — and carrying the totals means
+ * the comparison, which is the whole reason to look, needs no clicking.
+ */
+const seatTabs = computed(() => seatRows.value.map(row => ({
+  seat: row.seat,
+  name: row.name,
+  total: row.total,
+  viewed: row.viewed,
+})))
+
+/**
+ * Show a seat's score, without the toggle the seat list has.
+ *
+ * Deliberately not `viewSeat`: pressing the tab that is already open would unpin, and the panel would
+ * snap to whoever is due to play next — which is not what pressing your own name should do.
+ */
+function showSeat(seat: number): void {
+  pinnedSeat.value = seat
+}
+
 /*
  * Changing seat changes every piece on the table, and the scene only rebuilds when `revision` moves.
  * Without this the meshes of the seat you *were* looking at stay on screen: two boards that differ in
@@ -752,6 +775,11 @@ function startNextRound(): void {
   }
 
   showResults.value = false
+  /*
+   * Let go of whatever seat the results panel was showing. Play follows the turn; staying pinned to
+   * the player whose score you were reading would start the next round watching somebody else.
+   */
+  pinnedSeat.value = null
   announceRound(count.value.round, beginTurn)
 }
 
@@ -1397,9 +1425,11 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     <RoundResults
       v-if="showResults && roundRecords.length"
       :rounds="roundRecords"
+      :seats="seatTabs"
       :final="isFinalRound"
       :over="gameOver"
       :final-tally="finalGroups"
+      @select="showSeat"
       @next="startNextRound"
     />
 

@@ -23,9 +23,26 @@ import FinalScore from './FinalScore.vue'
 import type { RoundRecord } from './roundRecord'
 import ScoringReveal from './ScoringReveal.vue'
 
+/** One player, as the tab row shows them. */
+export interface SeatTab {
+  readonly seat: number
+  readonly name: string
+  /** Banked across every finished round. */
+  readonly total: number
+  readonly viewed: boolean
+}
+
 const props = defineProps<{
-  /** Every round finished so far, oldest first, each rebuilt from the game journal. */
+  /** Every round finished so far, oldest first, each rebuilt from the game log — for one seat. */
   rounds: readonly RoundRecord[]
+  /**
+   * Everyone at the table, or empty for a solo game.
+   *
+   * The panel counts **one** board, because that is what a score is. At a table the interesting
+   * question is how it compares, so the seats are tabs across the top and `rounds` is whichever of
+   * them is selected — the parent re-derives it from the log rather than this panel holding several.
+   */
+  seats: readonly SeatTab[]
   /** True on the last round of the game, which changes what the button offers. */
   final: boolean
   /**
@@ -39,7 +56,7 @@ const props = defineProps<{
   finalTally: FinalTally
 }>()
 
-const emit = defineEmits<{ next: [] }>()
+const emit = defineEmits<{ next: [], select: [seat: number] }>()
 
 const reveal = shallowRef<InstanceType<typeof ScoringReveal> | null>(null)
 const finalReveal = shallowRef<InstanceType<typeof FinalScore> | null>(null)
@@ -151,6 +168,33 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
       <h2 class="chrome-title">
         {{ showingFinal ? 'Final score' : `Round ${latest?.round} results` }}
       </h2>
+
+      <!--
+        Whose score this is, and what everyone else came to.
+        
+        Tabs rather than a list of every board at once: the working takes a whole board diagram, and
+        four of those is a scroll. The totals are on the tabs, so the comparison — which is the actual
+        question at a table — needs no clicking at all.
+      -->
+      <div
+        v-if="props.seats.length > 1"
+        class="seat-tabs"
+        role="tablist"
+      >
+        <button
+          v-for="tab in props.seats"
+          :key="tab.seat"
+          type="button"
+          role="tab"
+          class="seat-tab"
+          :class="{ chosen: tab.viewed }"
+          :aria-selected="tab.viewed"
+          @click="emit('select', tab.seat)"
+        >
+          <span class="seat-tab-name">{{ tab.name }}</span>
+          <strong class="seat-tab-total">{{ tab.total }}</strong>
+        </button>
+      </div>
 
       <!--
         Every finished round, oldest first, each collapsible. A closed one still states what it scored,
@@ -470,6 +514,74 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 
 @media (prefers-reduced-motion: reduce) {
   .action {
+    transition: none;
+  }
+}
+
+/* ── whose score ──────────────────────────────────────────────────────────────── */
+
+.seat-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+/*
+ * A tab carries its own total, so the comparison the panel exists for is readable without pressing
+ * anything. Pressing one changes whose working is shown below.
+ */
+.seat-tab {
+  display: flex;
+  flex: 1 1 0;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  background: transparent;
+  color: #79808f;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms, background-color 140ms;
+}
+
+.seat-tab:hover {
+  border-color: #7d6a41;
+  color: #cfd4de;
+}
+
+.seat-tab.chosen {
+  border-color: #7d6a41;
+  background: rgb(232 200 120 / 8%);
+  color: #e8c878;
+}
+
+.seat-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-tab-total {
+  color: #cfd4de;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-tab.chosen .seat-tab-total {
+  color: #e8c878;
+}
+
+.seat-tab:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seat-tab {
     transition: none;
   }
 }
