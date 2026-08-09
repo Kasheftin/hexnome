@@ -286,6 +286,44 @@ interface View {
   decor?: DraftDecor
 }
 
+/**
+ * Something spent, on its way off the table.
+ *
+ * Paying used to make items vanish between one frame and the next, which reads as a glitch rather
+ * than a cost — the player sees the drawer shrink without seeing anything leave it. So a spent piece
+ * keeps its mesh for a moment and flies out to the right, shrinking as it goes, and the payment
+ * leaves **one at a time** so the price is legible as a count rather than a puff.
+ *
+ * The mesh is off the model by then: nothing looks it up, nothing can pick it, and it is disposed at
+ * the end of its flight. Departures survive a seat change on purpose — they belong to the payment
+ * that made them, not to whichever board is on screen.
+ */
+interface Departure {
+  readonly object: Object3D
+  readonly decor?: DraftDecor
+  readonly anchor?: AnchorVisual
+  /** Seconds still to wait before setting off. What makes them leave in single file. */
+  delay: number
+  /** How far through the flight, 0 to 1. */
+  t: number
+  readonly fromX: number
+  readonly fromY: number
+  readonly scale: number
+}
+
+/**
+ * How long one piece takes to leave, and the gap between one and the next.
+ *
+ * Long enough to be read rather than merely noticed: the point is to show the *price*, so the eye
+ * should be able to count what left.
+ */
+const DEPART_SECONDS = 0.9
+const DEPART_STAGGER = 0.16
+/** How many leave in single file before the rest go together. */
+const DEPART_QUEUE = 7
+
+const departing: Departure[] = []
+
 const plateViews = new Map<string, View>()
 const tileViews = new Map<string, View>()
 const stemViews = new Map<string, View>()
@@ -1104,6 +1142,8 @@ onBeforeRender(({ delta }) => {
   const h = sizes.height.value
   const upp = unitsPerPixel(cam, h)
   const ease = Math.min(1, delta * 16)
+  // Before the living pieces: a departure owns its own transform and nothing else touches it.
+  flyDepartures(delta, cam, w, h)
   const current = held.value
   const l = layout.value
   const src = sourceLayout.value
@@ -1447,28 +1487,82 @@ function reconcileViews(): void {
    * object stays on the table, still clickable, long after the rules say it was spent.
    */
   const liveStems = new Set(props.tableau.stems().map(stem => stem.id))
+  let leaving = 0
+  /** Hand a view over to the departure animation, which owns its disposal from here. */
+  const send = (view: View): void => {
+    owners.delete(view.object)
+    /*
+     * Onto the scene. A tile in a petal is parented to its plate, so its position is local to it —
+     * and the flight below is in world space. Whatever it was riding, it leaves alone.
+     */
+    view.object.parent?.remove(view.object)
+    scene.value?.add(view.object)
+    departing.push({
+      object: view.object,
+      decor: view.decor,
+      anchor: view.anchor,
+      // Single file for the first handful. A round-end sweep is two dozen pieces, and queueing all
+      // of them would take longer than the panel that follows.
+      delay: Math.min(leaving++, DEPART_QUEUE) * DEPART_STAGGER,
+      t: 0,
+      fromX: view.screenX,
+      fromY: view.screenY,
+      scale: view.scale,
+    })
+  }
+
   for (const [id, view] of [...stemViews]) {
     if (liveStems.has(id)) continue
-    if (view.decor) disposeDraftDecor(view.decor)
-    view.object.parent?.remove(view.object)
-    owners.delete(view.object)
+    send(view)
     stemViews.delete(id)
   }
   for (const [id, view] of [...plateViews]) {
     // Both models: a source plate is as real as one in a bay, and sweeping it would delete the column.
     if (plateOf(id)) continue
-    if (view.decor) disposeDraftDecor(view.decor)
-    if (view.anchor) disposeAnchorVisual(view.anchor)
-    scene.value?.remove(view.object)
-    owners.delete(view.object)
+    send(view)
     plateViews.delete(id)
   }
   for (const [id, view] of [...tileViews]) {
     if (tileOf(id)) continue
-    if (view.decor) disposeDraftDecor(view.decor)
-    view.object.parent?.remove(view.object)
-    owners.delete(view.object)
+    send(view)
     tileViews.delete(id)
+  }
+}
+
+/**
+ * Fly the spent pieces out, and dispose of each as it goes.
+ *
+ * Off to the **right**, past the edge of the canvas: away from the drawer it left, away from the
+ * source column on the left, and across nothing the player is reading. Shrinking rather than fading
+ * because a tile's material is shared by every tile of its colour — fading one would fade them all,
+ * and cloning a material per departure to avoid that would be a lot of machinery for a half-second.
+ */
+function flyDepartures(delta: number, cam: OrthographicCamera, w: number, h: number): void {
+  for (let i = departing.length - 1; i >= 0; i--) {
+    const leaving = departing[i] as Departure
+    if (leaving.delay > 0) {
+      leaving.delay -= delta
+      continue
+    }
+    leaving.t = Math.min(1, leaving.t + delta / DEPART_SECONDS)
+    // Fast at first and easing out, so it reads as thrown rather than dragged.
+    const k = 1 - (1 - leaving.t) * (1 - leaving.t)
+
+    const x = leaving.fromX + (w + 160 - leaving.fromX) * k
+    const y = leaving.fromY - 70 * k
+    const p = screenToBoard(cam, w, h, x, y)
+    leaving.object.position.set(p.x, HELD_TILE_Y, p.z)
+    // Full size for the first half of the flight, then away. Shrinking from the outset makes a piece
+    // read as receding rather than leaving, and it is gone before the eye has found it.
+    const fade = Math.max(0, 1 - Math.max(0, (k - 0.45) / 0.55))
+    leaving.object.scale.setScalar(leaving.scale * fade)
+
+    if (leaving.t < 1) continue
+    if (leaving.decor) disposeDraftDecor(leaving.decor)
+    if (leaving.anchor) disposeAnchorVisual(leaving.anchor)
+    leaving.object.parent?.remove(leaving.object)
+    scene.value?.remove(leaving.object)
+    departing.splice(i, 1)
   }
 }
 
@@ -1511,6 +1605,13 @@ onBeforeUnmount(() => {
   document.body.style.cursor = ''
   for (const off of unregisters) off()
   unregisters.length = 0
+
+  for (const leaving of departing) {
+    if (leaving.decor) disposeDraftDecor(leaving.decor)
+    if (leaving.anchor) disposeAnchorVisual(leaving.anchor)
+    leaving.object.parent?.remove(leaving.object)
+  }
+  departing.length = 0
 
   for (const view of tileViews.values()) {
     if (view.decor) disposeDraftDecor(view.decor)
