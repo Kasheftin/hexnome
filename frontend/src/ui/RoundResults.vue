@@ -16,7 +16,7 @@
  * once it has finished does *Next round* take that place. Sharing one button would let a second click
  * land on a round the player had not seen yet.
  */
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { FinalTally } from '@hexnome/rules/groups'
 import FinalScore from './FinalScore.vue'
@@ -64,6 +64,26 @@ const done = shallowRef(false)
 
 /** The round that just ended — the one the panel is really about. */
 const latest = computed(() => props.rounds.at(-1) as RoundRecord | undefined)
+
+/**
+ * Whose sheet is on screen. 0 in a solo game, where there is nothing to switch between.
+ *
+ * It is part of every reveal's `key` below, and that is not decoration. `ScoringReveal` builds its
+ * timeline once, on mount, and drives everything from a counter over it — so a `tally` that changes
+ * underneath a mounted one leaves the *previous* seat's count on screen against the new seat's rows.
+ * That is how Antimony's sheet came to show a round total of 2 above a fold header reading 1.
+ */
+const chosenSeat = computed(() => props.seats.find(tab => tab.viewed)?.seat ?? 0)
+
+/*
+ * Changing seat spends the count, exactly as opening another section does.
+ *
+ * The alternative — remounting and letting it count itself out again — is worse in both directions:
+ * a player who came to compare has to sit through a second reveal, and one who had already watched it
+ * finish would see a fresh count start under a footer that has moved on to *Next round*. The reveal
+ * belongs to the round that just ended, for the seat that was on screen when it did.
+ */
+watch(chosenSeat, () => spendReveal())
 
 /**
  * Which section is open — a round number, `'final'`, or nothing.
@@ -231,6 +251,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           -->
           <ScoringReveal
             v-if="record.round === animated"
+            :key="`${record.round}:${chosenSeat}`"
             :ref="el => { reveal = el as InstanceType<typeof ScoringReveal> | null }"
             :tally="record.tally"
             :board="record.board"
@@ -240,7 +261,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           <!-- A past round: shown complete, with no count to sit through. -->
           <ScoringReveal
             v-else
-            :key="record.round"
+            :key="`${record.round}:${chosenSeat}`"
             :tally="record.tally"
             :board="record.board"
             :fine="record.fine"
@@ -273,6 +294,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           class="fold-body"
         >
           <FinalScore
+            :key="chosenSeat"
             ref="finalReveal"
             :tally="props.finalTally"
             :board="latest?.board ?? props.rounds[0]!.board"
