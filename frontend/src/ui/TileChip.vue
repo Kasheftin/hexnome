@@ -32,6 +32,7 @@ import {
   TILE_SIZE,
   symbolOffsetUpFor,
   symbolScaleFor,
+  tileColorCss,
 } from '@/scene/constants'
 
 const props = defineProps<{
@@ -83,7 +84,9 @@ const shape = computed(() => {
   if (props.stem) {
     return { width: `${STEM_CHIP_PX.toFixed(2)}px`, height: `${STEM_CHIP_PX.toFixed(2)}px` }
   }
-  return { background: props.color === undefined ? '#2f333c' : TILE_COLORS[props.color]?.hex ?? '#888' }
+  if (props.color === undefined) return { background: '#2f333c' }
+  const swatch = TILE_COLORS[props.color]
+  return { background: swatch ? tileColorCss(swatch) : '#888' }
 })
 
 const symbol = computed(() => {

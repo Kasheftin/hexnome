@@ -1,6 +1,6 @@
 import { Color, MeshStandardMaterial } from 'three'
 import { TILE_COLOR_COUNT } from '@hexnome/rules/deck'
-import { TILE_COLORS } from './constants'
+import { TILE_COLORS, tileColorCss } from './constants'
 
 /**
  * The tile material, and the guard tying it to the palette.
@@ -39,7 +39,9 @@ void paletteLengthMatchesRules
 export function createTileMaterial(colorIndex: TileColorIndex): MeshStandardMaterial {
   const entry = TILE_COLORS[colorIndex] ?? TILE_COLORS[0]
   return new MeshStandardMaterial({
-    color: new Color(entry.hex),
+    // `Color` reads a CSS string as sRGB and converts to the working space, which is what the
+    // palette is authored in — see `tileColorCss` for why the string is built rather than stored.
+    color: new Color(tileColorCss(entry)),
     // Matte enough to stay solid-looking, glossy enough that the rim picks up the
     // studio panels as a soft sheen.
     roughness: 0.45,

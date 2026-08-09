@@ -42,6 +42,7 @@ import {
   TILE_SIZE,
   symbolOffsetUpFor,
   symbolScaleFor,
+  tileColorCss,
 } from '@/scene/constants'
 
 /** How a tile is being treated by whatever is driving the diagram. */
@@ -112,7 +113,10 @@ function anchorBox(kind: 'internal' | 'external'): { w: number, h: number, x: nu
   return { w, h, x: -w / 2, y: -h / 2 }
 }
 
-const tileFill = (color: number): string => TILE_COLORS[color]?.hex ?? '#888'
+const tileFill = (color: number): string => {
+  const swatch = TILE_COLORS[color]
+  return swatch ? tileColorCss(swatch) : '#888'
+}
 </script>
 
 <template>

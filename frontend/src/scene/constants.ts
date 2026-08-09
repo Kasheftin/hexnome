@@ -136,25 +136,45 @@ export const STEM_TEXTURE_URL = '/textures/stem.png'
 /**
  * The six tile colours, in palette order — a tile's `color` is an index into this list.
  *
+ * **HSL, in degrees and percent**, so the palette can be dialled by hand: `l` alone walks a colour
+ * darker or lighter without touching what colour it is, and `s` alone takes it toward grey. In hex
+ * neither move is one edit — going a step darker means recomputing all three channels, which is why
+ * these started life as hand-picked hexes and stayed wherever they first landed.
+ *
  * `name` is user-facing: the action bar prints it when it names a draft ("all indigo"), and the scoring
  * panels name their colour targets the same way — so it reads as prose rather than as a swatch label.
  *
- * The hexes are sRGB and the tiles are **lit**, so what lands on screen is not the swatch. Indigo
- * `#613ECC` is RGB(97, 62, 204) as a value and measures RGB(116, 69, 204) on the board: brighter in
- * red and green, with blue unmoved. Tune against the render, not against the number here.
+ * These are sRGB and the tiles are **lit**, so what lands on screen is not the swatch. Indigo is
+ * RGB(97, 62, 204) as a value and measures RGB(116, 68, 204) on the board: brighter in red and green,
+ * with blue unmoved. Tune against the render, not against the numbers here.
  *
  * The rules never see any of this: `game/` knows a colour only as an index (docs/tech-spec.md, "The one
  * hard architectural rule"). The list length is pinned to `TILE_COLOR_COUNT` by an assertion in
  * scene/tileMaterials.ts — adding or removing an entry here is a typecheck error until both agree.
  */
 export const TILE_COLORS = [
-  { name: 'Orange', hex: '#b06127' },
-  { name: 'Lime', hex: '#6a8f00' },
-  { name: 'Green', hex: '#00994b' },
-  { name: 'Blue', hex: '#0f81af' },
-  { name: 'Indigo', hex: '#613ECC' },
-  { name: 'Magenta', hex: '#CC3E9C' },
+  { name: 'Orange', h: 25, s: 60, l: 40 },
+  { name: 'Lime', h: 76, s: 60, l: 30 },
+  { name: 'Green', h: 149, s: 60, l: 30 },
+  { name: 'Blue', h: 197, s: 60, l: 30 },
+  { name: 'Indigo', h: 255, s: 60, l: 50 },
+  { name: 'Magenta', h: 320, s: 60, l: 50 },
 ] as const
+
+/**
+ * A palette entry as a CSS colour — for the DOM, and for three, which parses the same string.
+ *
+ * **Keep the commas and the bare hue.** This is the only syntax three's `Color.setStyle` accepts;
+ * `hsl(25 64% 42%)` and `hsl(25deg, …)` are both valid modern CSS and both make it give up and leave
+ * the colour **white**, with no warning. Generating the string here rather than storing it is what
+ * keeps that from ever being typed by hand — and `tileColors.spec.ts` fails if it stops parsing.
+ *
+ * Takes the entry rather than the index, so each caller keeps whatever it already does about a colour
+ * that is not in the palette: the board falls back to the first colour, the flat chips to grey.
+ */
+export function tileColorCss(color: { h: number, s: number, l: number }): string {
+  return `hsl(${color.h}, ${color.s}%, ${color.l}%)`
+}
 
 
 /* ── Drawer ──────────────────────────────────────────────────────────────────── */
