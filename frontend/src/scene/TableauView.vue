@@ -74,6 +74,8 @@ import {
   TILE_BEVEL,
   TILE_SIZE,
   TILE_THICKNESS,
+  TOKEN_RIM,
+  TOKEN_RIM_DEPTH,
 } from './constants'
 import {
   attachCoinDraftDecor,
@@ -98,10 +100,10 @@ import {
 import { createPlateBackVisual, disposePlateBackAssets } from './plateBackVisual'
 import { createPlateVisual, disposePlateVisualAssets, petalOffset } from './plateVisual'
 import { boardToScreen, screenToBoard, unitsPerPixel } from './screenProjection'
-import { createHexPlateGeometry } from './hexPlateGeometry'
 import { createStemVisual, disposeStemAssets } from './stemVisual'
 import { createSymbolPlane } from './symbolPlane'
 import { createTileGeometry, hexApothemOf } from './tileGeometry'
+import { createTokenGeometry } from './tokenGeometry'
 import { SOURCE_HEAP_SPAN, sourceScatter, type ScatterOffset } from './sourceScatter'
 import { createTileMaterial, type TileColorIndex } from './tileMaterials'
 import type { DrawerShape } from './drawerLayout'
@@ -245,21 +247,37 @@ const tileGeometry: BufferGeometry = createTileGeometry({
 })
 
 /**
- * A plate's **own** tile is drawn flat — no thickness, no bevel.
+ * A plate's **own** tile is drawn with no thickness and its rim rolled the wrong way.
  *
- * Purely a visual signal, and a strong one: every loose tile is a thick bevelled piece that catches the
- * key light on its rim, so a token with no rim at all reads as *printed on* the plate rather than *set
- * into* it. That is exactly what it is — a plate and its token are one indivisible object, and the flat
- * face says so without a label.
+ * Purely a visual signal, and a strong one: every loose tile is a thick bevelled piece whose rim
+ * catches the key light, so a token that *darkens* where a tile brightens reads as a hollow in the
+ * plate rather than a piece on it. That is exactly what it is — a plate and its token are one
+ * indivisible object, and an inverted rim says so without a label.
+ *
+ * It was flat here first, which said the same thing by having no rim at all. The trouble with saying it
+ * that way is that a flat face on a flat plate leaves the token's edge as a bare colour step, hard and
+ * unshaded along every 60° diagonal. Inverting the rim keeps the meaning and gives the edge something
+ * to be made of. See scene/tokenGeometry.ts.
  *
  * The rule itself is unchanged and lives in the model (`Tile.fixed`): the token is still a full tile for
  * scoring, and it was already undraggable. This only makes that legible.
  */
-const tokenGeometry: BufferGeometry = createHexPlateGeometry(TILE_SIZE)
+const tokenGeometry: BufferGeometry = createTokenGeometry({
+  circumradius: TILE_SIZE,
+  rim: TOKEN_RIM,
+  depth: TOKEN_RIM_DEPTH,
+})
 
-/** A tile's top face in its own local space. A flat token's origin *is* its face. */
+/**
+ * A tile's top face in its own local space, which is where its symbol goes.
+ *
+ * A token's origin is its face, but its rim stands above that — so the symbol rides at the rim's
+ * height rather than the face's. Not because it would otherwise be hidden, but because it would be
+ * *pierced*: the symbol reaches almost to the face's edge, and a plane below the rim would have the
+ * rim poke through its corners. Height is free under a top-down orthographic camera.
+ */
 function tileFaceY(fixed: boolean): number {
-  return fixed ? 0 : TILE_THICKNESS / 2
+  return fixed ? TOKEN_RIM_DEPTH : TILE_THICKNESS / 2
 }
 const tileMaterials = new Map<number, Material>()
 

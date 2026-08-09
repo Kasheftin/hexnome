@@ -92,6 +92,21 @@ export const TILE_BEVEL = 0.15
  */
 export const TILE_ENV_INTENSITY = 1
 
+/**
+ * The **token's** rim — a plate's own tile — as `TILE_BEVEL` is a loose tile's.
+ *
+ * Same width, opposite curvature: the token is the cavity that tile would leave, so its rim rolls
+ * inward and its shading inverts. See scene/tokenGeometry.ts, where the shape and the reasoning live.
+ *
+ * `TOKEN_RIM` matches `TILE_BEVEL` exactly, because the point is that the two are the same moulding
+ * seen from opposite sides. `TOKEN_RIM_DEPTH` does not: a loose tile's rim rolls a full quarter circle
+ * through 0.15 of height, and a token repeating that would stand a fifth of a cell proud of a plate
+ * 0.08 thick. Flattening the quarter circle into a quarter ellipse keeps the shading — which is the
+ * only part of it a top-down camera can see — and drops the rest.
+ */
+export const TOKEN_RIM = TILE_BEVEL
+export const TOKEN_RIM_DEPTH = 0.06
+
 /* ── Stems (the jokers) ──────────────────────────────────────────────────────── */
 
 /**
