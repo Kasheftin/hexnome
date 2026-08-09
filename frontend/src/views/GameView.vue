@@ -117,6 +117,7 @@ import {
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
+  effectiveFirstPassFine,
   effectiveStrictBonus,
   modeInfo,
   roundsOf,
@@ -520,7 +521,15 @@ const targetPlateSlot = shallowRef<number | null>(null)
  */
 const roundPoints = computed(() => {
   void revision.value
-  return scoreTargets(roundAgenda(agenda, count.value.round) ?? [], board().tilesOnBoard())
+  const scored = scoreTargets(roundAgenda(agenda, count.value.round) ?? [], board().tilesOnBoard())
+  /*
+   * Less the first-pass fine, once this seat is the one that has incurred it. Not a prediction: the
+   * seat has already passed, so the charge is settled and only the round's close is outstanding.
+   */
+  const fined = state.firstToPass === viewedSeat.value
+    ? effectiveFirstPassFine(gameOptions.settings)
+    : 0
+  return scored - fined
 })
 
 /**
@@ -762,6 +771,7 @@ function roundRecord(round: number, seat = viewedSeat.value): RoundRecord {
      * board instead of hopping about in the order things happened to be placed.
      */
     tally: tallyRound(roundAgenda(agenda, round) ?? [], tilesInReadingOrder(asItWas)),
+    fine: (asThen.seats[seat] ?? asThen.seats[0]!).fined[round - 1] ?? 0,
     leftovers: describeLeftovers(asItWas),
   }
   derived.set(key, record)

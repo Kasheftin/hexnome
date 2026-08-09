@@ -455,6 +455,19 @@ a single Pass finishes the round. It is a choice rather than a detection: it usu
 nothing can be drafted and nothing placed, but a player may pass with moves still on the table, and
 nothing passes on their behalf.
 
+**The first player out of a round pays for it, and is paid for it.** They give up the *first-pass
+fine* — 0, 1 or 2 points, 1 by default — and they take the **first turn of the next round**, at a
+source nobody has touched yet. So leaving early is a trade rather than a surrender: you buy the next
+round's first pick with this round's points, and the fine is the dial that decides how good a deal
+that is. At 0 there is no reason not to bail out the moment the source turns awkward.
+
+Both halves are one rule and neither exists alone: without the fine the lead is free, and without the
+lead the fine is a punishment for something a player often has no choice about.
+
+**Neither applies in a solo game**, and the setting is not offered there. With one seat every pass is
+the first one, so the fine would be a charge for reaching the end of a round, and leading the next is
+not a privilege when there is nobody to lead.
+
 The **drawer starts empty**, so the first turn can only be a draft. That is a starting position
 rather than a rule to check — there is simply nothing to place yet.
 

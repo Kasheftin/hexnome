@@ -16,6 +16,15 @@ export interface RoundRecord {
   /** The board as it stood when this round ended. */
   readonly board: BoardDiagram
   readonly tally: RoundTally<Tile>
+  /**
+   * Points taken off for being the first to pass this round, or 0.
+   *
+   * Kept beside the tally rather than folded into it, because it is not something the board can be
+   * counted to find: the tally is what the tiles were worth, and this is what the round charged for
+   * leaving it early. `SeatState.banked` is already net of it — this is only so the panel can show
+   * why the two numbers differ.
+   */
+  readonly fine: number
   /** Still in the drawer at that point. Only the last round's is ever settled — see `game/groups.ts`. */
   readonly leftovers: Leftovers
 }

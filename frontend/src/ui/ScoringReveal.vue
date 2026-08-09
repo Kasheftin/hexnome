@@ -47,6 +47,14 @@ import { useTileFlights } from './useTileFlights'
 const props = defineProps<{
   tally: RoundTally<Tile>
   board: BoardDiagram
+  /**
+   * Points charged for passing first, or 0.
+   *
+   * Shown rather than quietly subtracted. It is the only part of a round's score that does not come
+   * from the board, so a panel that counted the tiles and then announced a different number would be
+   * the one thing this whole reveal exists to avoid.
+   */
+  fine?: number
   /** Skip straight to the finished state — used when the reveal has nothing worth watching. */
   instant?: boolean
 }>()
@@ -121,6 +129,15 @@ const subtotalOf = (index: number): number =>
 
 const runningTotal = computed(() =>
   props.tally.rows.reduce((sum, _row, index) => sum + subtotalOf(index), 0))
+
+/**
+ * The fine, and what is left after it — held back until the count is over.
+ *
+ * A charge landing part-way through would be counted against a total still climbing, and the player
+ * would have to work out which of the two numbers moving was the one they cared about.
+ */
+const fine = computed(() => props.fine ?? 0)
+const banked = computed(() => runningTotal.value - fine.value)
 
 const chipVisible = (row: number, index: number): boolean =>
   index < (landed.value[row] ?? 0) || flights.pending.value.has(`${row}:${index}`)
@@ -295,6 +312,17 @@ const doubleCounted = computed(() =>
         <strong>{{ runningTotal }}</strong>
       </p>
 
+      <template v-if="finished && fine > 0">
+        <p class="total charge">
+          <span>Passed first</span>
+          <strong>−{{ fine }}</strong>
+        </p>
+        <p class="total">
+          <span>Banked</span>
+          <strong>{{ banked }}</strong>
+        </p>
+      </template>
+
       <p
         v-if="finished && doubleCounted > 0"
         class="note"
@@ -319,6 +347,9 @@ const doubleCounted = computed(() =>
         {{ nameOf(row) }}: {{ row.tiles.length }} tiles, {{ row.points }} points.
       </li>
       <li>Round total {{ props.tally.total }}.</li>
+      <li v-if="fine > 0">
+        Passed first, less {{ fine }}. Banked {{ props.tally.total - fine }}.
+      </li>
     </ul>
 
     <TileFlights
@@ -438,6 +469,21 @@ const doubleCounted = computed(() =>
   font-size: 18px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A deduction, and it should not look like another way of earning. Quieter than the totals it sits
+ * between, and no rule above it — it belongs to the total it is taken from rather than starting a
+ * section of its own.
+ */
+.charge {
+  padding-top: 6px;
+  border-top: none;
+}
+
+.charge strong {
+  color: #c98a72;
+  font-size: 15px;
 }
 
 .note {

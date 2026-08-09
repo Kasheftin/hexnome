@@ -11,7 +11,7 @@ import {
   type GameOptions,
   type GameState,
 } from './game'
-import { defaultGameSettings, type GameSettings } from './gameSettings'
+import { defaultGameSettings, SOLO, type GameSettings } from './gameSettings'
 import { hexRectangle } from './hex'
 import type { Tableau, TileSpec } from './tableau'
 
@@ -24,6 +24,11 @@ function options(overrides: Partial<GameSettings> = {}): GameOptions {
     kind: 'multiplayer',
     players: 3,
     playerNames: ['Ember', 'Flux', 'Gimbal'],
+    /*
+     * Off unless a test asks for it, so that everywhere else a banked score is the round's targets
+     * and nothing else. A real table defaults it on — see `DEFAULT_FIRST_PASS_FINE`.
+     */
+    firstPassFine: 0,
     ...overrides,
   }
   return {
@@ -61,6 +66,7 @@ function snapshot(state: GameState) {
     round: state.round,
     turn: state.turn,
     activeSeat: state.activeSeat,
+    firstToPass: state.firstToPass,
     platesDealt: state.platesDealt,
     finished: state.finished,
     source: census(state.source),
@@ -75,6 +81,7 @@ function snapshot(state: GameState) {
       name: seat.name,
       passed: seat.passed,
       banked: [...seat.banked],
+      fined: [...seat.fined],
       // A receipt a replay failed to reproduce would pay for the same enclosure twice.
       paidAnchors: [...seat.paidAnchors].sort(),
       ...census(seat.tableau),
@@ -306,6 +313,90 @@ describe('closing a round', () => {
     expect(state.finished).toBe(true)
     expect(state.seats[0]?.banked).toHaveLength(rounds)
     expect(applyCommand(state, { kind: 'pass', seat: 0 })).toMatchObject({ ok: false })
+  })
+})
+
+describe('passing first', () => {
+  /**
+   * A round where seat 1 leaves first.
+   *
+   * Seat 0 has to do something that is not a pass, or it would be the one that left first and the
+   * rule would be indistinguishable from "seat 0 always leads".
+   */
+  function seatOneLeavesFirst(state: GameState): void {
+    play(state, lot(1))
+    const ones = draftItems(state).filter(item => item.value === 1).map(item => item.id)
+    play(state, { kind: 'draft', seat: 0, ids: ones })
+    play(state, { kind: 'pass', seat: 1 })
+    play(state, { kind: 'pass', seat: 2 })
+    play(state, { kind: 'pass', seat: 0 })
+  }
+
+  it('charges the fine to the seat that left first, and to nobody else', () => {
+    const state = createGame(options({ firstPassFine: 2 }))
+    seatOneLeavesFirst(state)
+
+    expect(state.seats.map(seat => seat.fined)).toEqual([[0], [2], [0]])
+  })
+
+  it('takes the fine out of what that seat banks', () => {
+    const charged = createGame(options({ firstPassFine: 2 }))
+    const free = createGame(options({ firstPassFine: 0 }))
+    seatOneLeavesFirst(charged)
+    seatOneLeavesFirst(free)
+
+    // Banked is net, so nothing downstream has to remember to subtract it.
+    expect(charged.seats[1]!.banked[0]).toBe(free.seats[1]!.banked[0]! - 2)
+    expect(charged.seats[0]!.banked[0]).toBe(free.seats[0]!.banked[0])
+  })
+
+  it('gives that seat the first turn of the next round', () => {
+    const state = createGame(options({ firstPassFine: 1 }))
+    seatOneLeavesFirst(state)
+
+    expect(state.round).toBe(2)
+    expect(state.activeSeat).toBe(1)
+  })
+
+  it('hands over the turn even when the fine is nothing', () => {
+    // The two halves are one rule but not one number: at 0 the turn order still moves.
+    const state = createGame(options({ firstPassFine: 0 }))
+    seatOneLeavesFirst(state)
+
+    expect(state.activeSeat).toBe(1)
+    expect(state.seats[1]!.fined).toEqual([0])
+  })
+
+  it('asks the question again each round', () => {
+    const state = createGame(options({ firstPassFine: 1 }))
+    seatOneLeavesFirst(state)
+
+    // Round 2 opens on seat 1, and this time seat 2 is the one to leave.
+    play(state, lot(2))
+    const ones = draftItems(state).filter(item => item.value === 1).map(item => item.id)
+    play(state, { kind: 'draft', seat: 1, ids: ones })
+    play(state, { kind: 'pass', seat: 2 })
+    play(state, { kind: 'pass', seat: 0 })
+    play(state, { kind: 'pass', seat: 1 })
+
+    expect(state.activeSeat).toBe(2)
+    expect(state.seats.map(seat => seat.fined)).toEqual([[0, 0], [1, 0], [0, 1]])
+  })
+
+  it('never charges a solo game, whatever the settings say', () => {
+    // One seat passes first by definition, so a fine there is a charge for reaching the end of a
+    // round. Guarded where it is applied, not only where it is parsed.
+    const state = createGame(options({
+      kind: 'singleplayer',
+      players: SOLO,
+      playerNames: ['Solo'],
+      firstPassFine: 2,
+    }))
+    play(state, lot(1))
+    play(state, { kind: 'pass', seat: 0 })
+
+    expect(state.seats[0]!.fined).toEqual([0])
+    expect(state.activeSeat).toBe(0)
   })
 })
 

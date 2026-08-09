@@ -43,7 +43,9 @@ import {
   DEFAULT_STEM_COUNT,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
+  DEFAULT_FIRST_PASS_FINE,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
+  FIRST_PASS_FINE_CHOICES,
   STRICT_BONUS_CHOICES,
   GROUP_BONUS_CHOICES,
   MAX_GROUP_SIZE,
@@ -53,6 +55,7 @@ import {
   DEFAULT_MIN_GROUP_SIZE,
   DEFAULT_REWARD_STEMS,
   effectiveGroupBonuses,
+  effectiveFirstPassFine,
   effectiveStrictBonus,
   PLACEMENT_RULE_HINTS,
   PLACEMENT_RULE_LABELS,
@@ -109,6 +112,8 @@ const initialStems = ref<number>(DEFAULT_STEM_COUNT)
 const stemsPerInternalAnchor = ref<number>(DEFAULT_STEMS_PER_INTERNAL_ANCHOR)
 const stemsPerExternalAnchor = ref<number>(DEFAULT_STEMS_PER_EXTERNAL_ANCHOR)
 const strictEnclosureBonus = ref<number>(DEFAULT_STRICT_ENCLOSURE_BONUS)
+/** Only asked for multiplayer; a solo game passes first every round by definition. */
+const firstPassFine = ref<number>(DEFAULT_FIRST_PASS_FINE)
 
 const placementRule = ref<PlacementRule>(DEFAULT_PLACEMENT_RULE)
 
@@ -266,6 +271,27 @@ const STEM_DIALS: readonly Dial[] = [
   },
 ]
 
+/**
+ * The one band that exists only at a table.
+ *
+ * The whole band disappears in a solo game rather than the dial being disabled inside it — there is
+ * nothing to explain, because with one seat every pass is the first one and leading the next round
+ * means nothing. `visibleSections` drops a band once its last dial goes.
+ */
+const PASSING_DIALS: readonly Dial[] = [
+  {
+    key: 'firstPassFine',
+    legend: 'Fine for passing first',
+    short: 'first-pass fine',
+    choices: FIRST_PASS_FINE_CHOICES,
+    model: firstPassFine,
+    hint: 'The first player out of a round gives up these points — and takes the first turn of the '
+      + 'next round, at a source nobody has touched. At 0 there is no reason not to leave the moment '
+      + 'the source turns awkward.',
+    applies: () => kind.value === 'multiplayer',
+  },
+]
+
 const FINAL_DIALS: readonly Dial[] = [
   {
     key: 'minGroupSize',
@@ -331,6 +357,13 @@ interface DialSection {
 
 const SECTIONS: readonly DialSection[] = [
   { key: 'supply', dials: SUPPLY_DIALS },
+  {
+    key: 'passing',
+    title: 'Passing',
+    dials: PASSING_DIALS,
+    note: 'Passing takes you out of the round, not out of the game. The first to go pays the fine and '
+      + 'opens the next round.',
+  },
   { key: 'deck', title: 'Deck', dials: DECK_DIALS },
   { key: 'drawer', title: 'Drawer', dials: DRAWER_DIALS },
   { key: 'stems', title: 'Receiving stems', dials: STEM_DIALS },
@@ -429,6 +462,7 @@ function startGame(): void {
       placementRule: placementRule.value,
       strictEnclosureBonus: strictEnclosureBonus.value,
     }),
+    firstPassFine: effectiveFirstPassFine({ players, firstPassFine: firstPassFine.value }),
     placementRule: placementRule.value,
     minGroupSize: minGroupSize.value,
     groupBonuses: groupBonuses.value,

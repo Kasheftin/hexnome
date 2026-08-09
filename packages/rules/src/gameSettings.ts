@@ -151,6 +151,21 @@ export const STRICT_BONUS_CHOICES: readonly number[] = [0, 1]
 export const DEFAULT_STRICT_ENCLOSURE_BONUS = 1
 
 /**
+ * What the first player to pass in a round gives up, in points.
+ *
+ * Passing first is not simply giving up: it also takes the **first turn of the next round**, which is
+ * first pick of a fresh source. The fine is the price of that, and the two together are one decision —
+ * leave early and lead, or stay and take what is left. At 0 there is no reason not to bail out the
+ * moment the source turns awkward, which is why the default is not 0.
+ *
+ * **Meaningless in a solo game, and forced to zero there.** With one seat every pass is the first one,
+ * so the fine would be an unconditional charge for finishing a round, and leading the next is not a
+ * privilege when there is nobody to lead. See {@link effectiveFirstPassFine}.
+ */
+export const FIRST_PASS_FINE_CHOICES: readonly number[] = [0, 1, 2]
+export const DEFAULT_FIRST_PASS_FINE = 1
+
+/**
  * The largest a group can ever be.
  *
  * Not a limit anyone imposed — it falls out of the rules. A group holds no duplicates, and there are
@@ -243,6 +258,8 @@ export interface GameSettings {
   readonly stemsPerExternalAnchor: number
   /** Extra stems for a strict enclosure. Always 0 when `placementRule` is `strict`. */
   readonly strictEnclosureBonus: number
+  /** Points charged to the first seat to pass in a round. Always 0 in a solo game. */
+  readonly firstPassFine: number
   /** How strictly a placed tile must agree with its neighbours. See game/placement.ts. */
   readonly placementRule: PlacementRule
   /** Connected tiles needed before a group scores at all. */
@@ -326,6 +343,10 @@ export function isStrictBonus(value: unknown): boolean {
   return typeof value === 'number' && STRICT_BONUS_CHOICES.includes(value)
 }
 
+export function isFirstPassFine(value: unknown): boolean {
+  return typeof value === 'number' && FIRST_PASS_FINE_CHOICES.includes(value)
+}
+
 export function isMinGroupSize(value: unknown): boolean {
   return typeof value === 'number' && MIN_GROUP_SIZE_CHOICES.includes(value)
 }
@@ -356,6 +377,24 @@ export function effectiveStrictBonus(settings: {
   strictEnclosureBonus: number
 }): number {
   return settings.placementRule === 'strict' ? 0 : settings.strictEnclosureBonus
+}
+
+/**
+ * The first-pass fine a game actually runs with: nothing at all at a table of one.
+ *
+ * Keyed on the **seat count** rather than on `kind`, because that is what the rule is about. A solo
+ * game passes once per round and always first, so a fine there is a charge for reaching the end of a
+ * round, and the turn order it pays for cannot mean anything with one seat.
+ *
+ * One function for the same reason as {@link effectiveStrictBonus}: the menu hides the control in a
+ * solo game, and this makes the same thing true of a settings blob that was hand-edited, stored before
+ * the rule existed, or written by an older build.
+ */
+export function effectiveFirstPassFine(settings: {
+  players: number
+  firstPassFine: number
+}): number {
+  return settings.players <= SOLO ? 0 : settings.firstPassFine
 }
 
 /**
@@ -400,6 +439,8 @@ export function defaultGameSettings(createdAt: number, seed = ''): GameSettings 
     stemsPerInternalAnchor: DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
     stemsPerExternalAnchor: DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
     strictEnclosureBonus: DEFAULT_STRICT_ENCLOSURE_BONUS,
+    // Solo by default, and the fine means nothing there — see `effectiveFirstPassFine`.
+    firstPassFine: 0,
     placementRule: DEFAULT_PLACEMENT_RULE,
     minGroupSize: DEFAULT_MIN_GROUP_SIZE,
     groupBonuses: DEFAULT_GROUP_BONUSES,
@@ -482,6 +523,13 @@ export function parseGameSettings(value: unknown): GameSettings | null {
       strictEnclosureBonus: isStrictBonus(raw.strictEnclosureBonus)
         ? (raw.strictEnclosureBonus as number)
         : DEFAULT_STRICT_ENCLOSURE_BONUS,
+    }),
+    // The same, for the pairing with the seat count.
+    firstPassFine: effectiveFirstPassFine({
+      players,
+      firstPassFine: isFirstPassFine(raw.firstPassFine)
+        ? (raw.firstPassFine as number)
+        : DEFAULT_FIRST_PASS_FINE,
     }),
     createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt)
       ? raw.createdAt

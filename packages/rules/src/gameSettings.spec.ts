@@ -19,6 +19,7 @@ import {
   PLATE_BAG_LABELS,
   TILE_SLOT_CHOICES,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
+  DEFAULT_FIRST_PASS_FINE,
   SINGLEPLAYER_MODES,
   effectiveGroupBonuses,
   defaultGameSettings,
@@ -44,6 +45,7 @@ const valid = {
   stemsPerExternalAnchor: 1,
   placementRule: 'strict',
   strictEnclosureBonus: 0,
+  firstPassFine: 2,
   minGroupSize: 4,
   // Indexed by group size, and zeroed at or below the minimum — hence the leading run of noughts.
   groupBonuses: [0, 0, 0, 0, 0, 5, 7],
@@ -205,6 +207,34 @@ describe('the strict-enclosure bonus', () => {
     const older: Record<string, unknown> = { ...regular }
     delete older.strictEnclosureBonus
     expect(parseGameSettings(older)?.strictEnclosureBonus).toBe(DEFAULT_STRICT_ENCLOSURE_BONUS)
+  })
+})
+
+describe('the first-pass fine', () => {
+  it('is kept at a table', () => {
+    for (const fine of [0, 1, 2]) {
+      expect(parseGameSettings({ ...valid, players: 3, firstPassFine: fine })?.firstPassFine).toBe(fine)
+    }
+  })
+
+  it('is forced to zero in a solo game, whatever was stored', () => {
+    // With one seat every pass is the first one, so the fine would be a charge for finishing a round
+    // and the turn order it buys means nothing. Normalised on the way in rather than trusted.
+    const parsed = parseGameSettings({ ...valid, players: SOLO, firstPassFine: 2 })
+    expect(parsed?.firstPassFine).toBe(0)
+  })
+
+  it('falls back for a value that is not on offer', () => {
+    for (const bad of [undefined, null, 3, -1, 0.5, '1', {}]) {
+      const parsed = parseGameSettings({ ...valid, players: 3, firstPassFine: bad })
+      expect(parsed?.firstPassFine).toBe(DEFAULT_FIRST_PASS_FINE)
+    }
+  })
+
+  it('defaults for a game saved before the setting existed', () => {
+    const older: Record<string, unknown> = { ...valid, players: 3 }
+    delete older.firstPassFine
+    expect(parseGameSettings(older)?.firstPassFine).toBe(DEFAULT_FIRST_PASS_FINE)
   })
 })
 

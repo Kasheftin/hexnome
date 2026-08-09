@@ -53,7 +53,7 @@ import {
   type TileLocation,
   type TileSpec,
 } from './tableau'
-import type { GameSettings } from './gameSettings'
+import { effectiveFirstPassFine, type GameSettings } from './gameSettings'
 
 /** Where every player's tableau grows from. The board is a rectangle centred here. */
 export const BOARD_CENTRE: Axial = { q: 0, r: 0 }
@@ -72,8 +72,15 @@ export interface SeatState {
   readonly name: string
   /** This seat's board and drawer, and nothing else. */
   readonly tableau: Tableau
-  /** Points banked, one entry per finished round. */
+  /**
+   * Points banked, one entry per finished round — **net of the first-pass fine**.
+   *
+   * Net rather than gross so that no caller has to remember to subtract it. `fined` beside it says
+   * what was taken, for a panel that wants to show the working.
+   */
   banked: number[]
+  /** The first-pass fine charged in each finished round, parallel to `banked`. Mostly zeroes. */
+  fined: number[]
   /** Out of *this* round — cleared when the round closes, not a state of the game. */
   passed: boolean
   /**
@@ -92,6 +99,16 @@ export interface GameState {
   /** Numbered within the round, so the header reads "round 2, turn 5". */
   turn: number
   activeSeat: number
+  /**
+   * Who left the round first, or null while everyone is still in.
+   *
+   * Two things hang off it: that seat is fined, and it opens the next round. Held on the state rather
+   * than worked out from the seats because "who passed first" is an *order*, and `passed` is a set —
+   * by the time the round closes every seat carries the same flag and the order is gone.
+   *
+   * Cleared when the round closes, like `passed`.
+   */
+  firstToPass: number | null
   /** Plates dealt into the source this round, against `platesPerRound`. */
   platesDealt: number
   /** True once the last seat has passed and the round has been closed. */
@@ -252,6 +269,7 @@ export function createGame(options: GameOptions): GameState {
       name: settings.playerNames[seat] ?? `Player ${seat + 1}`,
       tableau,
       banked: [],
+      fined: [],
       passed: false,
       paidAnchors: new Set(),
     }
@@ -262,6 +280,7 @@ export function createGame(options: GameOptions): GameState {
     round: 1,
     turn: 1,
     activeSeat: 0,
+    firstToPass: null,
     platesDealt: 0,
     finished: false,
     source,
@@ -367,10 +386,22 @@ function closeRound(state: GameState): DeskReturns {
   }
 
   const targets = roundAgenda(state.options.agenda, state.round)
+  const fine = effectiveFirstPassFine(state.options.settings)
   for (const seat of state.seats) {
-    seat.banked.push(targets ? scoreTargets(targets, seat.tableau.tilesOnBoard()) : 0)
+    const charged = seat.seat === state.firstToPass ? fine : 0
+    const scored = targets ? scoreTargets(targets, seat.tableau.tilesOnBoard()) : 0
+    seat.banked.push(scored - charged)
+    seat.fined.push(charged)
     seat.passed = false
   }
+
+  /*
+   * Whoever left first opens the next round — first pick of a source nobody has touched, which is what
+   * the fine above buys. Read before `firstToPass` is cleared, and defaulted to seat 0 for the case
+   * that cannot arise in play: a round closes only when the last seat passes, so somebody passed.
+   */
+  const opensNext = state.firstToPass ?? 0
+  state.firstToPass = null
 
   const rounds = state.options.agenda.length
   if (state.round >= rounds) {
@@ -379,7 +410,7 @@ function closeRound(state: GameState): DeskReturns {
     state.round++
     state.turn = 1
     state.platesDealt = 0
-    state.activeSeat = 0
+    state.activeSeat = opensNext
   }
   return { tiles, plates }
 }
@@ -434,6 +465,8 @@ export function applyCommand(state: GameState, command: Command): CommandResult 
   switch (command.kind) {
     case 'pass':
       seat.passed = true
+      // First out of the round, which decides both the fine and who opens the next one.
+      if (state.firstToPass === null) state.firstToPass = seat.seat
       return done(endTurn(state))
 
     case 'draft':
