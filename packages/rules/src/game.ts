@@ -141,6 +141,15 @@ export type Command =
     readonly to: TileLocation | PlateLocation
     /** Drawer ids spent on it, in the order the player picked them. */
     readonly paying: readonly string[]
+    /**
+     * The plate's rotation as it was placed. Ignored for a tile.
+     *
+     * Turning a plate in its bay is free, repeatable and not a turn, so it is not a command of its
+     * own — but it decides which cell each petal lands on, and therefore whether the placement is
+     * legal at all. Without it here a replay meets an unturned plate, refuses the placement, and
+     * rebuilds a board with a tile missing. The only place that shows is the score.
+     */
+    readonly rotation?: number
   }
   /** Out of the round. Not a skipped turn — see docs/game-design.md. */
   | { readonly kind: 'pass', readonly seat: number }
@@ -481,25 +490,43 @@ function applyPut(
   const { item, to, paying } = command
   const board = seat.tableau
 
+  /*
+   * Turn it first: legality is asked of the board this placement will actually make, and a plate
+   * points its petals differently depending on how it is turned. Restored below if anything refuses,
+   * so a refusal still changes nothing.
+   */
+  const wasTurned = item.kind === 'plate' ? board.plate(item.id)?.rotation : undefined
+  if (item.kind === 'plate' && command.rotation !== undefined && wasTurned !== undefined) {
+    board.rotatePlate(item.id, command.rotation - wasTurned)
+  }
+  const unturn = (): void => {
+    if (item.kind !== 'plate' || wasTurned === undefined) return
+    const now = board.plate(item.id)?.rotation
+    if (now !== undefined && now !== wasTurned) board.rotatePlate(item.id, wasTurned - now)
+  }
+
   const target: PaymentTarget | undefined = item.kind === 'tile'
     ? tileTarget(board, item.id)
     : plateTarget(board, item.id)
-  if (!target) return refuse(`${item.id} is not in seat ${seat.seat}'s drawer`)
+  if (!target) { unturn(); return refuse(`${item.id} is not in seat ${seat.seat}'s drawer`) }
 
   const purse = purseOf(board, item.id)
-  if (!canAffordPlacement(target, purse)) return refuse('that cannot be paid for')
+  if (!canAffordPlacement(target, purse)) { unturn(); return refuse('that cannot be paid for') }
 
   const cost = paymentCost(target)
-  if (paying.length !== cost) return refuse(`that costs ${cost}, and ${paying.length} were offered`)
+  if (paying.length !== cost) {
+    unturn()
+    return refuse(`that costs ${cost}, and ${paying.length} were offered`)
+  }
   for (const id of paying) {
-    if (id === item.id) return refuse('an item cannot pay for itself')
-    if (!purse.some(payer => payer.id === id)) return refuse(`${id} cannot be spent`)
+    if (id === item.id) { unturn(); return refuse('an item cannot pay for itself') }
+    if (!purse.some(payer => payer.id === id)) { unturn(); return refuse(`${id} cannot be spent`) }
   }
 
   const placed = item.kind === 'tile'
     ? board.moveTile(item.id, to as TileLocation)
     : board.movePlate(item.id, to as PlateLocation)
-  if (!placed) return refuse('that placement is not allowed')
+  if (!placed) { unturn(); return refuse('that placement is not allowed') }
 
   const tiles: TileSpec[] = []
   const plates: PlateSpec[] = []
@@ -580,6 +607,14 @@ function purseOf(board: Tableau, exclude: string): Payer[] {
 export interface ReplayOptions {
   /** Stop once this round has closed. For showing a finished round beside the board as it then was. */
   readonly throughRound?: number
+  /**
+   * Told about any command the replay could not apply.
+   *
+   * A refused command means the rebuilt game is **not** the game that was played — a placement that
+   * will not go back leaves a tile missing, and the only place that shows is a score that is quietly
+   * a few points short. Skipping it silently is how that stays hidden, so a caller can ask to hear.
+   */
+  readonly onRefused?: (command: Command, error: string, at: number) => void
 }
 
 /**
@@ -595,12 +630,13 @@ export interface ReplayOptions {
 export function replayGame(
   options: GameOptions,
   log: readonly Command[],
-  { throughRound }: ReplayOptions = {},
+  { throughRound, onRefused }: ReplayOptions = {},
 ): GameState {
   const state = createGame(options)
-  for (const command of log) {
-    if (throughRound !== undefined && (state.round > throughRound || state.finished)) break
-    applyCommand(state, command)
-  }
+  log.forEach((command, at) => {
+    if (throughRound !== undefined && (state.round > throughRound || state.finished)) return
+    const result = applyCommand(state, command)
+    if (!result.ok) onRefused?.(command, result.error, at)
+  })
   return state
 }

@@ -542,6 +542,72 @@ describe('putting something on the board', () => {
     expect(seat.tableau.tile(spare.id)).toBeUndefined()
   })
 
+  /**
+   * A plate is placed *turned*, and the log has to say so.
+   *
+   * Rotation happens in a bay, one press at a time, and it is not a turn — so it is not a command.
+   * But it decides which cell each petal lands on, and therefore whether the placement is legal at
+   * all. Without it in the `put`, a replay meets an unturned plate, refuses the placement, and
+   * rebuilds a board with a tile missing. The only place that shows is the score.
+   */
+  it('replays a plate placed after turning it', () => {
+    const opts = options()
+    const state = createGame(opts)
+    const log: Command[] = []
+    const record = (command: Command): void => { play(state, command); log.push(command) }
+
+    record(lot(1))
+    // Pick the lot bare so its plate turns face up and can be drafted.
+    let guard = 0
+    while (state.source.tilesInSourceLot(0).length > 0 && guard++ < 8) {
+      const value = state.source.tilesInSourceLot(0)[0]!.value
+      const ids = draftItems(state).filter(item => item.value === value).map(item => item.id)
+      record({ kind: 'draft', seat: state.activeSeat, ids })
+    }
+
+    const revealed = draftItems(state).find(item => item.kind === 'plate')
+    expect(revealed).toBeDefined()
+    while (state.activeSeat !== 0) record({ kind: 'pass', seat: state.activeSeat })
+    record({ kind: 'draft', seat: 0, ids: [revealed!.id] })
+    while (state.activeSeat !== 0) record({ kind: 'pass', seat: state.activeSeat })
+
+    const seat = state.seats[0]!
+    const held = seat.tableau.plates().find(p => p.location.kind === 'plateSlot')!
+    // Turned in the bay, exactly as the rotate buttons do it — and not a command.
+    seat.tableau.rotatePlate(held.id, 2)
+
+    // Somewhere its flower fits and connects. Any hole the rules accept will do.
+    const holes = [{ q: 3, r: -1 }, { q: 0, r: 3 }, { q: -3, r: 3 }, { q: 3, r: 0 }, { q: -3, r: 0 }]
+    const hole = holes.find(h => seat.tableau.canPlacePlate({ kind: 'board', hole: h }, held.id))
+    expect(hole).toBeDefined()
+
+    // A plate costs its token's value minus one, paid out of the same drawer. Stems will do.
+    const token = seat.tableau.plateToken(held.id)!
+    const purse = [
+      ...seat.tableau.stems().map(s => s.id),
+      ...seat.tableau.tiles().filter(x => x.location.kind === 'drawer').map(x => x.id),
+    ]
+    const put: Command = {
+      kind: 'put',
+      seat: 0,
+      item: { kind: 'plate', id: held.id },
+      to: { kind: 'board', hole: hole! },
+      paying: purse.slice(0, Math.max(0, token.value - 1)),
+      rotation: seat.tableau.plate(held.id)!.rotation,
+    }
+    record(put)
+
+    const refusals: string[] = []
+    const rebuilt = replayGame(opts, log, { onRefused: (c, e) => refusals.push(`${c.kind}: ${e}`) })
+    expect(refusals).toEqual([])
+
+    const there = rebuilt.seats[0]!.tableau.plate(held.id)
+    expect(there?.location).toEqual({ kind: 'board', hole: hole })
+    expect(there?.rotation).toBe(put.rotation)
+    // And the board is the same board, tile for tile — which is what the score is counted from.
+    expect(snapshot(rebuilt).seats[0]).toEqual(snapshot(state).seats[0])
+  })
+
   it('is refused from a seat whose turn it is not', () => {
     const { state, held, to } = holding()
     // The turn moved on after the draft, so seat 0 is not the one playing.

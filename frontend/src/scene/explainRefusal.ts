@@ -12,8 +12,13 @@
 import type { TileRefusal, TileSpec } from '@hexnome/rules/tableau'
 import { TILE_COLORS } from './constants'
 
+/** A colour by the name the screen uses for it, so a log can be checked against the board. */
+export function colorName(color: number): string {
+  return TILE_COLORS[color]?.name ?? `colour ${color}`
+}
+
 export function tileName(spec: TileSpec): string {
-  return `${TILE_COLORS[spec.color]?.name ?? `colour ${spec.color}`}-${spec.value}`
+  return `${colorName(spec.color)}-${spec.value}`
 }
 
 const list = (specs: readonly TileSpec[]): string =>

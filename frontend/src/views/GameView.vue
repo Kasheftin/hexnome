@@ -61,6 +61,7 @@ import {
   type GameOptions,
 } from '@hexnome/rules/game'
 import { createDesk, rulesHealth, type Desk } from '@/composables/useDesk'
+import { colorName, tileName } from '@/scene/explainRefusal'
 import type { RoundRecord } from '@/ui/roundRecord'
 import {
   type PlateLocation,
@@ -709,7 +710,16 @@ function roundRecord(round: number, seat = viewedSeat.value): RoundRecord {
   const cached = derived.get(key)
   if (cached) return cached
 
-  const asThen = replayGame(gameOptions, log, { throughRound: round })
+  /*
+   * A refused command means the rebuilt game is not the game that was played — and the symptom is a
+   * score quietly a few points short, with nothing on screen to say why. So it is shouted about.
+   */
+  const asThen = replayGame(gameOptions, log, {
+    throughRound: round,
+    onRefused: (command, error, at) => {
+      console.error(`[hexnome] replay of round ${round} refused command ${at} (${command.kind}): ${error}`, command)
+    },
+  })
   const asItWas = (asThen.seats[seat] ?? asThen.seats[0]!).tableau
   const record: RoundRecord = {
     round,
@@ -722,7 +732,35 @@ function roundRecord(round: number, seat = viewedSeat.value): RoundRecord {
     leftovers: describeLeftovers(asItWas),
   }
   derived.set(key, record)
+  reportScoring(round, seat, asItWas, record)
   return record
+}
+
+/**
+ * The working behind a round's score, on the console.
+ *
+ * A tally is a number arrived at from a board, and when the number looks wrong the only question
+ * worth asking is which of the two is. So both are printed: every tile the rebuilt board holds, and
+ * every tile each target actually counted — with anything on the board that no target matched listed
+ * separately, since a tile that should have scored and did not is exactly the thing being hunted.
+ */
+function reportScoring(round: number, seat: number, asItWas: Tableau, record: RoundRecord): void {
+  const name = state.seats[seat]?.name ?? `seat ${seat}`
+  const counted = new Set(record.tally.rows.flatMap(row => row.tiles.map(tile => tile.id)))
+  const describe = (tile: { id: string, color: number, value: number, fixed: boolean }) => {
+    const cell = asItWas.cellOfTile(tile.id)
+    return `${tile.id} ${tileName(tile)}${tile.fixed ? ' (plate token)' : ''} at ${cell ? `${cell.q},${cell.r}` : '?'}`
+  }
+
+  console.groupCollapsed?.(`[hexnome] round ${round} scoring for ${name}: ${record.tally.total}`)
+  console.log('board tiles', asItWas.tilesOnBoard().map(describe))
+  console.log('diagram tiles', record.board.tiles.map(tile => `${tile.id} ${tileName(tile)} at ${tile.cell.q},${tile.cell.r}`))
+  for (const row of record.tally.rows) {
+    const target = row.target.kind === 'value' ? `all ${row.target.value}s` : `all ${colorName(row.target.color)}`
+    console.log(`${target}: ${row.points} from`, row.tiles.map(describe))
+  }
+  console.log('not counted by any target', asItWas.tilesOnBoard().filter(t => !counted.has(t.id)).map(describe))
+  console.groupEnd?.()
 }
 
 const roundRecords = computed<readonly RoundRecord[]>(() =>
@@ -1186,6 +1224,9 @@ function applyPayment(): void {
     item,
     to,
     paying: [...current.selected],
+    // How the plate was turned in the bay. Turning is not a turn and so not a command of its own,
+    // but it decides which cell each petal lands on — a replay without it refuses the placement.
+    rotation: item.kind === 'plate' ? board().plate(item.id)?.rotation : undefined,
   })
   if (!played) {
     // Refused after all: put it back where the player left it rather than silently undoing their move.
