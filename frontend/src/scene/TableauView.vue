@@ -83,6 +83,7 @@ import {
   showDraftState,
   type DraftDecor,
 } from './draftDecor'
+import { describeTileRefusal, tileName } from './explainRefusal'
 import { registerGrabbable } from './grabbables'
 import {
   attachAnchorVisual,
@@ -922,6 +923,36 @@ function dropHeld(current: Draggable): boolean {
   return false
 }
 
+/**
+ * Say why a drop was refused, on the console.
+ *
+ * The board has one way of saying no — the cell turns red — and five reasons for it. Two of them are
+ * genuinely hard to guess at from the screen: a group duplicated through a tile several cells away,
+ * and a stem reward with nowhere to go, which makes a *full drawer* refuse a placement that looks
+ * perfectly legal. Without this the only way to tell them apart is to read the model.
+ *
+ * Only on a refused drop, so it is silent in ordinary play. `whyNotPlaceTile` is the same call
+ * `canPlaceTile` is defined in terms of, so this cannot report a rule the game is not applying.
+ */
+function reportRefusedDrop(current: Draggable): void {
+  if (current.kind !== 'tile') return
+  const tile = props.tableau.tile(current.id)
+  if (!tile) return
+
+  if (targetTile === null) {
+    console.warn(`[hexnome] ${tileName(tile)} was dropped over nothing.`)
+    return
+  }
+
+  const refusal = props.tableau.whyNotPlaceTile(targetTile, current.id)
+  if (!refusal) return
+
+  console.warn(
+    `[hexnome] ${tileName(tile)} refused: ${describeTileRefusal(refusal)}.`,
+    { tile, target: targetTile, cell: targetTileCell, refusal },
+  )
+}
+
 function onWindowPointerUp(): void {
   window.removeEventListener('pointermove', onWindowPointerMove)
   document.body.style.cursor = ''
@@ -957,7 +988,12 @@ function onWindowPointerUp(): void {
       emit('changed')
       // Reaching the board opens the payment; rearranging the drawer does not.
       if (ontoBoard && origin) emit('placed', current, origin)
+    } else {
+      // The highlight said yes and the model said no — rarer than a red drop, and worse.
+      reportRefusedDrop(current)
     }
+  } else {
+    reportRefusedDrop(current)
   }
 
   held.value = null

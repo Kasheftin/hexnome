@@ -58,10 +58,33 @@ export function neighboursAllow(
   neighbours: readonly TileSpec[],
   rule: PlacementRule,
 ): boolean {
-  if (neighbours.length === 0) return true
-  return rule === 'strict'
-    ? neighbours.every(neighbour => agrees(spec, neighbour))
-    : neighbours.some(neighbour => agrees(spec, neighbour))
+  return neighbourVerdict(spec, neighbours, rule).allowed
+}
+
+export interface NeighbourVerdict {
+  readonly allowed: boolean
+  /** Neighbours sharing the placed tile's colour or value. */
+  readonly agreeing: readonly TileSpec[]
+  /** Neighbours sharing neither. Under `regular` these are harmless if anything agrees. */
+  readonly disagreeing: readonly TileSpec[]
+}
+
+/**
+ * The same answer, with its reasons — so a refusal can say *which* neighbours it objected to.
+ *
+ * `neighboursAllow` is defined in terms of this rather than beside it. A second implementation of a
+ * rule, kept in step by hand, is how an explanation ends up describing a decision nobody made.
+ */
+export function neighbourVerdict(
+  spec: TileSpec,
+  neighbours: readonly TileSpec[],
+  rule: PlacementRule,
+): NeighbourVerdict {
+  const agreeing = neighbours.filter(neighbour => agrees(spec, neighbour))
+  const disagreeing = neighbours.filter(neighbour => !agrees(spec, neighbour))
+  const allowed = neighbours.length === 0
+    || (rule === 'strict' ? disagreeing.length === 0 : agreeing.length > 0)
+  return { allowed, agreeing, disagreeing }
 }
 
 /* ── groups, and the no-duplicates rule ────────────────────────────────────────
@@ -118,9 +141,47 @@ function connectedGroup(
   return members
 }
 
-function hasDuplicates(members: readonly TileSpec[]): boolean {
-  const kinds = new Set(members.map(tile => `${tile.color}:${tile.value}`))
-  return kinds.size !== members.length
+/** The first kind occurring twice, or null. */
+function firstDuplicate(members: readonly TileSpec[]): TileSpec | null {
+  const seen = new Set<string>()
+  for (const tile of members) {
+    const kind = `${tile.color}:${tile.value}`
+    if (seen.has(kind)) return tile
+    seen.add(kind)
+  }
+  return null
+}
+
+export interface GroupClash {
+  /** Which of the two groups collided. */
+  readonly axis: 'color' | 'value'
+  /** The kind that appears twice in it. */
+  readonly duplicate: TileSpec
+  /** The whole group as it would stand after the placement, in flood-fill order. */
+  readonly group: readonly TileSpec[]
+}
+
+/**
+ * Why the groups refuse this placement, or null if they do not.
+ *
+ * Same relationship to {@link groupsAllow} as {@link neighbourVerdict} has to `neighboursAllow`: the
+ * predicate is defined in terms of this, so an explanation cannot describe a rule the game is not
+ * playing by.
+ *
+ * The colour group is reported first when both collide, which is arbitrary — it is a debugging aid,
+ * and the second clash is one keystroke away once the first is fixed.
+ */
+export function groupClash(
+  origin: Axial,
+  spec: TileSpec,
+  tileAt: (cell: Axial) => TileSpec | undefined,
+): GroupClash | null {
+  for (const axis of ['color', 'value'] as const) {
+    const group = connectedGroup(origin, spec, axis, tileAt)
+    const duplicate = firstDuplicate(group)
+    if (duplicate) return { axis, duplicate, group }
+  }
+  return null
 }
 
 /**
@@ -135,8 +196,7 @@ export function groupsAllow(
   spec: TileSpec,
   tileAt: (cell: Axial) => TileSpec | undefined,
 ): boolean {
-  return !hasDuplicates(connectedGroup(origin, spec, 'color', tileAt))
-    && !hasDuplicates(connectedGroup(origin, spec, 'value', tileAt))
+  return groupClash(origin, spec, tileAt) === null
 }
 
 /**

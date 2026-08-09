@@ -23,9 +23,10 @@
 import { NEIGHBOR_DIRS, axialAdd, axialKey, type Axial } from './hex'
 import {
   DEFAULT_PLACEMENT_RULE,
-  groupsAllow,
-  neighboursAllow,
+  groupClash,
+  neighbourVerdict,
   ringIsConnected,
+  type GroupClash,
   type PlacementRule,
 } from './placement'
 import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
@@ -98,6 +99,43 @@ export interface PlateSpec extends TileSpec {
   /** Which of the six rim petals the plate's own tile occupies. */
   readonly petal: number
 }
+
+/**
+ * Why a tile may not go where it was dropped.
+ *
+ * One variant per way `canPlaceTile` can say no, each carrying what it took to decide — so a refusal
+ * can be read rather than guessed at. See {@link Tableau.whyNotPlaceTile} and
+ * {@link describeTileRefusal}.
+ */
+export type TileRefusal =
+  /** The slot, lot or petal does not exist. */
+  | { readonly kind: 'noSuchPlace', readonly where: TileLocation }
+  /** Something else is already there. */
+  | { readonly kind: 'occupied', readonly where: TileLocation, readonly by: string }
+  /** The move pays stems the drawer cannot hold, so it is refused rather than losing them. */
+  | {
+    readonly kind: 'rewardWontFit'
+    readonly stems: number
+    readonly freeSlots: number
+    /** The slot this move empties, which counts as room. */
+    readonly vacating: number
+  }
+  /** Nothing around it agrees, under `regular`; or something disagrees, under `strict`. */
+  | {
+    readonly kind: 'neighboursDisagree'
+    readonly rule: PlacementRule
+    readonly cell: Axial
+    readonly spec: TileSpec
+    readonly neighbours: readonly TileSpec[]
+    readonly disagreeing: readonly TileSpec[]
+  }
+  /** One of the two groups would hold the same tile twice. */
+  | {
+    readonly kind: 'duplicateInGroup'
+    readonly cell: Axial
+    readonly spec: TileSpec
+    readonly clash: GroupClash
+  }
 
 /** What `discard` destroyed, in a form that can be put back into a deck. */
 export interface DiscardReceipt {
@@ -246,6 +284,18 @@ export interface Tableau {
    */
   canPlacePlate(location: PlateLocation, movingId?: string): boolean
   canPlaceTile(location: TileLocation, movingId?: string): boolean
+  /**
+   * Why not, when `canPlaceTile` says no — and null when it says yes.
+   *
+   * The board answers a refusal with one red highlight whatever the reason, and there are five of
+   * them: an impossible slot, an occupied one, a reward with nowhere to go, neighbours that disagree,
+   * and a group that would hold the same tile twice. Told apart only by reading the model, which is
+   * not something a player or a bug report can do.
+   *
+   * `canPlaceTile` is *defined* as this returning null, so the two cannot drift apart — an
+   * explanation that describes a rule the game is not playing by would be worse than none.
+   */
+  whyNotPlaceTile(location: TileLocation, movingId?: string): TileRefusal | null
   /**
    * May the player drag this tile? False for a plate's own tile, and for anything in the source.
    *
@@ -828,27 +878,6 @@ export function createTableau({
   }
 
   /**
-   * Would this placement enclose the plate, and if so is there room for what that pays?
-   *
-   * The reward is stems, stems live in drawer slots, and a reward with nowhere to go would either
-   * vanish or overflow. Refusing the move instead is the only option that loses nothing — so this is a
-   * placement rule like any other, checked before the drop rather than discovered after it.
-   *
-   * The slot the tile is *leaving* counts as free: it is vacated by the very move being judged, and
-   * ignoring that would refuse the last placement of a full drawer even when the reward fits exactly.
-   */
-  function tileRewardFits(location: TileLocation, movingId: string): boolean {
-    if (location.kind !== 'onPlate') return true
-    const plate = platesById.get(location.plateId)
-    const tile = tilesById.get(movingId)
-    if (!tile || plate?.location.kind !== 'board') return true
-    const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
-    const reward = rewardOfMove({ tile: { movingId, cell, spec: tile } })
-    const vacating = tile.location.kind === 'drawer' ? 1 : 0
-    return rewardHasRoom(reward, vacating)
-  }
-
-  /**
    * Does a plate placement pay more than the drawer can hold?
    *
    * A plate is the move most able to surprise here: it can **wrap a gap and close it in one action**,
@@ -871,14 +900,34 @@ export function createTableau({
     return petalCell(hole, normalizePetal(petal - rotation))
   }
 
-  /** Both rules, asked of one tile arriving on one cell. */
+  /** Both rules, asked of one tile arriving on one cell, with the objection if there is one. */
+  function tileWelcome(
+    cell: Axial,
+    spec: TileSpec,
+    view: (at: Axial) => TileSpec | undefined,
+  ): TileRefusal | null {
+    const neighbours = neighboursOf(cell, view)
+    const verdict = neighbourVerdict(spec, neighbours, placementRule)
+    if (!verdict.allowed) {
+      return {
+        kind: 'neighboursDisagree',
+        rule: placementRule,
+        cell,
+        spec,
+        neighbours,
+        disagreeing: verdict.disagreeing,
+      }
+    }
+    const clash = groupClash(cell, spec, view)
+    return clash ? { kind: 'duplicateInGroup', cell, spec, clash } : null
+  }
+
   function tileIsWelcome(
     cell: Axial,
     spec: TileSpec,
     view: (at: Axial) => TileSpec | undefined,
   ): boolean {
-    return neighboursAllow(spec, neighboursOf(cell, view), placementRule)
-      && groupsAllow(cell, spec, view)
+    return tileWelcome(cell, spec, view) === null
   }
 
   /**
@@ -912,18 +961,21 @@ export function createTableau({
     return occupant === undefined || occupant === movingId
   }
 
-  function canPlaceTile(location: TileLocation, movingId?: string): boolean {
+  function whyNotPlaceTile(location: TileLocation, movingId?: string): TileRefusal | null {
+    const nowhere: TileRefusal = { kind: 'noSuchPlace', where: location }
     if (location.kind === 'drawer') {
-      if (!inRange(location.slot, drawerSlots)) return false
+      if (!inRange(location.slot, drawerSlots)) return nowhere
     } else if (location.kind === 'source') {
-      if (!inRange(location.lot, sourceLots)) return false
-      if (!inRange(location.index, sourceTilesPerLot)) return false
+      if (!inRange(location.lot, sourceLots)) return nowhere
+      if (!inRange(location.index, sourceTilesPerLot)) return nowhere
     } else {
-      if (!isPetal(location.petal)) return false
-      if (!platesById.has(location.plateId)) return false
+      if (!isPetal(location.petal)) return nowhere
+      if (!platesById.has(location.plateId)) return nowhere
     }
     const occupant = occupants.get(tileLocationKey(location))
-    if (occupant !== undefined && occupant !== movingId) return false
+    if (occupant !== undefined && occupant !== movingId) {
+      return { kind: 'occupied', where: location, by: occupant }
+    }
 
     /*
      * The placement rules, which only a landing on the **board** can break.
@@ -933,13 +985,23 @@ export function createTableau({
      * colour and value to compare, and the dealing primitives (`addTile`, `revealPlate`) pass no id
      * because dealing is not a placement. Those set the board up; this governs playing on it.
      */
-    if (location.kind !== 'onPlate' || movingId === undefined) return true
+    if (location.kind !== 'onPlate' || movingId === undefined) return null
     const tile = tilesById.get(movingId)
     const plate = platesById.get(location.plateId)
-    if (!tile || plate?.location.kind !== 'board') return true
-    if (!tileRewardFits(location, movingId)) return false
+    if (!tile || plate?.location.kind !== 'board') return null
+
     const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
-    return tileIsWelcome(cell, tile, boardAfter({ tileId: movingId }))
+    const stems = rewardOfMove({ tile: { movingId, cell, spec: tile } })
+    const vacating = tile.location.kind === 'drawer' ? 1 : 0
+    if (!rewardHasRoom(stems, vacating)) {
+      return { kind: 'rewardWontFit', stems, freeSlots: freeDrawerSlotList().length, vacating }
+    }
+
+    return tileWelcome(cell, tile, boardAfter({ tileId: movingId }))
+  }
+
+  function canPlaceTile(location: TileLocation, movingId?: string): boolean {
+    return whyNotPlaceTile(location, movingId) === null
   }
 
   return {
@@ -1023,6 +1085,7 @@ export function createTableau({
 
     canPlacePlate,
     canPlaceTile,
+    whyNotPlaceTile,
 
     canDragTile: tileCanDrag,
     canDragPlate: plateCanDrag,
