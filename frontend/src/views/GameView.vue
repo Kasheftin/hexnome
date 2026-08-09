@@ -469,14 +469,26 @@ async function dealLot(): Promise<boolean> {
  * already left the board, the desk queues the request behind whatever is in flight, and a slow round
  * trip should not hold up the turn.
  */
-function commit(command: Command): Extract<CommandResult, { ok: true }> | null {
+function commit(
+  command: Command,
+  { tell = true }: { tell?: boolean } = {},
+): Extract<CommandResult, { ok: true }> | null {
   const result = applyCommand(state, command)
   if (!result.ok) {
     console.warn(`[hexnome] ${command.kind} refused: ${result.error}`)
     return null
   }
   log.push(command)
-  revision.value++
+  /*
+   * `tell` is how a caller says "not yet".
+   *
+   * Bumping the revision is what makes the scene look at the model again, and it builds a view for
+   * anything new on the spot — so anything the view needs to *know* about a new piece has to be true
+   * before the bump, not after. A reward is the case: the stems exist the moment the command applies,
+   * and the scene has to be told they are arrivals before it first sees them, or it will have already
+   * put them in place.
+   */
+  if (tell) revision.value++
 
   void tileDesk?.discard(result.toDesk.tiles.map(tileCode)).catch(reportDeskTrouble)
   void plateDesk?.discard(result.toDesk.plates.map(tileCode)).catch(reportDeskTrouble)
@@ -1309,6 +1321,7 @@ function commitPayment(
   if (item.kind === 'tile') board().moveTile(item.id, origin as TileLocation)
   else board().movePlate(item.id, origin as PlateLocation)
 
+  // Silent: the scene is told once `arriving` is set, so a reward is known to be one before it is seen.
   const played = commit({
     kind: 'put',
     seat,
@@ -1318,7 +1331,7 @@ function commitPayment(
     // How the plate was turned in the bay. Turning is not a turn and so not a command of its own,
     // but it decides which cell each petal lands on — a replay without it refuses the placement.
     rotation: item.kind === 'plate' ? board().plate(item.id)?.rotation : undefined,
-  })
+  }, { tell: false })
   if (!played) {
     // Refused after all: put it back where the player left it rather than silently undoing their move.
     if (item.kind === 'tile') board().moveTile(item.id, to as TileLocation)
@@ -1334,6 +1347,7 @@ function commitPayment(
    */
   if (played.awarded.length > 0) {
     arriving.value = [...played.awarded]
+    revision.value++
     settling.value = true
     pinnedSeat.value = seat
     settleTimer = window.setTimeout(() => {
@@ -1345,6 +1359,7 @@ function commitPayment(
     }, AWARD_SETTLE_MS)
     return
   }
+  revision.value++
   endTurn()
 }
 

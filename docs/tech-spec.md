@@ -71,6 +71,19 @@ Belt and braces, kept even though the trap is closed: `/health` reports a finger
 server actually loaded — the first codes a fixed probe seed deals — and the game compares it on load,
 so a server that simply was not restarted says so on screen rather than misbehaving.
 
+**The dev server has the same trap, and no fingerprint.** `packages/rules` is outside the frontend's
+root, reached through a Vite alias, and Vite does not reliably invalidate it — a rules change can go
+on being served from the old transform for as long as the server has been up. It looks exactly like a
+change that did nothing. If a rules edit seems to have no effect in the browser, check what is
+actually being served before doubting the edit:
+
+```
+curl -s 'http://localhost:5173/@fs<abs path>/packages/rules/src/game.ts' | grep <your change>
+```
+
+and restart `pnpm dev:frontend` if it is stale. This cost a debugging session of its own; the symptom
+was a feature that worked when driven directly and did nothing when driven through the game.
+
 ## Frontend layout
 
 ```
