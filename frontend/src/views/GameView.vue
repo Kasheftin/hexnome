@@ -26,7 +26,7 @@
 import { mdiArrowDownLeftBold, mdiArrowDownRightBold } from '@mdi/js'
 import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
-import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@hexnome/rules/agenda'
 import { openingPlateCodes } from '@hexnome/rules/deck'
@@ -52,35 +52,29 @@ import {
   type PaymentTarget,
 } from '@hexnome/rules/payment'
 import {
-  createGameLog,
-  entriesThroughRound,
-  recordingTableau,
-  replayTableau,
-} from '@hexnome/rules/gameLog'
-import { PETAL_COUNT } from '@hexnome/rules/plate'
-import { createRandom } from '@hexnome/rules/random'
+  applyCommand,
+  createGame,
+  draftItems,
+  needsDeal,
+  replayGame,
+  type Command,
+  type GameOptions,
+} from '@hexnome/rules/game'
 import { createDesk, rulesHealth, type Desk } from '@/composables/useDesk'
 import type { RoundRecord } from '@/ui/roundRecord'
-import { hasRoomToShift, platesToReveal, pushLot, shouldRefill, sourceContents } from '@hexnome/rules/source'
 import {
-  createTableau,
-  type Anchor,
-  type DiscardReceipt,
   type PlateLocation,
-  type PlateSpec,
-  type TableauOptions,
+  type Tableau,
   type TileLocation,
   type TileSpec,
 } from '@hexnome/rules/tableau'
 import { DEFAULT_PLACEMENT_RULE } from '@hexnome/rules/placement'
 import {
-  FIRST_TURN,
   IDLE,
   INFER_ACTIONS_FROM_GESTURES,
-  nextRound,
-  nextTurn,
   turnOptions,
   type TurnAction,
+  type TurnOptions,
   type TurnPhase,
 } from '@hexnome/rules/turn'
 import type { Axial } from '@hexnome/rules/hex'
@@ -116,7 +110,6 @@ import {
   DEFAULT_TILE_COPIES,
   DEFAULT_PLATE_COPIES,
   DEFAULT_TILE_SLOTS,
-  DEFAULT_STEM_COUNT,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
@@ -124,6 +117,7 @@ import {
   modeInfo,
   roundsOf,
   type GameSettings,
+  defaultGameSettings,
 } from '@hexnome/rules/gameSettings'
 import { useSavedGames } from '@/composables/useSavedGames'
 
@@ -230,9 +224,6 @@ const drawerShape: DrawerShape = {
   plateSlots: settings.value?.plateSlots ?? DEFAULT_PLATE_SLOTS,
 }
 
-/** Where the player's tableau starts. The board is a rectangle centred here. */
-const BOARD_CENTRE = { q: 0, r: 0 } as const
-
 /**
  * One source slot per plate the round deals.
  *
@@ -268,31 +259,6 @@ const strictEnclosureBonus = settings.value
   ? effectiveStrictBonus(settings.value)
   : DEFAULT_STRICT_ENCLOSURE_BONUS
 
-const tableauOptions: TableauOptions = {
-  cells,
-  drawerSlots: drawerShape.tileSlots,
-  plateSlots: drawerShape.plateSlots,
-  sourceLots: platesPerRound,
-  sourceTilesPerLot: SOURCE_TILES_PER_LOT,
-  placementRule: settings.value?.placementRule ?? DEFAULT_PLACEMENT_RULE,
-  stemsPerInternalAnchor,
-  stemsPerExternalAnchor,
-  strictEnclosureBonus,
-}
-
-/**
- * Everything that happens to the board, written down.
- *
- * The whole game is the journal: any earlier position is rebuilt by replaying a prefix of it, which is
- * what lets the results panel show round 1 beside *the board as it was then*. Nothing is snapshotted.
- *
- * The tableau is **wrapped** rather than instrumented at each call site, because the board is mutated
- * from two very different places — here, and the drag handling inside `TableauView` — and a journal
- * with a hole in it is worse than none. Wrapping makes missing a site impossible.
- */
-const log = createGameLog()
-const tableau = recordingTableau(createTableau(tableauOptions), log.append)
-
 /**
  * What the desks are dealt from. Stored with the game; the id is not it.
  *
@@ -302,17 +268,109 @@ const tableau = recordingTableau(createTableau(tableauOptions), log.append)
 const seed = computed(() => settings.value?.seed || gameId.value)
 
 /**
- * Each player's opening plate: a value-1 plate of their own colour.
+ * Everything the rules need to build a game, in one place.
  *
- * **Chosen from the seed rather than drawn**, because finding "the first value-1 plate in the bag"
- * would mean being able to see the bag, and the bag is exactly what the client no longer holds. The
- * codes are handed to the plate desk as `exclude`, so what is on a board can never also be dealt.
- *
- * Off its own tagged stream, so knowing which colour you opened with says nothing about either desk's
- * order. One player for now; six is the ceiling, one colour each.
+ * The settings are normalised on the way in — the drawer shape, the placement rule, the strict bonus
+ * — so the state is built from what the game will actually run with rather than from whatever is
+ * stored. `cells` is a scene decision and comes from here for that reason.
  */
-const PLAYERS = 1
-const opening = openingPlateCodes(seed.value, PLAYERS)
+const gameOptions: GameOptions = {
+  settings: {
+    ...(settings.value ?? defaultGameSettings(0, seed.value)),
+    seed: seed.value,
+    tileSlots: drawerShape.tileSlots,
+    plateSlots: drawerShape.plateSlots,
+    platesPerRound,
+    placementRule: settings.value?.placementRule ?? DEFAULT_PLACEMENT_RULE,
+    stemsPerInternalAnchor,
+    stemsPerExternalAnchor,
+    strictEnclosureBonus,
+  },
+  cells,
+  sourceTilesPerLot: SOURCE_TILES_PER_LOT,
+  agenda,
+}
+
+/**
+ * The game: one shared source, one board and drawer per seat, and the log it is folded from.
+ *
+ * Changed only through `commit`, so the log is a complete account of what happened and
+ * `replayGame(gameOptions, log)` rebuilds this exactly. That is what makes rolling back a command a
+ * server refuses a matter of dropping it and folding again, rather than of writing an inverse for
+ * every move.
+ */
+const log: Command[] = []
+const state = createGame(gameOptions)
+
+/**
+ * Bumped on every committed move, so the readouts and the scene recompute.
+ *
+ * The state is plain mutable data — the tableaux are closures over maps — so this is the one signal
+ * that anything changed. One counter for the whole game, because a command can touch the source and
+ * a board at once.
+ */
+const revision = shallowRef(0)
+
+/** Whose turn it is, read through `revision` so it follows the state rather than shadowing it. */
+const activeIndex = computed(() => {
+  void revision.value
+  return state.activeSeat
+})
+
+/**
+ * Which seat's board and drawer are on screen.
+ *
+ * A player is a **viewport**, not a slice of the truth: everyone holds the same state and differs
+ * only in what they are looking at. Null means *follow whoever is playing*, which is what a hot-seat
+ * game wants — otherwise every turn would begin with a click that carries no meaning. Clicking a seat
+ * in the score panel pins the view there, to see what somebody else is building.
+ */
+const pinnedSeat = shallowRef<number | null>(null)
+const viewedSeat = computed(() => {
+  const pinned = pinnedSeat.value
+  return pinned !== null && pinned < state.seats.length ? pinned : activeIndex.value
+})
+
+/** The seat being looked at, and the column everyone drafts from. */
+const board = (): Tableau => (state.seats[viewedSeat.value] ?? state.seats[0]!).tableau
+const source = (): Tableau => state.source
+
+/** Watching somebody else's turn: the table is live, but not for you. */
+const watching = computed(() => viewedSeat.value !== activeIndex.value)
+
+/** Every seat, for the score panel: who is playing, who has passed, what they have banked. */
+const seatRows = computed(() => {
+  void revision.value
+  return state.seats.map(seat => ({
+    seat: seat.seat,
+    name: seat.name,
+    passed: seat.passed,
+    total: seat.banked.reduce((sum, points) => sum + points, 0),
+    active: seat.seat === state.activeSeat,
+    viewed: seat.seat === viewedSeat.value,
+  }))
+})
+
+/** Look at a seat, or go back to following the turn. */
+function viewSeat(seat: number): void {
+  pinnedSeat.value = pinnedSeat.value === seat ? null : seat
+}
+
+/*
+ * Changing seat changes every piece on the table, and the scene only rebuilds when `revision` moves.
+ * Without this the meshes of the seat you *were* looking at stay on screen: two boards that differ in
+ * the model and not on the screen, which is the failure mode this whole design exists to avoid.
+ */
+watch(viewedSeat, () => { revision.value++ })
+
+/**
+ * The codes the plate desk must hold back: the players' opening plates.
+ *
+ * Chosen from the seed rather than drawn, because finding "the first value-1 plate in the bag" means
+ * being able to see the bag. `createGame` puts them on the boards from the same list, so the two
+ * cannot disagree about which plates never entered the desk.
+ */
+const opening = openingPlateCodes(seed.value, gameOptions.settings.players)
 
 /**
  * The two desks, once the server has made them.
@@ -328,16 +386,6 @@ const opening = openingPlateCodes(seed.value, PLAYERS)
 let tileDesk: Desk | null = null
 let plateDesk: Desk | null = null
 
-/**
- * The petal a dealt plate carries its token in.
- *
- * Cosmetic, and the client's business: a code is a colour and a value, and a plate rotates freely
- * anyway. Drawn from its own seeded stream in deal order, so a replay puts them back where they were
- * without the server having to care.
- */
-const petals = createRandom(`${seed.value}:petals`)
-const nextPetal = (): number => Math.floor(petals() * PETAL_COUNT)
-
 /** A code from the wire, as the model wants it. */
 function specOf(code: number): TileSpec {
   const spec = tileFromCode(code)
@@ -345,103 +393,67 @@ function specOf(code: number): TileSpec {
   return spec
 }
 
-/** Plates dealt into the source this round. The round is over as a supply once this reaches its quota. */
-const platesDealt = shallowRef(0)
-
 /**
- * The token each face-down plate is carrying, held outside the tableau.
+ * The one command whose payload comes from outside: what the desk dealt.
  *
- * The model deliberately does not store it — see `Plate.faceDown` — so this is where it waits until the
- * plate turns over. In multiplayer this is the server's job; keeping it here rather than in the model
- * means moving it there later changes one file, not the shape of the game state.
- */
-const dealtTokens = new Map<string, PlateSpec>()
-
-/**
- * Push a fresh lot onto the top of the source, drawing from the desks.
+ * Everything else a command needs the state already knows, which is what makes a replay possible. A
+ * deal cannot be worked out, so the codes are asked for once and carried, and the fold never asks
+ * again.
  *
- * The opening deal and every later restock both come through here, so the first lot cannot drift from
- * the rest. Draws the plate first and checks it: with no plate there is no lot, and dealing the tiles
- * anyway would leave a heap floating over an empty slot.
+ * **Room is checked before anything is drawn**, because a drawn tile is gone from the server's desk
+ * whether or not it lands anywhere, and nothing on this side could put it back. `needsDeal` is that
+ * precondition, and asking it first is the whole guard.
  *
- * **Room is checked before anything is drawn.** `pushLot` shifts the stack down and fails if the bottom
- * slot was occupied — and a draw made before that failure is a plate and four tiles gone from the game
- * for good. `hasRoomToShift` is exactly its precondition, so asking first is the whole fix. That
- * mattered when the bag was local; over the wire a wasted draw is gone from the server's desk too, and
- * nothing on this side could put it back.
- *
- * A desk that refuses is the end of the supply, not a crash: the round simply stops restocking.
+ * A desk with nothing left is the end of the supply rather than a failure: the round simply stops
+ * restocking. The server refuses a draw it cannot cover rather than answering short, so the two would
+ * otherwise arrive as the same rejection — asking what it last said is left is what tells them apart.
  */
 async function dealLot(): Promise<boolean> {
   if (!tileDesk || !plateDesk) return false
-  if (!hasRoomToShift(tableau)) return false
-
-  /*
-   * The supply running out is a game state, not a failure — and the server refuses a draw it cannot
-   * cover rather than answering short, so the two would arrive as the same rejection. Asking what it
-   * last said is left is what tells them apart: below this line the round simply stops restocking,
-   * and anything that fails above it is genuinely the table not answering.
-   */
+  if (!needsDeal(state)) return false
   if (plateDesk.remaining() < 1) return false
-  if (tileDesk.remaining() < tableau.sourceTilesPerLot) return false
+  if (tileDesk.remaining() < SOURCE_TILES_PER_LOT) return false
 
-  let dealt: PlateSpec
+  let plate: TileSpec
   let tiles: TileSpec[]
   try {
-    dealt = { ...specOf((await plateDesk.draw(1))[0] as number), petal: nextPetal() }
-    tiles = (await tileDesk.draw(tableau.sourceTilesPerLot)).map(specOf)
+    plate = specOf((await plateDesk.draw(1))[0] as number)
+    tiles = (await tileDesk.draw(SOURCE_TILES_PER_LOT)).map(specOf)
   } catch (error) {
     reportDeskTrouble(error)
     return false
   }
-  if (!pushLot(tableau, tiles)) return false
-
-  // pushLot puts the new plate at the top of the stack; remember what it is carrying until it flips.
-  const plate = tableau.plateInSourceLot(0)
-  if (plate) dealtTokens.set(plate.id, dealt)
-  platesDealt.value++
-  return true
+  return commit({ kind: 'deal', plate, tiles })
 }
 
 /**
- * The opening position: one plate at the centre of the board, the player's stems in the drawer, and one
- * lot in the source.
+ * The single way the game changes: apply, append, and settle up with the desks.
  *
- * **The starting plate goes straight to the board.** It is where the player's tableau grows from — every
- * later plate has to connect to it, and every drafted tile needs an empty petal to sit in, so without it
- * the board is unplayable and *Put* has nowhere to go.
+ * A refusal is reported rather than thrown. The view and the rules can disagree about what is legal —
+ * a stale button, a phase the player has left — and the rules are the ones that are right.
  *
- * It needs no server: the opening codes come from the seed and the desk is told to hold them back, so
- * the board is drawn before anything has been asked for. Only the source waits.
- *
- * **Stems take ordinary tile slots**, so they are a cost as well as a gift: three stems is three fewer
- * places to put a drafted tile until they are spent. `freeDrawerSlots` counts them as taken without
- * knowing what they are, so the drawer's capacity rules need no special case.
- *
- * Everything here happens once, before the first turn.
+ * Spent and swept material goes back to the pile, which lives on the server. Not awaited: it has
+ * already left the board, the desk queues the request behind whatever is in flight, and a slow round
+ * trip should not hold up the turn.
  */
-{
-  const start = opening[0]
-  const centre = tableau.addPlate({ kind: 'board', hole: BOARD_CENTRE })
-  if (start !== undefined && centre) {
-    // `fixed`: the plate's own tile, part of the plate and never separable from it.
-    tableau.addTile(specOf(start), { kind: 'onPlate', plateId: centre.id, petal: nextPetal() }, { fixed: true })
+function commit(command: Command): boolean {
+  const result = applyCommand(state, command)
+  if (!result.ok) {
+    console.warn(`[hexnome] ${command.kind} refused: ${result.error}`)
+    return false
   }
+  log.push(command)
+  revision.value++
 
-  const stems = settings.value?.initialStems ?? DEFAULT_STEM_COUNT
-  for (let i = 0; i < stems; i++) {
-    const slot = tableau.freeDrawerSlots()[0]
-    if (slot === undefined) break
-    tableau.addStem(slot)
-  }
+  void tileDesk?.discard(result.toDesk.tiles.map(tileCode)).catch(reportDeskTrouble)
+  void plateDesk?.discard(result.toDesk.plates.map(tileCode)).catch(reportDeskTrouble)
+  return true
 }
 
 const targetCells = shallowRef<Axial[]>([])
 const targetValid = shallowRef(false)
 const targetTileSlot = shallowRef<number | null>(null)
 const targetPlateSlot = shallowRef<number | null>(null)
-/** Bumped on every committed move, so the DOM readouts recompute. */
-const revision = shallowRef(0)
 
 /**
  * What the current round has earned so far — what would be banked if it ended now.
@@ -451,7 +463,7 @@ const revision = shallowRef(0)
  */
 const roundPoints = computed(() => {
   void revision.value
-  return scoreTargets(roundAgenda(agenda, count.value.round) ?? [], tableau.tilesOnBoard())
+  return scoreTargets(roundAgenda(agenda, count.value.round) ?? [], board().tilesOnBoard())
 })
 
 /**
@@ -480,15 +492,16 @@ function scoreOf(index: number): string {
 const phase = shallowRef<TurnPhase>(IDLE)
 
 /**
- * Which round, and which turn of it.
+ * Which round, and which turn of it — read off the state rather than counted here.
  *
- * The round is stuck on 1: advancing it needs the round structure — when a round ends, what refills,
- * what resets — none of which is designed. `nextRound` exists in game/turn.ts and already resets the
- * turn count, so wiring it up is one call, not a decision.
+ * The rules advance both, because they are what a command does. A second counter kept in step by
+ * hand is exactly the drift the fold exists to make impossible.
  */
-const count = shallowRef(FIRST_TURN)
+const count = computed(() => {
+  void revision.value
+  return { round: state.round, turn: state.turn }
+})
 
-/** Rounds the chosen mode plays, so the header can read "1 / 4" rather than a bare number. */
 const totalRounds = computed(() => {
   const s = settings.value
   return s ? roundsOf(s.mode) : 0
@@ -504,38 +517,34 @@ const totalRounds = computed(() => {
  */
 const sourceItems = computed<DraftItem[]>(() => {
   void revision.value
-  const items: DraftItem[] = tableau.tiles()
-    .filter(tile => tile.location.kind === 'source')
-    .map(tile => ({ id: tile.id, kind: 'tile' as const, color: tile.color, value: tile.value }))
-
-  for (let lot = 0; lot < tableau.sourceLots; lot++) {
-    const plate = tableau.plateInSourceLot(lot)
-    if (!plate || plate.faceDown) continue
-    const token = tableau.plateToken(plate.id)
-    if (token) {
-      items.push({ id: plate.id, kind: 'plate', color: token.color, value: token.value })
-    }
-  }
-  return items
+  return draftItems(state)
 })
 
 const freeSlots = computed(() => {
   void revision.value
-  return tableau.freeDrawerSlots()
+  return board().freeDrawerSlots()
 })
 
 const freeBays = computed(() => {
   void revision.value
-  return tableau.freePlateSlots()
+  return board().freePlateSlots()
 })
 
-const options = computed(() => turnOptions({
-  sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
-  sourcePlates: sourceItems.value.filter(item => item.kind === 'plate').length,
-  placeableItems: placeable.value.size,
-  freeDrawerSlots: freeSlots.value.length,
-  freePlateSlots: freeBays.value.length,
-}))
+/**
+ * What the bar may offer.
+ *
+ * Everything closes while watching another seat. The rules would refuse the command anyway — a turn
+ * belongs to one seat — but a live button that is answered with a refusal is a worse way to say so.
+ */
+const options = computed<TurnOptions>(() => watching.value
+  ? { take: false, put: false, pass: false }
+  : turnOptions({
+    sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
+    sourcePlates: sourceItems.value.filter(item => item.kind === 'plate').length,
+    placeableItems: placeable.value.size,
+    freeDrawerSlots: freeSlots.value.length,
+    freePlateSlots: freeBays.value.length,
+  }))
 
 const selectedIds = computed(() => phase.value.kind === 'taking' ? phase.value.selected : [])
 
@@ -602,7 +611,21 @@ const completed = computed(() => completedStrategies(sourceItems.value, selected
  * In singleplayer it is always your turn, so this is a status line. Multiplayer will put
  * "Player 2's turn" here and hide the actions.
  */
-const turnLabel = computed(() => 'Your turn')
+/** The name of whoever is playing, for the bar and the header. */
+const activeName = computed(() => {
+  void revision.value
+  return state.seats[state.activeSeat]?.name ?? ''
+})
+
+/**
+ * Whose turn the bar is announcing.
+ *
+ * While you are looking at somebody else's board the bar names them instead, because every control on
+ * it would act for the player whose turn it is — and pressing Take while reading another board is not
+ * something anybody means to do.
+ */
+const turnLabel = computed(() =>
+  watching.value ? `Waiting for ${activeName.value}` : 'Your turn')
 
 function chooseAction(action: TurnAction): void {
   if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
@@ -622,40 +645,49 @@ function chooseAction(action: TurnAction): void {
  * but a player may pass with moves left, so nothing passes on their behalf.
  */
 /**
- * Close the round by writing a bookmark, and nothing else.
+ * Pass: out of the round, not a skipped turn.
  *
- * The score is not computed here and the board is not copied: both are *derived* from the journal
- * whenever the panel asks. Marking the boundary at the moment the player passes is what makes the
- * derivation right — the sweep of the source happens later, and a prefix cut here does not include it.
+ * The rules decide what that means — the others play on, and the round closes only once the last of
+ * them has passed, sweeping the source and banking every board. So this says what the player did and
+ * then looks at what happened.
  */
 function endRoundByPassing(): void {
+  const before = state.round
   phase.value = IDLE
-  log.append({ op: 'endRound', round: count.value.round })
-  roundsFinished.value = log.rounds()
-  showResults.value = true
+  if (!commit({ kind: 'pass', seat: activeIndex.value })) return
+  if (state.round !== before || state.finished) showResults.value = true
+  else announceTurn(count.value.turn, beginTurn)
 }
 
 /* ── the end of a round ───────────────────────────────────────────────────────── */
 
-/** Rounds closed so far. The one reactive fact about the journal the template needs. */
-const roundsFinished = shallowRef(0)
+/** Rounds closed so far. Every seat banks together, so any seat's tally answers. */
+const roundsFinished = computed(() => {
+  void revision.value
+  return state.seats[0]?.banked.length ?? 0
+})
 /** Whether the results panel is up. Separate from the count, since it closes on Next round. */
 const showResults = shallowRef(false)
 
 /**
- * A finished round, rebuilt from the journal.
+ * A finished round, rebuilt from the log.
  *
- * Memoised because a replay walks the whole prefix and a round's past never changes — but memoising is
- * only an optimisation. The record is a pure function of the journal, so a game restored from a stored
- * log would rebuild exactly these without having kept anything else.
+ * The board **as it stood when that round closed**, not as it stands now — which is the whole reason
+ * the log is the primary record. Memoised because a replay walks the whole prefix and a round's past
+ * never changes, but that is only an optimisation: the record is a pure function of the log.
+ *
+ * Keyed by seat as well as round, because every player has their own board and the panel shows the
+ * one being looked at.
  */
-const derived = new Map<number, RoundRecord>()
+const derived = new Map<string, RoundRecord>()
 
-function roundRecord(round: number): RoundRecord {
-  const cached = derived.get(round)
+function roundRecord(round: number, seat = viewedSeat.value): RoundRecord {
+  const key = `${seat}:${round}`
+  const cached = derived.get(key)
   if (cached) return cached
 
-  const asItWas = replayTableau(entriesThroughRound(log.entries, round), tableauOptions)
+  const asThen = replayGame(gameOptions, log, { throughRound: round })
+  const asItWas = (asThen.seats[seat] ?? asThen.seats[0]!).tableau
   const record: RoundRecord = {
     round,
     board: describeBoard(asItWas, HEX_SIZE),
@@ -666,16 +698,18 @@ function roundRecord(round: number): RoundRecord {
     tally: tallyRound(roundAgenda(agenda, round) ?? [], tilesInReadingOrder(asItWas)),
     leftovers: describeLeftovers(asItWas),
   }
-  derived.set(round, record)
+  derived.set(key, record)
   return record
 }
 
 const roundRecords = computed<readonly RoundRecord[]>(() =>
   Array.from({ length: roundsFinished.value }, (_, index) => roundRecord(index + 1)))
 
-/** What each finished round scored, in order — derived, not banked. */
-const banked = computed<readonly number[]>(() =>
-  roundRecords.value.map(record => record.tally.total))
+/** What each finished round scored for the seat on screen, in order. */
+const banked = computed<readonly number[]>(() => {
+  void revision.value
+  return [...(state.seats[viewedSeat.value]?.banked ?? [])]
+})
 
 const totalScore = computed(() => banked.value.reduce((sum, points) => sum + points, 0))
 
@@ -702,66 +736,25 @@ const finalGroups = computed(() => {
 const isFinalRound = computed(() => count.value.round >= (totalRounds.value || 1))
 
 /**
- * Sweep the shared source into the piles: a round's leftovers do not carry over.
+ * Put the results panel away and start playing again.
  *
- * Also a fix, not only a rule. Restocking needs `hasRoomToShift` — the *bottom* lot free — so a round
- * that ended with anything still in the bottom lot (the usual way a round ends: nothing left is
- * affordable) would leave the next round unable to push a lot at all.
- *
- * Loose tiles are discarded separately from the plate they are heaped on. A source tile is
- * `kind: 'source'`, not `onPlate`, so discarding the plate does *not* take it.
- */
-function clearSource(): void {
-  const { tiles: loose, plates: standing } = sourceContents(tableau)
-  const tiles: TileSpec[] = []
-  const plates: PlateSpec[] = []
-
-  for (const tile of loose) {
-    const receipt = tableau.discard(tile.id)
-    if (receipt) tiles.push(...receipt.tiles)
-  }
-  for (const plate of standing) {
-    const receipt = tableau.discard(plate.id)
-    if (!receipt) continue
-    tiles.push(...receipt.tiles)
-    const recovered = recoverPlate(plate.id, receipt)
-    if (recovered) plates.push(recovered)
-  }
-
-  // One batch each, however many lots it came from.
-  recycle(tiles, plates)
-}
-
-/**
- * Bank the round and move on.
- *
- * The drawer is deliberately **not** cleared: tiles nobody could pay for are still yours next round,
- * which is most of why a drawer accumulates awkward tiles at all. The source *is* cleared, and behind
- * the round card, so the player never sees the old lots blink out — `platesDealt` then resets and the
- * new round deals its own supply into an empty column.
+ * The round itself already turned over — the rules did it when the last player passed, sweeping the
+ * source and banking every board. Nothing is decided here; the panel is simply dismissed and the new
+ * round announced, with its first lot dealt behind the card.
  */
 function startNextRound(): void {
   if (!showResults.value) return
 
-  if (isFinalRound.value) {
+  if (state.finished) {
     // The panel stays up and becomes the end of the game — see RoundResults' `over`.
     gameOver.value = true
     return
   }
 
   showResults.value = false
-  count.value = nextRound(count.value)
-  announceRound(count.value.round, () => {
-    // Behind the card, and in this order: empty the column before the new round's quota is opened.
-    clearSource()
-    platesDealt.value = 0
-    // Explicit, rather than leaning on `beginTurn` happening to deal: the sweep alone changed the scene.
-    revision.value++
-    beginTurn()
-  })
+  announceRound(count.value.round, beginTurn)
 }
 
-/** True once the last round has been banked. The game is over; nothing further is playable. */
 const gameOver = shallowRef(false)
 
 /** Back to the action list, with any part-built selection discarded. */
@@ -932,41 +925,20 @@ async function onCardShown(): Promise<void> {
 onBeforeUnmount(clearCardTimers)
 
 function endTurn(): void {
-  revealEmptiedLots()
-  count.value = nextTurn(count.value)
   phase.value = IDLE
   announceTurn(count.value.turn, beginTurn)
 }
 
-/**
- * Turn over any plate whose lot has been picked clean.
- *
- * The token comes from `dealtTokens`, not from the model — a face-down plate genuinely has no token in
- * the tableau, which is what stops anything reading one before it is turned over. This map is the local
- * stand-in for the server that will hand out reveals in multiplayer.
- */
-function revealEmptiedLots(): void {
-  let revealed = false
-  for (const plate of platesToReveal(tableau)) {
-    const dealt = dealtTokens.get(plate.id)
-    if (!dealt) continue
-    if (tableau.revealPlate(plate.id, { color: dealt.color, value: dealt.value }, dealt.petal)) {
-      dealtTokens.delete(plate.id)
-      revealed = true
-    }
-  }
-  if (revealed) revision.value++
-}
+onBeforeUnmount(clearCardTimers)
 
 /**
- * The start of a turn: restock the source if its newest lot has been drafted from.
+ * The start of a turn: restock the source if it wants restocking.
  *
- * `shouldRefill` owns the conditions — newest lot touched, round has a plate left, room to shift into.
- * Once the round's plates are gone the source only shrinks, which is what makes a round finite.
+ * `needsDeal` owns the conditions — newest lot touched, round has a plate left, room to shift into —
+ * and `dealLot` asks the desk for the one thing the state cannot work out for itself.
  */
 async function beginTurn(): Promise<void> {
-  if (!shouldRefill(tableau, { platesDealt: platesDealt.value, platesPerRound })) return
-  if (await dealLot()) revision.value++
+  await dealLot()
 }
 
 /**
@@ -998,21 +970,9 @@ function onSelectTile(id: string): void {
 
 function confirmTake(): void {
   if (!canConfirm.value) return
-  const slots = [...freeSlots.value]
-  const bays = [...freeBays.value]
-
-  for (const id of selectedIds.value) {
-    // A selected id is either a loose tile or a revealed plate; the plate carries its token with it.
-    if (tableau.plate(id)) {
-      const bay = bays.shift()
-      if (bay !== undefined) tableau.movePlate(id, { kind: 'plateSlot', slot: bay })
-    } else {
-      const slot = slots.shift()
-      if (slot !== undefined) tableau.moveTile(id, { kind: 'drawer', slot })
-    }
-  }
-  revision.value++
-  endTurn()
+  // Which slot each takes is the rules' business: the draft crosses from the source's model into this
+  // seat's, and only one of them can decide where things land.
+  if (commit({ kind: 'draft', seat: activeIndex.value, ids: [...selectedIds.value] })) endTurn()
 }
 
 /**
@@ -1045,7 +1005,7 @@ const payTarget = computed<PaymentTarget | null>(() => {
   void revision.value
   const p = phase.value
   if (p.kind !== 'paying') return null
-  const spec = p.item.kind === 'tile' ? tableau.tile(p.item.id) : tableau.plateToken(p.item.id)
+  const spec = p.item.kind === 'tile' ? board().tile(p.item.id) : board().plateToken(p.item.id)
   return spec ? { color: spec.color, value: spec.value } : null
 })
 
@@ -1057,16 +1017,16 @@ const payTarget = computed<PaymentTarget | null>(() => {
  */
 const purse = computed<Payer[]>(() => {
   void revision.value
-  const out: Payer[] = tableau.tiles()
+  const out: Payer[] = board().tiles()
     .filter(tile => tile.location.kind === 'drawer')
     .map(tile => ({ id: tile.id, kind: 'tile' as const, color: tile.color, value: tile.value }))
 
-  for (const plate of tableau.plates()) {
+  for (const plate of board().plates()) {
     if (plate.location.kind !== 'plateSlot') continue
-    const token = tableau.plateToken(plate.id)
+    const token = board().plateToken(plate.id)
     if (token) out.push({ id: plate.id, kind: 'plate', color: token.color, value: token.value })
   }
-  for (const stem of tableau.stems()) out.push({ id: stem.id, kind: 'stem' })
+  for (const stem of board().stems()) out.push({ id: stem.id, kind: 'stem' })
   return out
 })
 
@@ -1157,104 +1117,44 @@ function onSelectPayment(id: string): void {
  * what discarding means. Plates and stems go with the tiles.
  */
 /**
- * Anchors that have already paid out. Each pays once, ever.
+ * Pay for the provisional placement, which is what commits the turn.
  *
- * Enclosure itself is derived and therefore reversible — that is what lets the emblem light up under a
- * provisional placement and go dark again on cancel. Payment must not be: without this an anchor could
- * be emptied and refilled to mint stems indefinitely.
+ * The placement is on the board already, so the player can see what they are buying — but the log
+ * records **committed turns**, and a `put` carries the placement and its payment together. So the
+ * provisional move is put back first and the rules do the whole thing: otherwise the live path and a
+ * replay would start from different boards, and only one of them could be right.
+ *
+ * Undoing and immediately redoing it is invisible — the piece is already where it is going — and it
+ * means there is one description of a placement rather than two that could drift.
  */
-const paidAnchors = new Set<string>()
-
-/**
- * A name for an anchor that survives the board moving underneath it.
- *
- * An internal anchor is named by its **plate**, not its cell, because a plate can be picked up and put
- * down elsewhere — and an anchor that has been paid for should not pay again just because it is now at
- * different coordinates. An external anchor has no owner to be named by, so its cell is all there is;
- * it is also a hole in the plates, which only closes, so it does not travel.
- */
-function anchorKey(anchor: Anchor): string {
-  if (anchor.kind === 'external') return `external:${anchor.cell.q},${anchor.cell.r}`
-  return `internal:${tableau.coverageAt(anchor.cell)?.plateId ?? `${anchor.cell.q},${anchor.cell.r}`}`
-}
-
-/**
- * Hand out stems for any anchor enclosed by the move just settled.
- *
- * Run on payment rather than on the placement landing, because until the price is paid the placement is
- * only provisional — the anchor lights up to show what is on offer, but cancelling has to leave the
- * player with nothing gained.
- *
- * Every board plate is checked rather than just the one that was touched. It costs nothing at this
- * scale and it means the award cannot be missed by whatever future move encloses a plate some other
- * way. `canPlaceTile` has already refused any placement whose reward would not fit, so the slots are
- * there.
- */
-function awardEnclosedAnchors(): void {
-  for (const anchor of tableau.anchors()) {
-    const key = anchorKey(anchor)
-    if (paidAnchors.has(key) || !tableau.anchorIsEnclosed(anchor.cell)) continue
-    paidAnchors.add(key)
-    // The rate for its kind, plus the strict bonus if its ring earns one.
-    for (let i = 0; i < tableau.anchorReward(anchor); i++) {
-      const slot = tableau.freeDrawerSlots()[0]
-      if (slot === undefined) break
-      tableau.addStem(slot)
-    }
-  }
-}
-
-/**
- * Complete a plate the tableau has just destroyed.
- *
- * A face-up plate reports its own token; a face-down one cannot, because the model never held it, so it
- * comes from the deal we remembered. Either way the remembered entry is spent and goes.
- */
-function recoverPlate(id: string, receipt: DiscardReceipt): PlateSpec | null {
-  const plate = receipt.plate ?? dealtTokens.get(id) ?? null
-  dealtTokens.delete(id)
-  return plate
-}
-
-/**
- * Put a whole event's worth of spent items into the piles.
- *
- * **One call per desk per event, never one per item.** The server sorts each batch as it arrives, which
- * is what keeps a reshuffle independent of the order the player happened to click; batches of one would
- * make that sort a no-op and let click order back into the seed (packages/rules/src/desk.ts).
- *
- * Not awaited by its callers: the tiles have already left the board, and the desk queues the request
- * behind whatever else is in flight, so a slow round trip delays nothing the player is looking at. A
- * failure is logged rather than surfaced — the pile matters to a reshuffle that may never happen, and
- * interrupting a turn over it would be the larger harm.
- */
-function recycle(tiles: readonly TileSpec[], plates: readonly PlateSpec[]): void {
-  void tileDesk?.discard(tiles.map(tileCode)).catch(reportDeskTrouble)
-  void plateDesk?.discard(plates.map(tileCode)).catch(reportDeskTrouble)
-}
-
 function applyPayment(): void {
   const current = phase.value
   if (current.kind !== 'paying' || !canApply.value) return
 
-  // Accumulated across the whole payment, then handed over as one batch each — see `recycle`.
-  const tiles: TileSpec[] = []
-  const plates: PlateSpec[] = []
-  for (const id of current.selected) {
-    const receipt = tableau.discard(id)
-    if (!receipt) continue
-    tiles.push(...receipt.tiles)
-    // Stems are the deliberate exception: an anchor minted them, so no bag is owed them back.
-    if (receipt.kind === 'plate') {
-      const plate = recoverPlate(id, receipt)
-      if (plate) plates.push(plate)
-    }
-  }
-  recycle(tiles, plates)
+  const item = current.item
+  const to = item.kind === 'tile'
+    ? board().tile(item.id)?.location
+    : board().plate(item.id)?.location
+  if (!to) return
 
-  // After the payment: spending can free slots, and the reward should be able to use them.
-  awardEnclosedAnchors()
-  revision.value++
+  // Back where it came from, so the command starts from the board the rules expect.
+  if (item.kind === 'tile') board().moveTile(item.id, current.origin as TileLocation)
+  else board().movePlate(item.id, current.origin as PlateLocation)
+
+  const played = commit({
+    kind: 'put',
+    seat: activeIndex.value,
+    item,
+    to,
+    paying: [...current.selected],
+  })
+  if (!played) {
+    // Refused after all: put it back where the player left it rather than silently undoing their move.
+    if (item.kind === 'tile') board().moveTile(item.id, to as TileLocation)
+    else board().movePlate(item.id, to as PlateLocation)
+    revision.value++
+    return
+  }
   endTurn()
 }
 
@@ -1268,9 +1168,9 @@ function cancelPayment(): void {
   const current = phase.value
   if (current.kind !== 'paying') return
   if (current.item.kind === 'tile') {
-    tableau.moveTile(current.item.id, current.origin as TileLocation)
+    board().moveTile(current.item.id, current.origin as TileLocation)
   } else {
-    tableau.movePlate(current.item.id, current.origin as PlateLocation)
+    board().movePlate(current.item.id, current.origin as PlateLocation)
   }
   revision.value++
   phase.value = IDLE
@@ -1326,7 +1226,7 @@ const rotateControls = computed(() => {
   const slot = hoveredPlateSlot.value ?? (overButtons.value ? activePlateSlot.value : null)
   if (slot === null) return null
   const centre = drawerLayout.value.plateSlotCentre(slot)
-  const plate = tableau.plates().find(
+  const plate = board().plates().find(
     p => p.location.kind === 'plateSlot' && p.location.slot === slot,
   )
   if (!plate) return null
@@ -1336,7 +1236,7 @@ const rotateControls = computed(() => {
 function rotate(steps: number): void {
   const controls = rotateControls.value
   if (!controls) return
-  if (tableau.rotatePlate(controls.plateId, steps)) revision.value++
+  if (board().rotatePlate(controls.plateId, steps)) revision.value++
 }
 
 /**
@@ -1376,7 +1276,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :valid="targetValid"
       />
       <ExternalAnchors
-        :tableau="tableau"
+        :tableau="board()"
         :revision="revision"
       />
       <SourceChrome
@@ -1392,7 +1292,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :live="phase.kind === 'putting' || phase.kind === 'paying'"
       />
       <TableauView
-        :tableau="tableau"
+        :tableau="board()"
+        :source="source()"
         :drawer="drawerShape"
         :game-id="gameId"
         :may-place="phase.kind === 'putting' || canStartPut"
@@ -1524,6 +1425,22 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       >
         {{ modeLabel }} · {{ settings.platesPerRound }} plates/round
       </p>
+      <!--
+        Whose board this is. Only worth saying at a table: with one seat it is always yours, and a
+        label that never changes is furniture.
+      -->
+      <p
+        v-if="seatRows.length > 1"
+        class="viewing"
+        :class="{ watching }"
+      >
+        <span class="viewing-label">Board</span>
+        <strong>{{ seatRows[viewedSeat]?.name }}</strong>
+        <span
+          v-if="watching"
+          class="viewing-note"
+        >watching</span>
+      </p>
       <dl class="counters">
         <dt>Round</dt>
         <dd>
@@ -1584,6 +1501,35 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         <span>banked</span>
         <strong>{{ totalScore }}</strong>
       </p>
+
+      <!--
+        Everyone at the table, and which of them you are looking at.
+
+        The view follows whoever is playing, so in an ordinary hot-seat turn this reads rather than
+        being clicked. Clicking a seat pins the view to it — to see what somebody else is building —
+        and clicking it again lets go and follows the turn once more.
+      -->
+      <ul
+        v-if="seatRows.length > 1"
+        class="seats"
+      >
+        <li
+          v-for="row in seatRows"
+          :key="row.seat"
+        >
+          <button
+            type="button"
+            :class="{ active: row.active, viewed: row.viewed }"
+            :aria-pressed="row.viewed"
+            @click="viewSeat(row.seat)"
+          >
+            <span class="seat-mark">{{ row.active ? '▸' : '' }}</span>
+            <span class="seat-name">{{ row.name }}</span>
+            <span class="seat-note">{{ row.passed ? 'passed' : '' }}</span>
+            <span class="seat-score">{{ row.total }}</span>
+          </button>
+        </li>
+      </ul>
     </section>
 
     <!--
@@ -1886,5 +1832,111 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+
+/* ── who is playing, and whose board this is ──────────────────────────────────── */
+
+.viewing {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.viewing-label {
+  color: #6b7382;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.viewing strong {
+  color: #cfd4de;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* Amber while you are reading somebody else's board, so it never passes for your own. */
+.viewing.watching strong {
+  color: #e8c878;
+}
+
+.viewing-note {
+  color: #7d6a41;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.seats {
+  margin: 12px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid #22252b;
+  list-style: none;
+}
+
+.seats button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #79808f;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.seats button:hover {
+  border-color: #33383f;
+  color: #cfd4de;
+}
+
+/* Whose turn it is, and which board is on screen: two different facts, so two different marks. */
+.seats button.active .seat-name {
+  color: #cfd4de;
+}
+
+.seats button.viewed {
+  border-color: #3a3222;
+  background: rgb(232 200 120 / 6%);
+}
+
+.seats button.viewed .seat-name {
+  color: #e8c878;
+}
+
+.seat-mark {
+  width: 8px;
+  color: #8fe6c0;
+}
+
+.seat-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-note {
+  color: #6b7382;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.seat-score {
+  color: #cfd4de;
+  font-variant-numeric: tabular-nums;
+}
+
+.seats button:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 1px;
 }
 </style>
