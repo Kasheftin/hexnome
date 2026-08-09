@@ -65,7 +65,14 @@ export class DeskService {
     const result = discardToDesk(state, codes)
     if (!result.ok) throw new ConflictException(result.error)
 
-    await this.save(id, version, result.value)
+    /*
+     * An empty batch changes nothing, so it must not be written.
+     *
+     * Not merely a wasted round trip: the write bumps the version, and a request already in flight
+     * against this desk would then lose the conditional update and get a 409 — refused because of a
+     * call that did nothing. The desk is still loaded first, so an unknown id is still a 404.
+     */
+    if (codes.length > 0) await this.save(id, version, result.value)
     return { id, remaining: deskRemaining(result.value) }
   }
 
