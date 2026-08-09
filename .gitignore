@@ -21,3 +21,6 @@ Thumbs.db
 npm-debug.log*
 pnpm-debug.log*
 yarn-error.log*
+
+# Local environment. .env.example is committed; .env holds real credentials.
+.env

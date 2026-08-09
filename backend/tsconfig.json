@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "module": "node16",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "moduleResolution": "node16",
+    "outDir": "./dist",
+    "rootDir": "./src",
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "preserveSymlinks": true,
+    "sourceMap": true,
+    "incremental": true,
+    // Inside dist, so `nest build`'s deleteOutDir invalidates it too. Left at the default, tsc keeps
+    // a build-info file that outlives the output it describes and then emits nothing into an empty
+    // directory — a silent no-op build.
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules", "src/rules/**/*.spec.ts"]
+}

@@ -1,0 +1,51 @@
+// One table, because there is one kind of state: a bag of tiles and the pile they come back to.
+//
+// The desk knows nothing about games, turns or players — see packages/rules/src/desk.ts. A game uses
+// two rows, one for its tiles and one for its plates, and nothing here can tell them apart.
+//
+// ## Why the state is a JSON column
+//
+// The desk is a value: two arrays and a counter, read and written whole on every request. Normalising
+// it into a row per tile would buy nothing — there is no query that wants a single tile, and the order
+// of the arrays *is* the data. `config` is the shape `DeskState` serialises to.
+
+// Prisma 7 generates into the project rather than into node_modules, so the client is ordinary
+// source the compiler can see.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+
+  // Stated rather than inferred. Left to itself the generator emits ESM, which compiles to a file
+  // holding both `exports.` and `import.meta.url` — and Node, seeing the latter, loads it as ESM and
+  // dies on the former. The generated code carries `@ts-nocheck`, so tsc never warns.
+  moduleFormat = "cjs"
+}
+
+// Prisma 7 keeps the connection out of the schema: the CLI reads it from prisma.config.ts and the
+// running server passes a driver adapter. The schema describes shape only.
+datasource db {
+  provider = "mysql"
+}
+
+model Desk {
+  /// A uuid, minted on creation. This is the only handle a client ever gets.
+  id String @id @db.VarChar(36)
+
+  /// What the order was derived from. Kept because a reshuffle needs it, not for lookup.
+  ///
+  /// Not secret *yet* — the client mints it and sends it, which is why anyone holding it can build a
+  /// second desk and read the whole order. Moving the minting to the server is the next step.
+  seed String @db.VarChar(200)
+
+  /// Bumped on every write, and checked on the way in.
+  ///
+  /// Two draws racing on one desk would otherwise both read the same state and both write it back,
+  /// and the second would silently undo the first — a tile dealt twice, with nothing to notice it.
+  /// The conditional update makes that a 409 instead. Same discipline as a chain, three lines long.
+  version Int @default(0)
+
+  /// The whole desk as one value: { seed, copies, exclude, desk, discard, generation }.
+  config Json
+
+  createdAt DateTime @default(now())
+}

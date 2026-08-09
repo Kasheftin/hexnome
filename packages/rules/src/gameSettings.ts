@@ -10,6 +10,7 @@
  * an older shape, or simply nonsense. `parseGameSettings` is the only way in.
  */
 
+import { DISTINCT_TILES, STANDARD_PLATE_COPIES, STANDARD_TILE_COPIES } from './deck'
 import { DEFAULT_PLACEMENT_RULE, isPlacementRule, type PlacementRule } from './placement'
 
 export type GameKind = 'singleplayer' | 'multiplayer' | 'quiz'
@@ -60,6 +61,30 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
 
 export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6]
 export const DEFAULT_PLATES_PER_ROUND = 4
+
+/**
+ * How much material the game is dealt from, as copies of each of the 36 distinct kinds.
+ *
+ * More tiles makes duplicates commoner in the source, so a colour sweeps more easily and an awkward
+ * value is likelier to come round again. More plates means the plate bag reshuffles later, or never
+ * — a four-round game draws 16 plates against a bag of 36, so at two copies the pile is decoration.
+ *
+ * **Stored as copies, shown as totals.** The stored number is what `createDeck` takes; a player
+ * thinks in how many tiles are in play, not in multiples of 36. The labels below are what the menu
+ * renders in place of the raw value, and they are *derived* — a fifth choice cannot be added without
+ * its total following it.
+ */
+export const TILE_COPIES_CHOICES: readonly number[] = [2, 3, 4]
+export const DEFAULT_TILE_COPIES = STANDARD_TILE_COPIES
+
+export const PLATE_COPIES_CHOICES: readonly number[] = [1, 2, 3]
+export const DEFAULT_PLATE_COPIES = STANDARD_PLATE_COPIES
+
+export const TILE_BAG_LABELS: readonly string[] =
+  TILE_COPIES_CHOICES.map(copies => String(copies * DISTINCT_TILES))
+
+export const PLATE_BAG_LABELS: readonly string[] =
+  PLATE_COPIES_CHOICES.map(copies => String(copies * DISTINCT_TILES))
 
 /**
  * How big the player's drawer is.
@@ -160,7 +185,22 @@ export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 export interface GameSettings {
   readonly kind: GameKind
   readonly mode: SingleplayerMode
+  /**
+   * What the game's desks are dealt from. Minted with the game and never shown.
+   *
+   * Separate from the game id, which is in the URL and gets pasted around. The desks are built from
+   * this on the server, and the day it stops being minted here is the day the client stops being able
+   * to predict the deal — keeping the two apart now makes that a deletion rather than a migration.
+   *
+   * Empty for a game saved before this existed; the reader substitutes the game id, which is what
+   * those games were dealt from.
+   */
+  readonly seed: string
   readonly platesPerRound: number
+  /** Copies of each distinct tile in the bag. `× 36` is the total dealt from. */
+  readonly tileCopies: number
+  /** Copies of each distinct plate in the bag. `× 36` is the total dealt from. */
+  readonly plateCopies: number
   /** Tile slots in the player's drawer. Stems share them. */
   readonly tileSlots: number
   /** Plate bays in the player's drawer. */
@@ -205,6 +245,14 @@ export function isGameKind(value: unknown): value is GameKind {
 
 export function isPlatesPerRound(value: unknown): boolean {
   return typeof value === 'number' && PLATES_PER_ROUND_CHOICES.includes(value)
+}
+
+export function isTileCopies(value: unknown): boolean {
+  return typeof value === 'number' && TILE_COPIES_CHOICES.includes(value)
+}
+
+export function isPlateCopies(value: unknown): boolean {
+  return typeof value === 'number' && PLATE_COPIES_CHOICES.includes(value)
 }
 
 export function isTileSlots(value: unknown): boolean {
@@ -285,11 +333,14 @@ export const PLACEMENT_RULE_HINTS: Readonly<Record<PlacementRule, string>> = {
   strict: 'every neighbour must match',
 }
 
-export function defaultGameSettings(createdAt: number): GameSettings {
+export function defaultGameSettings(createdAt: number, seed = ''): GameSettings {
   return {
     kind: 'singleplayer',
     mode: DEFAULT_SINGLEPLAYER_MODE,
+    seed,
     platesPerRound: DEFAULT_PLATES_PER_ROUND,
+    tileCopies: DEFAULT_TILE_COPIES,
+    plateCopies: DEFAULT_PLATE_COPIES,
     tileSlots: DEFAULT_TILE_SLOTS,
     plateSlots: DEFAULT_PLATE_SLOTS,
     initialStems: DEFAULT_STEM_COUNT,
@@ -332,9 +383,16 @@ export function parseGameSettings(value: unknown): GameSettings | null {
   return {
     kind: raw.kind,
     mode: raw.mode,
+    // A dial-style fallback rather than a rejection: a game saved before seeds existed is still a
+    // game, and the caller knows the id it was dealt from. See {@link GameSettings.seed}.
+    seed: typeof raw.seed === 'string' ? raw.seed : '',
     platesPerRound: isPlatesPerRound(raw.platesPerRound)
       ? (raw.platesPerRound as number)
       : DEFAULT_PLATES_PER_ROUND,
+    tileCopies: isTileCopies(raw.tileCopies) ? (raw.tileCopies as number) : DEFAULT_TILE_COPIES,
+    plateCopies: isPlateCopies(raw.plateCopies)
+      ? (raw.plateCopies as number)
+      : DEFAULT_PLATE_COPIES,
     tileSlots: isTileSlots(raw.tileSlots) ? (raw.tileSlots as number) : DEFAULT_TILE_SLOTS,
     plateSlots: isPlateSlots(raw.plateSlots) ? (raw.plateSlots as number) : DEFAULT_PLATE_SLOTS,
     initialStems: isStemCount(raw.initialStems)

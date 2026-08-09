@@ -24,6 +24,12 @@ import {
   DEFAULT_SINGLEPLAYER_MODE,
   GAME_KINDS,
   PLATES_PER_ROUND_CHOICES,
+  TILE_COPIES_CHOICES,
+  PLATE_COPIES_CHOICES,
+  TILE_BAG_LABELS,
+  PLATE_BAG_LABELS,
+  DEFAULT_TILE_COPIES,
+  DEFAULT_PLATE_COPIES,
   PLATE_SLOT_CHOICES,
   TILE_SLOT_CHOICES,
   DEFAULT_PLATE_SLOTS,
@@ -57,6 +63,7 @@ import {
   type PlacementRule,
 } from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
+import { createGameId } from '@/composables/createGameId'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
 import { useSavedGames } from '@/composables/useSavedGames'
 
@@ -88,6 +95,9 @@ const step = ref<Step>('title')
 const kind = ref<GameKind | null>(null)
 const mode = ref<SingleplayerMode>(DEFAULT_SINGLEPLAYER_MODE)
 const platesPerRound = ref<number>(DEFAULT_PLATES_PER_ROUND)
+/* Held as copies, shown as bag totals — see the dials below. */
+const tileCopies = ref<number>(DEFAULT_TILE_COPIES)
+const plateCopies = ref<number>(DEFAULT_PLATE_COPIES)
 const tileSlots = ref<number>(DEFAULT_TILE_SLOTS)
 const plateSlots = ref<number>(DEFAULT_PLATE_SLOTS)
 const initialStems = ref<number>(DEFAULT_STEM_COUNT)
@@ -158,6 +168,36 @@ const SUPPLY_DIALS: readonly Dial[] = [
     short: 'plates/round',
     choices: PLATES_PER_ROUND_CHOICES,
     model: platesPerRound,
+  },
+]
+
+/**
+ * How much material the game is dealt from.
+ *
+ * The dial holds copies and renders totals, which is what `labels` is for. A player thinks in "how
+ * many tiles are in this game", not in multiples of 36 — and the totals come from the rules package
+ * rather than being written out here, so a fourth choice cannot arrive with a stale label.
+ */
+const DECK_DIALS: readonly Dial[] = [
+  {
+    key: 'tileCopies',
+    legend: 'Tiles in the bag',
+    short: 'tile bag',
+    choices: TILE_COPIES_CHOICES,
+    labels: TILE_BAG_LABELS,
+    model: tileCopies,
+    hint: 'Two, three or four copies of each of the 36 distinct tiles. More copies means duplicates '
+      + 'turn up together more often, so a colour is easier to sweep in one draft.',
+  },
+  {
+    key: 'plateCopies',
+    legend: 'Plates in the bag',
+    short: 'plate bag',
+    choices: PLATE_COPIES_CHOICES,
+    labels: PLATE_BAG_LABELS,
+    model: plateCopies,
+    hint: 'One, two or three per distinct tile. A four-round game draws sixteen, so beyond the first '
+      + 'copy the bag never runs dry and nothing you spend comes back around.',
   },
 ]
 
@@ -286,6 +326,7 @@ interface DialSection {
 
 const SECTIONS: readonly DialSection[] = [
   { key: 'supply', dials: SUPPLY_DIALS },
+  { key: 'deck', title: 'Deck', dials: DECK_DIALS },
   { key: 'drawer', title: 'Drawer', dials: DRAWER_DIALS },
   { key: 'stems', title: 'Receiving stems', dials: STEM_DIALS },
   {
@@ -352,7 +393,17 @@ function startGame(): void {
   const id = savedGames.create({
     kind: 'singleplayer',
     mode: mode.value,
+    /*
+     * Minted here and stored with the game, separately from its id.
+     *
+     * The desks are built from it on the server, so the same seed always deals the same game — which
+     * is what makes a reload deal what it dealt before. It is deliberately not the id: the id is in
+     * the URL and gets shared, and this is the value that becomes a secret once the server mints it.
+     */
+    seed: createGameId(),
     platesPerRound: platesPerRound.value,
+    tileCopies: tileCopies.value,
+    plateCopies: plateCopies.value,
     tileSlots: tileSlots.value,
     plateSlots: plateSlots.value,
     initialStems: initialStems.value,

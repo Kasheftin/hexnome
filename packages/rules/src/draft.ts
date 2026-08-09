@@ -12,9 +12,10 @@
  * 1. Pick any tile to start. That tile's colour and its symbol are both still live as the criterion.
  * 2. Pick a second, and the criterion **pins**: two tiles that share only a colour can only be a
  *    colour draft, so every remaining symbol match goes inactive.
- * 3. **At most one of each distinct kind.** The bag holds three copies of every tile, so the source
- *    often shows duplicates. Selecting one red-2 makes any *other* red-2 inactive — it is already
- *    represented. The duplicate is left in the source rather than swept along.
+ * 3. **At most one of each distinct kind.** The bag holds several copies of every tile — three by
+ *    default, and a setting — so the source often shows duplicates. Selecting one red-2 makes any
+ *    *other* red-2 inactive: it is already represented. The duplicate is left in the source rather
+ *    than swept along.
  *
  *    A revealed plate counts as its token here, so a red-1 plate and a red-1 tile are the same kind: take
  *    one or the other, never both.

@@ -2,11 +2,7 @@
   "name": "@hexnome/rules",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "//": "TypeScript source is the entry point. Both consumers compile it themselves \u2014 the frontend through Vite, the backend through its own tsconfig \u2014 so there is no build step to forget and no dist to go stale.",
-  "exports": {
-    "./*": "./src/*.ts"
-  },
+  "//": "Source only - no build, no dist. Both consumers compile it themselves: the frontend through a Vite alias and a tsconfig path, the backend through a symlink at backend/src/rules that puts these files inside its own program. So there is no build step to forget and no compiled copy to go stale.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

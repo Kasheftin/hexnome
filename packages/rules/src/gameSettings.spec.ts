@@ -8,6 +8,12 @@ import {
   DEFAULT_MIN_GROUP_SIZE,
   DEFAULT_PLATE_SLOTS,
   DEFAULT_TILE_SLOTS,
+  DEFAULT_TILE_COPIES,
+  DEFAULT_PLATE_COPIES,
+  TILE_COPIES_CHOICES,
+  PLATE_COPIES_CHOICES,
+  TILE_BAG_LABELS,
+  PLATE_BAG_LABELS,
   TILE_SLOT_CHOICES,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
   SINGLEPLAYER_MODES,
@@ -16,12 +22,16 @@ import {
   parseGameSettings,
   roundsOf,
 } from './gameSettings'
+import { STANDARD_PLATE_COPIES, STANDARD_TILE_COPIES } from './deck'
 import { DEFAULT_PLACEMENT_RULE } from './placement'
 
 const valid = {
   kind: 'singleplayer',
   mode: 'classic',
+  seed: '9c1f0b2a-7d3e-4a55-8b61-0f2e3d4c5b6a',
   platesPerRound: 5,
+  tileCopies: 4,
+  plateCopies: 2,
   tileSlots: 16,
   plateSlots: 1,
   initialStems: 2,
@@ -80,7 +90,9 @@ describe('parsing settings that came back from storage', () => {
   })
 
   it('ignores extra keys from a future or past shape', () => {
-    const parsed = parseGameSettings({ ...valid, seed: 'abc', players: 3 })
+    // `seed` used to be one of these. It is a field now, so the stand-ins have to be things that
+    // genuinely are not — a setting that was never added, and one that has not been yet.
+    const parsed = parseGameSettings({ ...valid, players: 3, sourceLots: 9 })
     expect(parsed).toEqual(valid)
   })
 
@@ -291,5 +303,70 @@ describe('the drawer\'s size', () => {
   /* Two rows deep, so every offered count has to divide into whole columns. */
   it('offers only even tile counts', () => {
     expect(TILE_SLOT_CHOICES.every(count => count % 2 === 0)).toBe(true)
+  })
+})
+
+describe('the seed a game is dealt from', () => {
+  it('is kept exactly as it was stored', () => {
+    expect(parseGameSettings(valid)?.seed).toBe(valid.seed)
+  })
+
+  /*
+   * Empty rather than null for a game saved before seeds existed. Those games are still games, and
+   * the reader knows the id they were dealt from — see frontend/src/composables/useSavedGames.ts.
+   */
+  it('comes back empty when there was not one, rather than failing the game', () => {
+    const { seed, ...withoutSeed } = valid
+    void seed
+    expect(parseGameSettings(withoutSeed)).not.toBeNull()
+    expect(parseGameSettings(withoutSeed)?.seed).toBe('')
+    expect(parseGameSettings({ ...valid, seed: 42 })?.seed).toBe('')
+  })
+})
+
+describe('how much material the game is dealt from', () => {
+  it('falls back rather than failing on a bad count', () => {
+    for (const bad of [0, 5, 2.5, '3', null, undefined, NaN]) {
+      expect(parseGameSettings({ ...valid, tileCopies: bad })?.tileCopies)
+        .toBe(DEFAULT_TILE_COPIES)
+      expect(parseGameSettings({ ...valid, plateCopies: bad })?.plateCopies)
+        .toBe(DEFAULT_PLATE_COPIES)
+    }
+  })
+
+  it('keeps an offered count', () => {
+    // Both offered and *not* the default, so a silent fallback would still fail this.
+    expect(parseGameSettings({ ...valid, tileCopies: 2 })?.tileCopies).toBe(2)
+    expect(parseGameSettings({ ...valid, plateCopies: 3 })?.plateCopies).toBe(3)
+  })
+
+  it('defaults to the bags the game shipped with', () => {
+    const fresh = defaultGameSettings(0)
+    expect([fresh.tileCopies, fresh.plateCopies]).toEqual([3, 1])
+  })
+
+  /*
+   * The menu shows totals while the setting holds copies, so these two lists are the translation
+   * between them. A wrong entry here is a panel that reports a bag size the game is not playing with
+   * — invisible, since nothing counts the tiles on screen.
+   */
+  it('labels every choice with the bag size it actually means', () => {
+    expect(TILE_BAG_LABELS).toEqual(['72', '108', '144'])
+    expect(PLATE_BAG_LABELS).toEqual(['36', '72', '108'])
+
+    expect(TILE_BAG_LABELS).toHaveLength(TILE_COPIES_CHOICES.length)
+    expect(PLATE_BAG_LABELS).toHaveLength(PLATE_COPIES_CHOICES.length)
+    for (const [index, copies] of TILE_COPIES_CHOICES.entries()) {
+      expect(TILE_BAG_LABELS[index]).toBe(String(copies * 36))
+    }
+    for (const [index, copies] of PLATE_COPIES_CHOICES.entries()) {
+      expect(PLATE_BAG_LABELS[index]).toBe(String(copies * 36))
+    }
+  })
+
+  /* The default has to be the standard bag, or a fresh game is not the game the rules describe. */
+  it('takes its defaults from the deck itself', () => {
+    expect([DEFAULT_TILE_COPIES, DEFAULT_PLATE_COPIES])
+      .toEqual([STANDARD_TILE_COPIES, STANDARD_PLATE_COPIES])
   })
 })

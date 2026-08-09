@@ -106,6 +106,12 @@ the symptom is the server refusing something the client just did — which reads
 bug. This cost one debugging session outright. Run the backend in watch mode, or have it report the
 rules version it loaded so a mismatch is a banner rather than a mystery.
 
+> **Closed in attempt 2**, and not the way this note suggested. Watch mode does not help while the
+> rules are imported by package name, because TypeScript will not watch anything that resolves
+> through `node_modules` — a pnpm workspace link included. The fix is a symlink, `backend/src/rules`,
+> which makes them ordinary files inside the backend's own program: no build, no `dist`, and
+> `nest start --watch` behaves. See `docs/tech-spec.md`, "Repo layout".
+
 **A socket notification can beat its own HTTP response.** The server announces a command when it is
 *stored*; the reply carrying that command's `seq` may arrive later. A client that fetches on the
 notification will apply its own command before its cursor has moved, and again when the reply lands.

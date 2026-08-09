@@ -9,7 +9,10 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "build": "pnpm --filter hexnome-frontend build",
-    "dev": "pnpm --filter hexnome-frontend dev"
+    "dev": "pnpm --parallel --filter @hexnome/backend --filter hexnome-frontend dev",
+    "dev:frontend": "pnpm --filter hexnome-frontend dev",
+    "dev:backend": "pnpm --filter @hexnome/backend dev",
+    "//dev": "Both, because the game no longer runs without the desk service. The backend's watcher covers the rules too - see docs/tech-spec.md."
   },
   "devDependencies": {
     "eslint": "^10.8.0",
@@ -17,5 +20,12 @@
     "jiti": "^2.6.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.65.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "@swc/core",
+      "prisma"
+    ]
   }
 }

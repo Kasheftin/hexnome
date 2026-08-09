@@ -17,6 +17,18 @@ import { createGameId } from './createGameId'
 const STORAGE_KEY = 'hexnome:games'
 
 /**
+ * Fill in the seed for a game saved before there were seeds.
+ *
+ * Those games were dealt from their id, so the id is the honest answer rather than a placeholder —
+ * they come back dealing what they always dealt. Done here, where the id is known, because
+ * `parseGameSettings` is handed a value and not the key it was stored under.
+ */
+function withSeed(id: string, settings: GameSettings | null): GameSettings | null {
+  if (!settings) return null
+  return settings.seed ? settings : { ...settings, seed: id }
+}
+
+/**
  * How many games to remember. Each entry is tiny, but nothing ever deleted them, so without a
  * cap this grows for as long as the browser profile lives.
  */
@@ -45,7 +57,7 @@ export function readSavedGame(id: string): GameSettings | null {
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return null
-    return parseGameSettings((parsed as Record<string, unknown>)[id])
+    return withSeed(id, parseGameSettings((parsed as Record<string, unknown>)[id]))
   } catch {
     // Storage can be unavailable (private mode, disabled) or hold invalid JSON. Either way
     // there is no game to restore.
@@ -72,7 +84,7 @@ export function useSavedGames(): SavedGames {
       if (!id) return null
       const raw = stored.value
       if (typeof raw !== 'object' || raw === null) return null
-      return parseGameSettings(raw[id])
+      return withSeed(id, parseGameSettings(raw[id]))
     },
 
     create(settings) {

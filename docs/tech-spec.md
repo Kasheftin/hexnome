@@ -25,14 +25,51 @@ before any API call resolves.
 
 ```
 docs/               design docs
-frontend/           Vue 3 SPA               ← Stage 1 lives entirely here
-backend/            Nest.js API             ← later stage, not created yet
+frontend/           Vue 3 SPA
+backend/            Nest.js API             ← the desk service, and nothing else yet
+packages/rules/     the game's rules        ← shared by both
 external assets/    reference art, screen1.png
 ```
 
-Plain sibling folders, each with its own `package.json`. No monorepo tooling until something actually
-needs to be shared — at which point the natural first extraction is the rules module (see below),
-because the backend needs it to validate moves.
+A pnpm workspace. The rules were extracted the moment something else needed them, which is what the
+backend needed to deal a bag the browser cannot see.
+
+**Two ways in to the rules, and neither builds anything.** The frontend resolves `@hexnome/rules/*`
+to `packages/rules/src/*` — a Vite alias for the bundle, a tsconfig path for the typecheck. The
+backend reaches them through a **symlink**, `backend/src/rules -> ../../packages/rules/src`, and
+imports them relatively: `import { createDesk } from '../rules/desk'`.
+
+The symlink is the whole trick, and it is worth understanding rather than copying.
+
+`nest start --watch` does not notice a package that changes. The rules *are* in its tsc program —
+`tsc --listFiles` lists every file under `packages/rules/src` even when they are imported by package
+name — but TypeScript deliberately does not **watch** files that resolve through `node_modules`, on
+the reasonable assumption that dependencies do not change while you work. A pnpm workspace link is
+`node_modules`. Measured, not assumed: under package-name imports, touching
+`packages/rules/src/desk.ts` produces no recompile and no restart, and the server carries on serving
+the rules it booted with — then refuses something the browser has just done, which reads exactly like
+a logic bug. That is the trap in `docs/backend-attempt1.md`, and it cost a whole debugging session.
+
+Through the symlink they are ordinary files under `src/`, so all of that goes away:
+
+- `tsc` watches them, and `nest start --watch` restarts on a rules edit like any other.
+- They compile into `dist/rules/` as part of the backend's own build, and the emitted `require` is
+  relative — no export map, no second copy, nothing to go stale.
+- `packages/rules` therefore has **no build step and no `dist`**: it is source, and both consumers
+  compile it themselves.
+
+Two settings make it work. `"preserveSymlinks": true` in `backend/tsconfig.json`, so TypeScript keeps
+the `src/rules/...` path instead of resolving it back outside `rootDir` — it applies to type
+resolution only, so pnpm's symlink farm is unaffected, and the backend typechecks against the full
+dependency tree as before. And `src/rules/**/*.spec.ts` is excluded from the build and from the
+backend's vitest, since the rules run their own suite.
+
+*(A symlink is committed as a symlink. On Windows that needs developer mode or
+`git config core.symlinks true`.)*
+
+Belt and braces, kept even though the trap is closed: `/health` reports a fingerprint of the rules the
+server actually loaded — the first codes a fixed probe seed deals — and the game compares it on load,
+so a server that simply was not restarted says so on screen rather than misbehaving.
 
 ## Frontend layout
 
@@ -150,10 +187,13 @@ where it needs to be already.
 
 ### The agenda is a second promise attached to the URL
 
-`game/agenda.ts` deals what each round scores for from the game id, the same way `deck.ts` deals the
-bags — so it falls inside the same frozen contract, and `agenda.spec.ts` carries its own golden pins.
-In that file, not `deck.spec.ts`: separate modules, separate pins. They do share the two known ids,
-which is how an accidental cross-module seed collision would show up.
+`game/agenda.ts` deals what each round scores for from the game id, the same way `desk.ts` deals a bag
+from its seed — so it falls inside the same frozen contract, and `agenda.spec.ts` carries its own
+golden pins. In that file, not `desk.spec.ts`: separate modules, separate pins.
+
+Note that the agenda still hangs off the **game id** while the desks hang off the **seed**. That is
+deliberate rather than an oversight: what a round scores for is public — it is printed down the side
+of the screen — while the desk order is the thing a player must not be able to derive.
 
 Two streams, `${gameId}:agenda:colors` and `${gameId}:agenda:values`, for the reason `random.ts` gives
 in its own comment. On one stream `random` draws values first and `classic` draws none, so the same id
@@ -176,49 +216,86 @@ The agenda is derived and never stored. Both inputs survive a reload already —
 mode in the saved settings — and persisting it would let an agenda written by an older build outlive
 the code that produced it, which is the failure `parseGameSettings` exists to prevent.
 
-### Seeded bags
+### The desk service
 
-`game/random.ts` holds the primitives — `cyrb128` → `sfc32` → descending Fisher-Yates — and
-`game/deck.ts` derives the draw order of both bags — 36 plates, 108 tiles — from the game's id. A
-game is already minted with a uuid and stored against it so `/game?id=…` survives a refresh, so
-reusing that id as the seed makes the deck **a property of the id** rather than of the moment the
-page loaded.
+The bag is on the server. `createDeck(gameId)` used to derive both bags in the browser, which meant
+every tile the game would ever deal was in memory and readable from the console — fine for solitaire
+and impossible for anything else. It now lives behind three routes that know nothing about the game:
 
 ```
-createDeck(gameId) → { plates: DealtPlate[36], tiles: TileSpec[108] }
+POST /desk              { seed, copies, exclude? }  -> { id, remaining }
+POST /desk/:id/draw     { n }                       -> { id, remaining, codes }
+POST /desk/:id/discard  { codes }                   -> { id, remaining }
 ```
 
-`dealStartingPlates` then pulls each player's opening plate out of the bag — the first value-1 plate in
-draw order for the first player, and so on — before the source sees any of it. Removed rather than
-copied, so a plate on someone's board can never also turn up in the source. That caps a game at **six
-players**, by arithmetic: one plate per (colour, value) pair means exactly six carry value 1.
+A **code** is `11`-`66`: colour then value, `(color + 1) * 10 + value`. That is the whole vocabulary.
+A game uses two desks, one for tiles and one for plates, and the service cannot tell them apart — the
+client sends `` `${seed}:tiles` `` for one and `` `${seed}:plates` `` for the other, which is what
+keeps their orders independent.
 
-Three things this buys, in order of when they matter:
+**The seed is not the game id.** It is minted with the game and stored beside its settings; the id is
+in the URL and gets pasted around. Right now the client mints it and sends it, so the system is *not
+secure*: anyone holding a seed can build a second desk and read the whole order. Fixing that means
+minting it on the server, and keeping the two values apart now makes that a deletion rather than a
+migration.
 
-1. A refresh returns to the game you were looking at, not to a new one sharing a URL.
-2. A bug report is reproducible from the URL alone.
-3. Later, two clients can agree on a deck **without exchanging it** — the id is the deck.
+**The mechanism is in `packages/rules/src/desk.ts`**, as pure functions over a value:
 
-**`cyrb128` → `sfc32` → descending Fisher-Yates**, in `game/random.ts`. `Math.random()` is
-deliberately unseedable, so this needs its own generator. Both the hash and the generator are built from exact 32-bit integer
-operations (`Math.imul`, shifts, xor) plus a single exact `/ 2**32`, which is what makes the sequence
-bit-identical on every JS engine — a deck that derived differently per browser would defeat the point.
+```ts
+createDesk(seed, { copies, exclude }) -> DeskState        // { seed, copies, exclude, desk, discard, generation }
+drawFromDesk(state, n)                -> { state, codes } | { error }
+discardToDesk(state, codes)           -> state | { error }
+```
 
-**Two independent streams**, seeded `` `${id}:plates` `` and `` `${id}:tiles` ``. If they shared one
-stream, changing how many plates were drawn would shift every tile after it, coupling two things the
-game has no reason to couple. `deck.spec.ts` tests exactly that: varying `tileCopies` leaves the
-plate order untouched.
+State rather than a closure, because it round-trips through a JSON column between one request and the
+next. `DeskService` is the thin shell that loads a row, calls one of these and writes it back; the
+arithmetic is testable without a database, and `conservation.spec.ts` drives the same code the server
+runs.
+
+**Copies and exclusions.** `copies` multiplies the 36 distinct kinds — the settings offer 2-4 tiles
+and 1-3 plates. Each copy is built in the fixed colour-major order and the finished list is shuffled
+once, so duplicates spread through the bag rather than the second copy sitting behind the first.
+`exclude` holds codes back at creation, one occurrence each: it is how the players' opening plates
+stay out of the shared source, since they are already on a board.
+
+The opening plates are chosen by `openingPlateCodes(seed, players)` — a value-1 plate per player,
+distinct colours, off its own tagged stream. Not drawn from the desk, because finding "the first
+value-1 plate in the bag" would mean seeing the bag. Six colours is therefore the cap on a table.
+
+**Validation is the server's, and it is not decorative.** A draw larger than desk plus pile is refused
+outright rather than answered short — over HTTP a short array is a silent surprise. A discard is
+checked against what exists: desk plus pile can never hold more of a code than the game has copies of,
+so anything past that was never drawn. That one check is what stops a client inventing tiles for a
+desk that would happily deal them back out.
+
+**Two writers on one desk conflict rather than clobber.** Every write is `UPDATE … WHERE id = ? AND
+version = ?`, so a second request that read the same state gets a 409 instead of silently undoing the
+first — a tile dealt twice, with nothing anywhere to notice. The client serialises its own calls
+through one promise chain per desk (`composables/useDesk.ts`), so this should never fire in play; it
+is there because "should never" is not a guarantee.
+
+**`cyrb128` -> `sfc32` -> descending Fisher-Yates**, in `random.ts`. `Math.random()` is deliberately
+unseedable, so this needs its own generator. Both the hash and the generator are built from exact
+32-bit integer operations (`Math.imul`, shifts, xor) plus a single exact `/ 2**32`, which is what
+makes the sequence bit-identical on every JS engine.
 
 **The derivation is a frozen contract.** Changing the hash, the generator, the order the bag is built
-in (colour-major then value), or the shuffle direction all silently deal a *different* deck for ids
-already handed out — and nothing at runtime can detect it. `deck.spec.ts` therefore pins the exact
-first five plates and tiles for two known ids. A failure there is a question about intent, not a
-prompt to update the numbers. The pins live in `deck.spec.ts` but the contract covers `random.ts`
-too, since everything derives from it — including the source's loose-tile scatter.
+in (colour-major then value), or the shuffle direction all silently deal a *different* desk for a seed
+already handed out — and nothing at runtime can detect it. `desk.spec.ts` pins the exact first codes
+for two known seeds. A failure there is a question about intent, not a prompt to update the numbers.
 
-One claim not being made: a uuid carries 122 bits of entropy against `36! × 108!` possible orders, so
-this samples a small subset rather than shuffling uniformly. Irrelevant to play, but it is not a
-uniform shuffle.
+What the seed buys, in order of when it matters:
+
+1. A refresh deals the game you were playing, not a new one. The board does not persist, so a reload
+   creates two fresh desks from the same seed — which deal exactly what they dealt before. Desk ids
+   are deliberately *not* stored: resuming a half-drawn bag against an empty board is a different
+   game.
+2. A bug report is reproducible from the seed alone.
+3. Later, the seed never leaves the server and the client cannot predict anything at all.
+
+One claim not being made: a uuid carries 122 bits of entropy against `108!` possible orders, so this
+samples a small subset rather than shuffling uniformly. Irrelevant to play, but it is not a uniform
+shuffle.
 
 The colour count lives in `game/deck.ts`, while the palette lives in `scene/tileMaterials.ts`, so the
 deck deals indices `0…5` without consulting the palette. `tileMaterials.ts` carries a type-level
@@ -259,25 +336,25 @@ already derivable from the game's settings.
 
 ### The reshuffle, and the third frozen contract
 
-`game/recycling.ts` wraps a bag in a discard pile: `createRecyclingBag(items, { seed })` draws from a
-cursor and, when the cursor runs short mid-draw, reshuffles the pile into a fresh bag and finishes the
-draw out of it. `bag.ts` is untouched and is held internally, so cursor arithmetic and the short-draw
-contract exist once.
+When a draw runs short mid-draw, the desk shuffles its pile into a fresh bag and finishes the draw out
+of it. The remnant left in the old bag is taken *first* and is not shuffled back in — the
+deck-of-cards behaviour a short draw expects.
 
-**This is the third promise attached to a game id**, after the deck and the agenda — and a wider one
-than either. Those two are pure functions of the id, so "the deck for game X" is a fixed thing a golden
-test can pin. A reshuffle depends on the id *and on how the game was played*, so there is no
-per-id answer to pin. `recycling.spec.ts` pins the **mechanism** instead: the encoding, the ordering,
-the seed format, the generation counter, and that an identical pile reshuffles identically.
+**This is the third promise attached to a seed**, after the desk order and the agenda — and a wider
+one than either. Those two are pure functions, so "the desk for seed X" is a fixed thing a golden test
+can pin. A reshuffle depends on the seed *and on how the game was played*, so there is no per-seed
+answer to pin. `desk.spec.ts` pins the **mechanism** instead: the encoding, the ordering, the seed
+format, the generation counter, and that an identical pile reshuffles identically.
 
 The seed is
 
 ```
-`${gameId}:reshuffle:${kind}:${generation}:${digits}`
+`${seed}:${generation}:${digits}`
 ```
 
-where `kind` is `plates` or `tiles`, `generation` counts reshuffles so far, and `digits` is every pile
-item's `tileCode` concatenated in pile order.
+where `seed` is the desk's own — already tagged `:tiles` or `:plates` by the client, which is what
+keeps the two desks of one game from reshuffling identically when their piles happen to match —
+`generation` counts reshuffles so far, and `digits` is every pile code concatenated in pile order.
 
 Four details, each of which changes every reshuffle in every existing game if got wrong:
 
@@ -294,19 +371,24 @@ Four details, each of which changes every reshuffle in every existing game if go
 - **The generation only advances on a real reshuffle.** A no-op increment when the pile is empty would
   silently reseed the next genuine one.
 
-The pile holds **bare specs, never records with ids or rotation**. Sorting has ties, and ties are only
-safe while the tied items are indistinguishable; give a pile item an id and tie order becomes
-observable, breaking determinism in a way no test would obviously catch.
+The pile holds **bare codes, never records with ids, petals or rotation**. Sorting has ties, and ties
+are only safe while the tied items are indistinguishable; give a pile item an id and tie order becomes
+observable, breaking determinism in a way no test would obviously catch. Codes carry none of that,
+which is one thing the wire format settles by construction rather than by discipline.
 
 Two things route into the piles, both in `GameView`: `applyPayment` accumulates a whole payment and
-hands over one batch per bag, and the round-end sweep does the same for the source. `tableau.discard`
+hands over one batch per desk, and the round-end sweep does the same for the source. `tableau.discard`
 returns a **receipt** of what it destroyed rather than a boolean, so the caller never has to re-derive
 what a plate takes with it — two sources of truth about that is how a duplicate reaches a pile. The
 receipt keeps a plate's own token out of its loose tiles, and reports `plate: null` for a face-down
 plate the model never held a token for.
 
-`conservation.spec.ts` guards the whole protocol with one invariant: 36 plates and 108 tiles, across
-bag, pile and board, at every point in a scripted game.
+`conservation.spec.ts` guards the whole protocol with one invariant: every plate and every tile the
+desks hold, across bag, pile and board, at every point in a scripted game. It drives the real desk
+functions in process rather than over HTTP — the storage is what a server adds, and the arithmetic
+under test is the same either way. It runs the script twice: once at the standard 36 and 108, and once
+at the largest desks the settings offer, which is what says the size is a real parameter rather than a
+default nobody has moved.
 
 ## Rendering
 

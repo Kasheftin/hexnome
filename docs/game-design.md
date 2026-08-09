@@ -186,16 +186,19 @@ need splitting when a second seat arrives.
 
 ### The opening plate
 
-Before the first turn, the dealer reads the shuffled plate bag in **draw order** and takes the first
-**value-1** plate for the first player, the next for the second, and so on. Each is placed at the
-**centre of that player's board**, holding its own tile.
+Before the first turn, each player is given a **value-1** plate of their own colour, placed at the
+**centre of their board** and holding its own tile.
 
-- Every player therefore opens from the same modest footing — a value-1 plate — with the colour decided
-  by the game's id, like the rest of the deal.
-- Those plates are **removed from the bag**. They are on a board, so they can never appear in the shared
-  source.
-- **At most six players.** Not a policy, arithmetic: there is one plate per (colour, value) pair, so
-  exactly six carry value 1. A seventh player would have nothing to open with.
+- Every player therefore opens from the same modest footing — a value-1 plate — with the colour dealt
+  from the game's seed.
+- Those plates are **held out of the bag**. They are on a board, so they can never appear in the
+  shared source. (Spend one and it enters the *pile*, from where it can be dealt out of a bag it was
+  never in — intended: a plate is a plate.)
+- **At most six players**, one colour each. A seventh would have to double up.
+
+The colours are chosen by their own draw rather than by reading the top of the plate bag. That used to
+be the same thing; it stopped being when the bag moved to the server, because looking through it is
+exactly what a client must not do.
 
 It happens **once**, at the start of the game — not once per round.
 
@@ -386,6 +389,11 @@ Two bags feed the shared source, and their full contents are settled:
 | **Plates** | **36** — one per distinct tile, i.e. 6 colors × 6 values of the pre-filled tile |
 | **Tiles** | **108** — three copies of each of the 36 distinct tiles |
 
+Both are the **defaults**, and both are dials in the game settings: tiles at 72 / 108 / 144 and plates
+at 36 / 72 / 108, i.e. 2–4 and 1–3 copies of each distinct kind. More tiles makes duplicates commoner
+in the source, so a color sweeps more easily; more plates means the plate bag reshuffles later, or
+never — a four-round game draws sixteen. Everything below describes the standard bags.
+
 The shared source is a **window onto the front of these bags**. How wide that window is, and when it
 refills, is the part still open (see [Open questions](#open-questions)).
 
@@ -393,8 +401,9 @@ Each plate also arrives with **one** of its six petals pre-filled and the other 
 petal is cosmetic — a plate rotates freely before placement, and drafting matches on the tile's color
 or value, not its position.
 
-Draw order is not random. It is derived from the game's id, so the same game always deals the same
-36 plates and 108 tiles in the same order — see `docs/tech-spec.md`, "Seeded bags".
+Draw order is not random, and it is **not the client's to know**. Both bags live on the server, dealt
+from a seed minted with the game — see `docs/tech-spec.md`, "The desk service". The same seed always
+deals the same game, so a replay is exact; the settings settle how many, and the two are independent.
 
 ### The discard pile, and reshuffling
 
@@ -416,9 +425,9 @@ deck-of-cards move, so a lot is never dealt short while material exists. In prac
 reach: only the largest configuration exhausts a bag inside a game, and it happens silently when it
 does. If bag *and* pile are both empty the source simply stops growing.
 
-The reshuffle is **seeded from the game id and the pile itself**, not from chance, so a game is still
-entirely determined by its URL. That is why each batch is discarded in a fixed order rather than in
-whatever order the player clicked — see `docs/tech-spec.md`, "The reshuffle".
+The reshuffle is **seeded from the game's seed and the pile itself**, not from chance, so a game is
+still entirely determined by how it was played. That is why each batch is discarded in a fixed order
+rather than in whatever order the player clicked — see `docs/tech-spec.md`, "The reshuffle".
 
 ## Turn structure
 
@@ -738,7 +747,8 @@ none of these block current work. The rules module must leave room for them rath
 3. ~~**Rule enforcement** — is a no-duplicate violation an *illegal placement* or a *legal but
    non-scoring* one?~~ **Resolved — illegal.** It is a hard gate: the model refuses the move and the
    drop marker turns red. See [Groups, and the no-duplicates rule](#groups-and-the-no-duplicates-rule).
-4. ~~**Shared source** — when does it refill?~~ **Resolved.** Composition (36 plates, 108 tiles) and
+4. ~~**Shared source** — when does it refill?~~ **Resolved.** Composition (36 plates, 108 tiles by
+   default, now a settings dial) and
    shape (lots of a face-down plate under four loose tiles) were already settled; the timing now is
    too. Lots fill **progressively**, one per turn once the top lot has been touched, up to the round's
    quota — see [When the source restocks](#when-the-source-restocks) — and the column is swept at the

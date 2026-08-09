@@ -29,7 +29,8 @@ import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@hexnome/rules/agenda'
-import { createDeck, dealStartingPlates, type DealtPlate } from '@hexnome/rules/deck'
+import { openingPlateCodes } from '@hexnome/rules/deck'
+import { createDesk as createLocalDesk, tileCode, tileFromCode } from '@hexnome/rules/desk'
 import { finalTally, NOTHING_LEFT } from '@hexnome/rules/groups'
 import {
   canConfirmDraft,
@@ -56,7 +57,9 @@ import {
   recordingTableau,
   replayTableau,
 } from '@hexnome/rules/gameLog'
-import { createRecyclingBag } from '@hexnome/rules/recycling'
+import { PETAL_COUNT } from '@hexnome/rules/plate'
+import { createRandom } from '@hexnome/rules/random'
+import { createDesk, rulesHealth, type Desk } from '@/composables/useDesk'
 import type { RoundRecord } from '@/ui/roundRecord'
 import { hasRoomToShift, platesToReveal, pushLot, shouldRefill, sourceContents } from '@hexnome/rules/source'
 import {
@@ -110,6 +113,8 @@ import {
   DEFAULT_PLATE_SLOTS,
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
+  DEFAULT_TILE_COPIES,
+  DEFAULT_PLATE_COPIES,
   DEFAULT_TILE_SLOTS,
   DEFAULT_STEM_COUNT,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
@@ -139,20 +144,75 @@ const modeLabel = computed(() => {
   return s ? modeInfo(s.mode)?.label ?? s.mode : ''
 })
 
-onMounted(() => {
+/**
+ * What the player is told while the desks are being made, and if they cannot be.
+ *
+ * The bag is on the server now, so a game genuinely cannot start without it. Saying nothing would
+ * leave an empty board with a starting plate on it and no explanation — which reads as a broken game
+ * rather than an unreachable one.
+ */
+const dealing = shallowRef(true)
+const deskTrouble = shallowRef<string | null>(null)
+
+function reportDeskTrouble(error: unknown): void {
+  deskTrouble.value = error instanceof Error ? error.message : 'The table is not answering.'
+}
+
+onMounted(async () => {
   // No id, or one we cannot read: there is no game here, so send them somewhere that works.
   if (!settings.value) {
     void router.replace('/')
     return
   }
+
+  /*
+   * Two desks, one per kind, told apart by their seed alone — the service has no idea which is which.
+   * The plate desk is told to hold back the opening plates, which are already on the board.
+   */
+  try {
+    const copies = {
+      tiles: settings.value.tileCopies ?? DEFAULT_TILE_COPIES,
+      plates: settings.value.plateCopies ?? DEFAULT_PLATE_COPIES,
+    }
+    ;[tileDesk, plateDesk] = await Promise.all([
+      createDesk({ seed: `${seed.value}:tiles`, copies: copies.tiles }),
+      createDesk({ seed: `${seed.value}:plates`, copies: copies.plates, exclude: opening }),
+    ])
+  } catch (error) {
+    reportDeskTrouble(error)
+    return
+  } finally {
+    dealing.value = false
+  }
+
+  void checkRules()
+
   /*
    * The first turn is announced like any other. Its lot is dealt just before the card rather than behind
    * it — see `cardWork`. The board's starting plate and the player's stems are part of neither: they are
    * the tableau, not a deal.
    */
-  beginTurn()
+  await beginTurn()
   announceRound(count.value.round)
 })
+
+/**
+ * Say so if the server is running rules the browser is not.
+ *
+ * Vite recompiles `@hexnome/rules` on every edit; the server holds the copy it started with. The
+ * symptom of a mismatch is the server refusing something the client just did, which reads exactly
+ * like a logic bug and cost a whole debugging session once (docs/backend-attempt1.md). Comparing a
+ * fingerprint turns it into a sentence.
+ */
+async function checkRules(): Promise<void> {
+  const health = await rulesHealth()
+  if (!health) return
+  const mine = createLocalDesk('health-check', { copies: 1 })
+  const expected = mine.ok ? mine.value.desk.slice(0, health.fingerprint.length) : []
+  if (String(expected) !== String(health.fingerprint)) {
+    deskTrouble.value = 'The server is running different rules from this page. Restart the backend.'
+  }
+}
 
 /**
  * A rectangular playfield of 1661 cells (~41 × 41). Panning is clamped so its edge is
@@ -234,39 +294,56 @@ const log = createGameLog()
 const tableau = recordingTableau(createTableau(tableauOptions), log.append)
 
 /**
- * The bags this game's id seeds, and how far into them play has got.
+ * What the desks are dealt from. Stored with the game; the id is not it.
  *
- * The *order* is a frozen contract derived from the id (game/deck.ts); the cursor is ordinary play state
- * that resets with the board. A restock draws one plate and a full heap of tiles off the top of each.
+ * A game saved before seeds existed comes back with its id here, which is what it was dealt from —
+ * see `composables/useSavedGames.ts`.
  */
-const deck = createDeck(gameId.value)
+const seed = computed(() => settings.value?.seed || gameId.value)
 
 /**
- * Each player's opening plate comes out of the bag before anything else.
+ * Each player's opening plate: a value-1 plate of their own colour.
  *
- * The dealer reads the shuffled bag in draw order and takes the first value-1 plate for the first
- * player, the next for the second, and so on (game/deck.ts). They are **removed**, so they can never
- * appear in the shared source — they are already on a board.
+ * **Chosen from the seed rather than drawn**, because finding "the first value-1 plate in the bag"
+ * would mean being able to see the bag, and the bag is exactly what the client no longer holds. The
+ * codes are handed to the plate desk as `exclude`, so what is on a board can never also be dealt.
  *
- * One player for now. The seat count is capped at six by arithmetic rather than by policy: there is one
- * plate per (colour, value) pair, so exactly six carry value 1.
+ * Off its own tagged stream, so knowing which colour you opened with says nothing about either desk's
+ * order. One player for now; six is the ceiling, one colour each.
  */
 const PLAYERS = 1
-const opening = dealStartingPlates(deck.plates, PLAYERS)
+const opening = openingPlateCodes(seed.value, PLAYERS)
 
-/*
- * Recycling bags: what is spent or swept comes back, reshuffled, if a bag ever runs dry.
+/**
+ * The two desks, once the server has made them.
  *
- * The seeds are the stable half of the reshuffle contract — `game/recycling.ts` appends the generation
- * and the pile's own digits. Two independent tags, because the two bags reshuffle on their own schedules
- * and a shared one would couple them.
+ * Null until then, and the game does not start until they exist — there is no local bag any more, so
+ * without these there is nothing to deal. `onMounted` builds them; `dealing` and `deskError` are what
+ * the player sees in the meantime.
  *
- * Note the plate arithmetic: `opening.remaining` is 35, not 36, because the starting plate never entered
- * the bag. Spend it and it enters the *pile*, so it can later be dealt out of a bag it was never in.
- * That is intended — a plate is a plate — and it means conservation is over 36, not 35.
+ * They are **not** stored. The board resets on reload, so a returning player starts the game again,
+ * and two fresh desks from the same seed deal exactly what they dealt before. Keeping their ids would
+ * resume a half-drawn bag against an empty board, which is a different game.
  */
-const plateBag = createRecyclingBag(opening.remaining, { seed: `${gameId.value}:reshuffle:plates` })
-const tileBag = createRecyclingBag(deck.tiles, { seed: `${gameId.value}:reshuffle:tiles` })
+let tileDesk: Desk | null = null
+let plateDesk: Desk | null = null
+
+/**
+ * The petal a dealt plate carries its token in.
+ *
+ * Cosmetic, and the client's business: a code is a colour and a value, and a plate rotates freely
+ * anyway. Drawn from its own seeded stream in deal order, so a replay puts them back where they were
+ * without the server having to care.
+ */
+const petals = createRandom(`${seed.value}:petals`)
+const nextPetal = (): number => Math.floor(petals() * PETAL_COUNT)
+
+/** A code from the wire, as the model wants it. */
+function specOf(code: number): TileSpec {
+  const spec = tileFromCode(code)
+  if (!spec) throw new Error(`the desk dealt ${code}, which is not a tile`)
+  return spec
+}
 
 /** Plates dealt into the source this round. The round is over as a supply once this reaches its quota. */
 const platesDealt = shallowRef(0)
@@ -278,10 +355,10 @@ const platesDealt = shallowRef(0)
  * plate turns over. In multiplayer this is the server's job; keeping it here rather than in the model
  * means moving it there later changes one file, not the shape of the game state.
  */
-const dealtTokens = new Map<string, DealtPlate>()
+const dealtTokens = new Map<string, PlateSpec>()
 
 /**
- * Push a fresh lot onto the top of the source, drawing from the bags.
+ * Push a fresh lot onto the top of the source, drawing from the desks.
  *
  * The opening deal and every later restock both come through here, so the first lot cannot drift from
  * the rest. Draws the plate first and checks it: with no plate there is no lot, and dealing the tiles
@@ -289,13 +366,35 @@ const dealtTokens = new Map<string, DealtPlate>()
  *
  * **Room is checked before anything is drawn.** `pushLot` shifts the stack down and fails if the bottom
  * slot was occupied — and a draw made before that failure is a plate and four tiles gone from the game
- * for good. `hasRoomToShift` is exactly its precondition, so asking first is the whole fix.
+ * for good. `hasRoomToShift` is exactly its precondition, so asking first is the whole fix. That
+ * mattered when the bag was local; over the wire a wasted draw is gone from the server's desk too, and
+ * nothing on this side could put it back.
+ *
+ * A desk that refuses is the end of the supply, not a crash: the round simply stops restocking.
  */
-function dealLot(): boolean {
+async function dealLot(): Promise<boolean> {
+  if (!tileDesk || !plateDesk) return false
   if (!hasRoomToShift(tableau)) return false
-  const dealt = plateBag.draw(1)[0]
-  if (!dealt) return false
-  if (!pushLot(tableau, tileBag.draw(tableau.sourceTilesPerLot))) return false
+
+  /*
+   * The supply running out is a game state, not a failure — and the server refuses a draw it cannot
+   * cover rather than answering short, so the two would arrive as the same rejection. Asking what it
+   * last said is left is what tells them apart: below this line the round simply stops restocking,
+   * and anything that fails above it is genuinely the table not answering.
+   */
+  if (plateDesk.remaining() < 1) return false
+  if (tileDesk.remaining() < tableau.sourceTilesPerLot) return false
+
+  let dealt: PlateSpec
+  let tiles: TileSpec[]
+  try {
+    dealt = { ...specOf((await plateDesk.draw(1))[0] as number), petal: nextPetal() }
+    tiles = (await tileDesk.draw(tableau.sourceTilesPerLot)).map(specOf)
+  } catch (error) {
+    reportDeskTrouble(error)
+    return false
+  }
+  if (!pushLot(tableau, tiles)) return false
 
   // pushLot puts the new plate at the top of the stack; remember what it is carrying until it flips.
   const plate = tableau.plateInSourceLot(0)
@@ -312,6 +411,9 @@ function dealLot(): boolean {
  * later plate has to connect to it, and every drafted tile needs an empty petal to sit in, so without it
  * the board is unplayable and *Put* has nowhere to go.
  *
+ * It needs no server: the opening codes come from the seed and the desk is told to hold them back, so
+ * the board is drawn before anything has been asked for. Only the source waits.
+ *
  * **Stems take ordinary tile slots**, so they are a cost as well as a gift: three stems is three fewer
  * places to put a drafted tile until they are spent. `freeDrawerSlots` counts them as taken without
  * knowing what they are, so the drawer's capacity rules need no special case.
@@ -319,15 +421,11 @@ function dealLot(): boolean {
  * Everything here happens once, before the first turn.
  */
 {
-  const start = opening.starting[0]
+  const start = opening[0]
   const centre = tableau.addPlate({ kind: 'board', hole: BOARD_CENTRE })
-  if (start && centre) {
+  if (start !== undefined && centre) {
     // `fixed`: the plate's own tile, part of the plate and never separable from it.
-    tableau.addTile(
-      { color: start.color, value: start.value },
-      { kind: 'onPlate', plateId: centre.id, petal: start.petal },
-      { fixed: true },
-    )
+    tableau.addTile(specOf(start), { kind: 'onPlate', plateId: centre.id, petal: nextPetal() }, { fixed: true })
   }
 
   const stems = settings.value?.initialStems ?? DEFAULT_STEM_COUNT
@@ -719,8 +817,8 @@ const CARD_SAFETY_MS = 4000
 interface Announcement {
   readonly label: string
   readonly n: number
-  /** Run once this card is fully up. See `cardWork`. */
-  readonly work?: () => void
+  /** Run once this card is fully up, and awaited before the hold starts. See `cardWork`. */
+  readonly work?: () => void | Promise<void>
 }
 
 /** What the card is announcing, or null while play is live. */
@@ -766,10 +864,20 @@ function finishAnnouncement(): void {
  * bar came back. Doing it first costs nothing visible — the scene eases pieces into place, so they still
  * arrive while the card is fading in — and leaves the card's whole life on an unblocked main thread.
  */
-let cardWork: (() => void) | null = null
+let cardWork: (() => void | Promise<void>) | null = null
+
+/**
+ * Which card is up, as a number that only ever increases.
+ *
+ * The work behind a card is a network round trip now, so it can finish after its card has already been
+ * given up on — `CARD_SAFETY_MS` moves on regardless, and an unmount clears everything. Comparing the
+ * token on the way back is what stops a late answer restarting a card that has gone.
+ */
+let cardToken = 0
 
 function showCard(card: Announcement): void {
   clearCardTimers()
+  cardToken++
   cardWork = card.work ?? null
   announcing.value = card
   cardVisible.value = true
@@ -785,7 +893,7 @@ function announce(cards: readonly Announcement[]): void {
 }
 
 /** A turn card, optionally restocking behind it once it is up. */
-function announceTurn(turn: number, work?: () => void): void {
+function announceTurn(turn: number, work?: () => void | Promise<void>): void {
   announce([{ label: 'Turn', n: turn, work }])
 }
 
@@ -796,7 +904,7 @@ function announceTurn(turn: number, work?: () => void): void {
  * time to say it. The restock rides on the *turn* card, which is the one the player is watching when
  * the new lot needs to appear.
  */
-function announceRound(round: number, work?: () => void): void {
+function announceRound(round: number, work?: () => void | Promise<void>): void {
   announce([{ label: 'Round', n: round }, { label: 'Turn', n: 1, work }])
 }
 
@@ -807,9 +915,16 @@ function announceRound(round: number, work?: () => void): void {
  * always been there: the card is opaque, the plate and its tiles appear underneath it, and the card
  * then leaves to reveal them.
  */
-function onCardShown(): void {
-  cardWork?.()
+async function onCardShown(): Promise<void> {
+  const work = cardWork
+  const mine = cardToken
   cardWork = null
+
+  // Awaited, so the hold begins once the lot is actually there. The restock is a request now, and
+  // starting the clock before it lands would let the card leave over an empty slot.
+  await work?.()
+  if (mine !== cardToken) return
+
   cardTimers.push(setTimeout(() => { cardVisible.value = false }, CARD_HOLD_MS))
   cardTimers.push(setTimeout(finishAnnouncement, CARD_HOLD_MS + CARD_LEAVE_MS))
 }
@@ -849,9 +964,9 @@ function revealEmptiedLots(): void {
  * `shouldRefill` owns the conditions — newest lot touched, round has a plate left, room to shift into.
  * Once the round's plates are gone the source only shrinks, which is what makes a round finite.
  */
-function beginTurn(): void {
+async function beginTurn(): Promise<void> {
   if (!shouldRefill(tableau, { platesDealt: platesDealt.value, platesPerRound })) return
-  if (dealLot()) revision.value++
+  if (await dealLot()) revision.value++
 }
 
 /**
@@ -1104,13 +1219,18 @@ function recoverPlate(id: string, receipt: DiscardReceipt): PlateSpec | null {
 /**
  * Put a whole event's worth of spent items into the piles.
  *
- * **One call per bag per event, never one per item.** The pile sorts each batch as it arrives, which is
- * what keeps a reshuffle independent of the order the player happened to click; batches of one would
- * make that sort a no-op and let click order back into the seed (game/recycling.ts).
+ * **One call per desk per event, never one per item.** The server sorts each batch as it arrives, which
+ * is what keeps a reshuffle independent of the order the player happened to click; batches of one would
+ * make that sort a no-op and let click order back into the seed (packages/rules/src/desk.ts).
+ *
+ * Not awaited by its callers: the tiles have already left the board, and the desk queues the request
+ * behind whatever else is in flight, so a slow round trip delays nothing the player is looking at. A
+ * failure is logged rather than surfaced — the pile matters to a reshuffle that may never happen, and
+ * interrupting a turn over it would be the larger harm.
  */
 function recycle(tiles: readonly TileSpec[], plates: readonly PlateSpec[]): void {
-  tileBag.discard(tiles)
-  plateBag.discard(plates)
+  void tileDesk?.discard(tiles.map(tileCode)).catch(reportDeskTrouble)
+  void plateDesk?.discard(plates.map(tileCode)).catch(reportDeskTrouble)
 }
 
 function applyPayment(): void {
@@ -1465,6 +1585,33 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         <strong>{{ totalScore }}</strong>
       </p>
     </section>
+
+    <!--
+      The desks are made before the game can start, and said so plainly if they cannot be.
+
+      An unreachable table used to be impossible: the bag was local, so a game either ran or the page
+      was broken. Now it is an ordinary thing that can happen — the server is not started, or it is
+      running rules this page is not — and neither reads as anything at all without being said.
+    -->
+    <div
+      v-if="dealing || deskTrouble"
+      class="table-state"
+      role="status"
+    >
+      <p v-if="deskTrouble">
+        {{ deskTrouble }}
+      </p>
+      <p v-else>
+        Dealing…
+      </p>
+      <RouterLink
+        v-if="deskTrouble"
+        to="/"
+        class="table-back"
+      >
+        Back to the menu
+      </RouterLink>
+    </div>
   </div>
 </template>
 
@@ -1704,5 +1851,40 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .rotate-button:focus-visible {
   outline: 2px solid #8fe6c0;
   outline-offset: 2px;
+}
+
+/* ── waiting for the table ─────────────────────────────────────────────────── */
+
+/*
+ * Over the board rather than beside it, because until the desks exist the board is not a game yet —
+ * a starting plate and nothing to draft. Quiet while it is only slow; it is usually gone in a blink.
+ */
+.table-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  background: rgb(12 14 18 / 88%);
+  color: #cfd4de;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.table-state p {
+  max-width: 34ch;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.table-back {
+  color: #e8c878;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 </style>
