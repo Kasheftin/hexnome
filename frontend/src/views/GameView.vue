@@ -756,7 +756,18 @@ const finalGroups = computed(() => {
   )
 })
 
-const isFinalRound = computed(() => count.value.round >= (totalRounds.value || 1))
+/**
+ * Was the round this panel is showing the last one?
+ *
+ * **Not** "is the current round the last": by the time the panel is up the state has already moved
+ * on — the rules close a round the moment the final player passes — so `count.round` is the round
+ * about to be *played*, and reading it here called round 3 the end of a four-round game. The state
+ * says outright when there is nothing after this, so it is asked instead.
+ */
+const isFinalRound = computed(() => {
+  void revision.value
+  return state.finished
+})
 
 /**
  * Put the results panel away and start playing again.
