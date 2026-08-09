@@ -99,6 +99,7 @@ import {
   COLORS,
   HEX_SIZE,
   SOURCE_TILES_PER_LOT,
+  departureMillis,
 } from '@/scene/constants'
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
 import {
@@ -474,6 +475,15 @@ function commit(command: Command): boolean {
   void plateDesk?.discard(result.toDesk.plates.map(tileCode)).catch(reportDeskTrouble)
   return true
 }
+
+/**
+ * The pieces this payment is spending, handed to the scene to fly off.
+ *
+ * A prop rather than a call on the component: it lives inside `TresCanvas`, which is its own
+ * renderer, and a template ref across that boundary stays null — which is exactly how the first
+ * attempt failed silently, paying instantly while looking like it waited.
+ */
+const spending = shallowRef<readonly string[]>([])
 
 const targetCells = shallowRef<Axial[]>([])
 const targetValid = shallowRef(false)
@@ -1191,6 +1201,9 @@ function onSelectPayment(id: string): void {
  */
 function applyPayment(): void {
   const current = phase.value
+  // The bar is hidden while the pieces fly, so this cannot normally be reached twice — but a keypress
+  // or a stale click should not be able to pay the same price again.
+  if (settling.value) return
   if (current.kind !== 'paying' || !canApply.value) return
 
   const item = current.item
@@ -1199,16 +1212,54 @@ function applyPayment(): void {
     : board().plate(item.id)?.location
   if (!to) return
 
-  // Back where it came from, so the command starts from the board the rules expect.
-  if (item.kind === 'tile') board().moveTile(item.id, current.origin as TileLocation)
-  else board().movePlate(item.id, current.origin as PlateLocation)
+  /*
+   * The pieces leave first, and the turn waits for them.
+   *
+   * Applying at once would end the turn on the same frame, and ending a turn hands the view to the
+   * next player — so the payment would be paid on a board nobody is looking at any more. The flight
+   * is told to begin here, before the model changes, and the turn follows it.
+   *
+   * `settling` closes Apply while it plays, so a second press cannot pay twice.
+   */
+  settling.value = true
+  spending.value = [...current.selected]
+  settleTimer = window.setTimeout(() => {
+    settleTimer = null
+    settling.value = false
+    spending.value = []
+    commitPayment(item, to, current.origin, current.selected)
+  }, departureMillis(current.selected.length))
+}
+
+/** Whether a payment is mid-flight. Nothing else may happen to the turn until it lands. */
+const settling = shallowRef(false)
+let settleTimer: number | null = null
+onBeforeUnmount(() => {
+  if (settleTimer !== null) window.clearTimeout(settleTimer)
+})
+
+/**
+ * The payment itself, once its pieces have gone.
+ *
+ * The placement is put back where it came from and the rules do the whole turn: the log records
+ * **committed turns**, so a `put` carries the placement and its payment together, and the live path
+ * has to start from the same board a replay would.
+ */
+function commitPayment(
+  item: { kind: 'tile' | 'plate', id: string },
+  to: TileLocation | PlateLocation,
+  origin: TileLocation | PlateLocation,
+  paying: readonly string[],
+): void {
+  if (item.kind === 'tile') board().moveTile(item.id, origin as TileLocation)
+  else board().movePlate(item.id, origin as PlateLocation)
 
   const played = commit({
     kind: 'put',
     seat: activeIndex.value,
     item,
     to,
-    paying: [...current.selected],
+    paying: [...paying],
     // How the plate was turned in the bay. Turning is not a turn and so not a command of its own,
     // but it decides which cell each petal lands on — a replay without it refuses the placement.
     rotation: item.kind === 'plate' ? board().plate(item.id)?.rotation : undefined,
@@ -1358,6 +1409,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
       <TableauView
         :tableau="board()"
+        :spending="spending"
         :source="source()"
         :drawer="drawerShape"
         :game-id="gameId"
@@ -1438,7 +1490,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
     <Transition name="bar">
       <ActionBar
-        v-if="announcing === null && !showResults && !gameOver"
+        v-if="announcing === null && !showResults && !gameOver && !settling"
         :phase="phase"
         :options="options"
         :selection="selection"

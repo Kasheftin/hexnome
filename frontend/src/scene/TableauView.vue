@@ -50,6 +50,9 @@ import { petalCell } from '@hexnome/rules/plate'
 import type { DraftTileState } from '@hexnome/rules/draft'
 import type { PlateLocation, Tableau, TileLocation } from '@hexnome/rules/tableau'
 import {
+  DEPART_QUEUE,
+  DEPART_SECONDS,
+  DEPART_STAGGER,
   DRAWER_TILE_FILL,
   DRAWER_TILE_Y,
   SOURCE_PLATE_Y,
@@ -167,6 +170,16 @@ const props = defineProps<{
    * this becomes required and the fallback below goes with it.
    */
   source?: Tableau
+  /**
+   * Ids being spent on the current payment, so they can be flown off before the turn ends.
+   *
+   * A prop rather than a method on a template ref: this component is rendered inside `TresCanvas`,
+   * which is its own renderer, and a ref reaching across that boundary is null. Every other
+   * instruction here arrives the same way.
+   *
+   * Watched rather than read, and each list is acted on once — the flight is an event, not a state.
+   */
+  spending?: readonly string[]
   /**
    * Bumped by the owner on every model mutation.
    *
@@ -294,9 +307,13 @@ interface View {
  * keeps its mesh for a moment and flies out to the right, shrinking as it goes, and the payment
  * leaves **one at a time** so the price is legible as a count rather than a puff.
  *
- * The mesh is off the model by then: nothing looks it up, nothing can pick it, and it is disposed at
- * the end of its flight. Departures survive a seat change on purpose — they belong to the payment
- * that made them, not to whichever board is on screen.
+ * Started **deliberately**, by {@link spend}, and never inferred from a view going missing — because
+ * everything on the table goes missing when the view switches seats, and a whole board flying away
+ * because somebody else's turn began is a bug that looks like a feature.
+ *
+ * The mesh leaves the view maps as it sets off: nothing looks it up, nothing can pick it, and it is
+ * disposed at the end of its flight. A departure outlives the seat change that follows the payment,
+ * which is the point — it belongs to the turn that spent it.
  */
 interface Departure {
   readonly object: Object3D
@@ -310,17 +327,6 @@ interface Departure {
   readonly fromY: number
   readonly scale: number
 }
-
-/**
- * How long one piece takes to leave, and the gap between one and the next.
- *
- * Long enough to be read rather than merely noticed: the point is to show the *price*, so the eye
- * should be able to count what left.
- */
-const DEPART_SECONDS = 0.9
-const DEPART_STAGGER = 0.16
-/** How many leave in single file before the rest go together. */
-const DEPART_QUEUE = 7
 
 const departing: Departure[] = []
 
@@ -1487,10 +1493,54 @@ function reconcileViews(): void {
    * object stays on the table, still clickable, long after the rules say it was spent.
    */
   const liveStems = new Set(props.tableau.stems().map(stem => stem.id))
-  let leaving = 0
-  /** Hand a view over to the departure animation, which owns its disposal from here. */
-  const send = (view: View): void => {
+  for (const [id, view] of [...stemViews]) {
+    if (liveStems.has(id)) continue
+    drop(view)
+    stemViews.delete(id)
+  }
+  for (const [id, view] of [...plateViews]) {
+    // Both models: a source plate is as real as one in a bay, and sweeping it would delete the column.
+    if (plateOf(id)) continue
+    drop(view)
+    plateViews.delete(id)
+  }
+  for (const [id, view] of [...tileViews]) {
+    if (tileOf(id)) continue
+    drop(view)
+    tileViews.delete(id)
+  }
+}
+
+/** Take a view off the table at once. What most disappearances are: swept, replaced, or not ours. */
+function drop(view: View): void {
+  if (view.decor) disposeDraftDecor(view.decor)
+  if (view.anchor) disposeAnchorVisual(view.anchor)
+  view.object.parent?.remove(view.object)
+  scene.value?.remove(view.object)
+  owners.delete(view.object)
+}
+
+/**
+ * Send these pieces off to the discard pile, and say how long they will take.
+ *
+ * Called **before** the payment is applied, so the flight starts from where each piece actually sits
+ * and the model still agrees with the table. Their views are handed over here and gone from the maps,
+ * so the reconcile that follows the payment finds nothing to do.
+ *
+ * Deliberately not inferred from a view going missing. Everything on the table disappears when the
+ * view switches seats, and a board flying away because somebody else's turn began is not a payment —
+ * it is a bug that looks like a feature.
+ */
+function spend(ids: readonly string[]): void {
+  let queued = 0
+  for (const id of ids) {
+    const view = tileViews.get(id) ?? stemViews.get(id) ?? plateViews.get(id)
+    if (!view) continue
+    tileViews.delete(id)
+    stemViews.delete(id)
+    plateViews.delete(id)
     owners.delete(view.object)
+
     /*
      * Onto the scene. A tile in a petal is parented to its plate, so its position is local to it —
      * and the flight below is in world space. Whatever it was riding, it leaves alone.
@@ -1501,33 +1551,17 @@ function reconcileViews(): void {
       object: view.object,
       decor: view.decor,
       anchor: view.anchor,
-      // Single file for the first handful. A round-end sweep is two dozen pieces, and queueing all
-      // of them would take longer than the panel that follows.
-      delay: Math.min(leaving++, DEPART_QUEUE) * DEPART_STAGGER,
+      // Single file for the first handful, so a price of four is legible as four.
+      delay: Math.min(queued++, DEPART_QUEUE) * DEPART_STAGGER,
       t: 0,
       fromX: view.screenX,
       fromY: view.screenY,
       scale: view.scale,
     })
   }
-
-  for (const [id, view] of [...stemViews]) {
-    if (liveStems.has(id)) continue
-    send(view)
-    stemViews.delete(id)
-  }
-  for (const [id, view] of [...plateViews]) {
-    // Both models: a source plate is as real as one in a bay, and sweeping it would delete the column.
-    if (plateOf(id)) continue
-    send(view)
-    plateViews.delete(id)
-  }
-  for (const [id, view] of [...tileViews]) {
-    if (tileOf(id)) continue
-    send(view)
-    tileViews.delete(id)
-  }
 }
+
+watch(() => props.spending, ids => { if (ids?.length) spend(ids) })
 
 /**
  * Fly the spent pieces out, and dispose of each as it goes.

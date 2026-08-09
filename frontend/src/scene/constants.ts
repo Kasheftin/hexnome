@@ -640,3 +640,24 @@ export const COLORS = {
   gridLine: '#333b47',
   canvasClear: '#0d0f13',
 } as const
+
+
+/* ── spending ────────────────────────────────────────────────────────────────── */
+
+/**
+ * How a paid piece leaves the table.
+ *
+ * Long enough to be read rather than merely noticed: the point is to show the *price*, so the eye
+ * should be able to count what left. The turn waits for it — see `GameView.applyPayment` — which is
+ * why the arithmetic lives here rather than inside the scene, where the caller could not reach it.
+ */
+export const DEPART_SECONDS = 0.9
+export const DEPART_STAGGER = 0.16
+/** How many leave in single file before the rest go together. */
+export const DEPART_QUEUE = 7
+
+/** How long spending this many pieces takes, in milliseconds. Zero for nothing. */
+export function departureMillis(count: number): number {
+  if (count <= 0) return 0
+  return (Math.min(count - 1, DEPART_QUEUE) * DEPART_STAGGER + DEPART_SECONDS) * 1000
+}
