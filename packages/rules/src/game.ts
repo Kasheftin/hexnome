@@ -510,7 +510,7 @@ function applyPut(
     : plateTarget(board, item.id)
   if (!target) { unturn(); return refuse(`${item.id} is not in seat ${seat.seat}'s drawer`) }
 
-  const purse = purseOf(board, item.id)
+  const purse = paymentPurse(board, item.id)
   if (!canAffordPlacement(target, purse)) { unturn(); return refuse('that cannot be paid for') }
 
   const cost = paymentCost(target)
@@ -588,12 +588,22 @@ function plateTarget(board: Tableau, id: string): PaymentTarget | undefined {
   return { color: token.color, value: token.value }
 }
 
-/** Everything in the drawer that could pay, minus the item being placed. */
-function purseOf(board: Tableau, exclude: string): Payer[] {
+/**
+ * Everything in a drawer that could pay, minus the item being placed.
+ *
+ * **Exported so there is one of it.** The view needs the same list to light the chips a player may
+ * spend, and a second copy written by hand is how a payment came to be offered and then refused: that
+ * one omitted a tile's colour, so every purple in the drawer could only pay for something sharing its
+ * *value*, and paying for a purple with purples was impossible.
+ *
+ * A payer is described completely or not at all. Stems carry neither colour nor value, which is what
+ * makes them wild — see `payment.ts`.
+ */
+export function paymentPurse(board: Tableau, exclude?: string): Payer[] {
   const purse: Payer[] = []
   for (const tile of board.tiles()) {
     if (tile.id === exclude || tile.location.kind !== 'drawer') continue
-    purse.push({ id: tile.id, kind: 'tile', value: tile.value })
+    purse.push({ id: tile.id, kind: 'tile', color: tile.color, value: tile.value })
   }
   for (const stem of board.stems()) purse.push({ id: stem.id, kind: 'stem' })
   for (const plate of board.plates()) {

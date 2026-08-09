@@ -56,6 +56,7 @@ import {
   createGame,
   draftItems,
   needsDeal,
+  paymentPurse,
   replayGame,
   type Command,
   type GameOptions,
@@ -1087,33 +1088,17 @@ const payTarget = computed<PaymentTarget | null>(() => {
 })
 
 /**
- * Everything in the drawer that could pay: loose tiles, plates in bays, and stems.
+ * What the player may spend, from the rules rather than from here.
  *
- * A plate offers itself rather than its token, because spending it spends the whole plate — the same
- * reason a plate drafts as one object.
+ * This used to be built by hand, and the hand-built one dropped a tile's colour — so the bar lit a
+ * payment the rules then refused, which is a confusing way to be told no. One definition, in the
+ * module that judges it.
  */
 const purse = computed<Payer[]>(() => {
   void revision.value
-  const out: Payer[] = board().tiles()
-    .filter(tile => tile.location.kind === 'drawer')
-    .map(tile => ({ id: tile.id, kind: 'tile' as const, color: tile.color, value: tile.value }))
-
-  for (const plate of board().plates()) {
-    if (plate.location.kind !== 'plateSlot') continue
-    const token = board().plateToken(plate.id)
-    if (token) out.push({ id: plate.id, kind: 'plate', color: token.color, value: token.value })
-  }
-  for (const stem of board().stems()) out.push({ id: stem.id, kind: 'stem' })
-  return out
+  return paymentPurse(board())
 })
 
-/**
- * Drawer items that could actually be placed — those whose price this drawer can meet.
- *
- * A stem is never in here: it cannot go on the board at all, so "can you afford it" does not arise.
- * The purse for each candidate excludes the candidate itself, since placing it takes it out of the
- * drawer before anything is paid.
- */
 const placeable = computed(() => {
   void revision.value
   const all = purse.value

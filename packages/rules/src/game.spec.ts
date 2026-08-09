@@ -5,6 +5,7 @@ import {
   createGame,
   draftItems,
   needsDeal,
+  paymentPurse,
   replayGame,
   type Command,
   type GameOptions,
@@ -606,6 +607,60 @@ describe('putting something on the board', () => {
     expect(there?.rotation).toBe(put.rotation)
     // And the board is the same board, tile for tile — which is what the score is counted from.
     expect(snapshot(rebuilt).seats[0]).toEqual(snapshot(state).seats[0])
+  })
+
+  /**
+   * Paying by colour.
+   *
+   * The purse the rules judge a payment against has to describe each payer completely — a drawer tile
+   * arriving without its colour can only ever pay for something sharing its *value*, so a perfectly
+   * ordinary "spend two purples on a purple" is refused with the button still lit. Which is exactly
+   * what a second, hand-written purse in the view produced.
+   */
+  it('accepts a payment made on colour, with stems making up the rest', () => {
+    const state = createGame(options({ players: 1 }))
+    const seat = state.seats[0]!
+    const opening = seat.tableau.tilesOnBoard()[0]!
+    const colour = opening.color
+
+    // A dear tile of the opening's colour, and two cheaper ones of the same colour to help pay.
+    const held = seat.tableau.addTile({ color: colour, value: 5 }, { kind: 'drawer', slot: 3 })!
+    const payA = seat.tableau.addTile({ color: colour, value: 2 }, { kind: 'drawer', slot: 4 })!
+    const payB = seat.tableau.addTile({ color: colour, value: 3 }, { kind: 'drawer', slot: 5 })!
+    const stems = seat.tableau.stems().map(stem => stem.id)
+
+    const plate = seat.tableau.plates()[0]!
+    const petal = [0, 1, 2, 3, 4, 5].find(p =>
+      seat.tableau.canPlaceTile({ kind: 'onPlate', plateId: plate.id, petal: p }, held.id))
+    expect(petal).toBeDefined()
+
+    // Four items for a value-5 tile: two purples and two wilds.
+    const result = applyCommand(state, {
+      kind: 'put',
+      seat: 0,
+      item: { kind: 'tile', id: held.id },
+      to: { kind: 'onPlate', plateId: plate.id, petal: petal! },
+      paying: [payA.id, payB.id, stems[0] as string, stems[1] as string],
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    expect(seat.tableau.tile(held.id)?.location).toMatchObject({ kind: 'onPlate' })
+    // The two tiles are owed back to the desk; the stems are not, an anchor minted them.
+    expect(result.ok && result.toDesk.tiles).toHaveLength(2)
+  })
+
+  /* One purse, described once. The view used to build its own, and the two disagreed. */
+  it('describes every payer completely', () => {
+    const state = createGame(options({ players: 1 }))
+    const seat = state.seats[0]!
+    const tile = seat.tableau.addTile({ color: 3, value: 4 }, { kind: 'drawer', slot: 3 })!
+
+    const purse = paymentPurse(seat.tableau)
+    expect(purse.find(payer => payer.id === tile.id)).toEqual({
+      id: tile.id, kind: 'tile', color: 3, value: 4,
+    })
+    // Stems have neither, which is what makes them wild rather than an oversight.
+    expect(purse.filter(payer => payer.kind === 'stem').length).toBe(seat.tableau.stems().length)
   })
 
   it('is refused from a seat whose turn it is not', () => {
