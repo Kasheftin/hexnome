@@ -44,7 +44,7 @@ import type { Axial } from './hex'
 import { PETAL_COUNT } from './plate'
 import { canAffordPlacement, paymentCost, type Payer, type PaymentTarget } from './payment'
 import { createRandom, type Random } from './random'
-import { hasRoomToShift, pushLot, shiftLotsDown, sourceContents } from './source'
+import { hasRoomToShift, pushLot, sourceContents } from './source'
 import {
   createTableau,
   type PlateLocation,
@@ -395,7 +395,8 @@ export function applyCommand(state: GameState, command: Command): CommandResult 
 
     const petal = Math.floor(state.petals() * PETAL_COUNT)
     const token: PlateSpec = { ...command.plate, petal }
-    shiftLotsDown(state.source)
+    // `pushLot` shifts the column down itself. Doing it here as well moved everything twice and left
+    // a hole between the new lot and the one before it.
     if (!pushLot(state.source, command.tiles)) return refuse('the lot would not fit')
 
     const plate = state.source.plateInSourceLot(0)

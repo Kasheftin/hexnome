@@ -317,6 +317,27 @@ describe('dealing', () => {
     expect(applyCommand(state, lot(3))).toMatchObject({ ok: false })
   })
 
+  /*
+   * The column is a stack: a fresh lot goes to 0 and everything already there moves down exactly one.
+   * Two shifts leave a hole between the new lot and the old one — which conservation cannot see,
+   * because nothing is lost by moving twice, and a single-lot test cannot see either.
+   */
+  it('puts each new lot directly on top of the last, with no gap', () => {
+    const state = createGame(options())
+    play(state, lot(1))
+    play(state, lot(2))
+
+    expect(state.source.plateInSourceLot(0)).toBeDefined()
+    expect(state.source.plateInSourceLot(1)).toBeDefined()
+    expect(state.source.plateInSourceLot(2)).toBeUndefined()
+    expect(state.source.tilesInSourceLot(1)).toHaveLength(TILES_PER_LOT)
+
+    // And a third keeps the run unbroken.
+    play(state, lot(3))
+    for (const at of [0, 1, 2]) expect(state.source.plateInSourceLot(at)).toBeDefined()
+    expect(state.source.plateInSourceLot(3)).toBeUndefined()
+  })
+
   it('keeps the plate\'s token out of the model until its lot is bare', () => {
     const state = createGame(options())
     play(state, lot(1))
