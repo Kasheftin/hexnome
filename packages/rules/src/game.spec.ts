@@ -74,6 +74,8 @@ function snapshot(state: GameState) {
       name: seat.name,
       passed: seat.passed,
       banked: [...seat.banked],
+      // A receipt a replay failed to reproduce would pay for the same enclosure twice.
+      paidAnchors: [...seat.paidAnchors].sort(),
       ...census(seat.tableau),
     })),
   }

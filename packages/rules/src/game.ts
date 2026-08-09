@@ -76,6 +76,14 @@ export interface SeatState {
   banked: number[]
   /** Out of *this* round — cleared when the round closes, not a state of the game. */
   passed: boolean
+  /**
+   * Anchors this seat has already been paid for.
+   *
+   * An enclosure pays once. Keyed by the plate rather than by the cell for an internal anchor,
+   * because a plate can be moved and takes its hole with it; an external anchor is a hole *between*
+   * plates, which only ever closes, so its cell is stable.
+   */
+  readonly paidAnchors: Set<string>
 }
 
 export interface GameState {
@@ -224,6 +232,7 @@ export function createGame(options: GameOptions): GameState {
       tableau,
       banked: [],
       passed: false,
+      paidAnchors: new Set(),
     }
   })
 
@@ -501,9 +510,39 @@ function applyPut(
     if (receipt.kind === 'plate' && receipt.plate) plates.push(receipt.plate)
   }
 
+  awardEnclosedAnchors(seat)
+
   const returns = { tiles, plates }
   const after = endTurn(state)
   return done({ tiles: [...returns.tiles, ...after.tiles], plates: [...returns.plates, ...after.plates] })
+}
+
+/**
+ * Hand out stems for any anchor this seat has enclosed and not yet been paid for.
+ *
+ * On payment rather than on the placement landing: until the price is paid the placement is only
+ * provisional, so cancelling has to leave the player with nothing gained.
+ *
+ * Every anchor is checked rather than only the one just touched. It costs nothing at this scale and
+ * the award then cannot be missed by some future move that encloses a plate another way.
+ * `canPlaceTile` has already refused any placement whose reward would not fit, so the slots are there.
+ */
+function awardEnclosedAnchors(seat: SeatState): void {
+  const board = seat.tableau
+  for (const anchor of board.anchors()) {
+    const key = anchor.kind === 'external'
+      ? `external:${anchor.cell.q},${anchor.cell.r}`
+      : `internal:${board.coverageAt(anchor.cell)?.plateId ?? `${anchor.cell.q},${anchor.cell.r}`}`
+    if (seat.paidAnchors.has(key) || !board.anchorIsEnclosed(anchor.cell)) continue
+    seat.paidAnchors.add(key)
+
+    // The rate for its kind, plus the strict bonus if its ring earns one.
+    for (let i = 0; i < board.anchorReward(anchor); i++) {
+      const slot = board.freeDrawerSlots()[0]
+      if (slot === undefined) break
+      board.addStem(slot)
+    }
+  }
 }
 
 /** What a drawer tile costs to place. A plate is described by the token it carries. */

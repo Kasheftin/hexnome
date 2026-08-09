@@ -156,6 +156,18 @@ const props = defineProps<{
    */
   payStates: ReadonlyMap<string, DraftTileState> | null
   /**
+   * The shared source, which is a **different model** from the seat's board and drawer.
+   *
+   * One per game rather than one per player — everybody drafts from the same column, so it cannot
+   * belong to any one seat's tableau. Read-only here: a source item is never dragged (`canDragTile`
+   * refuses it), so every write below still goes to `tableau` and only lookups have to consult both.
+   *
+   * **Optional only while the transition is half done.** `GameView` still runs one tableau holding
+   * board, drawer and source together; when it moves to the per-seat state (`@hexnome/rules/game`)
+   * this becomes required and the fallback below goes with it.
+   */
+  source?: Tableau
+  /**
    * Bumped by the owner on every model mutation.
    *
    * The tableau is plain mutable data, not reactive, so this is how the view learns that plates or
@@ -163,6 +175,20 @@ const props = defineProps<{
    */
   revision: number
 }>()
+
+/*
+ * Reading across the two models.
+ *
+ * The seat is asked first because that is where a piece usually is, and because an id can only ever
+ * be in one of them: ids carry the prefix of the tableau that minted them (`TableauOptions.idPrefix`),
+ * so "in both" cannot happen. Stems need no such thing — they only exist in a drawer.
+ */
+const sourceOf = (): Tableau => props.source ?? props.tableau
+const plateOf = (id: string) => props.tableau.plate(id) ?? sourceOf().plate(id)
+const tileOf = (id: string) => props.tableau.tile(id) ?? sourceOf().tile(id)
+const both = <T,>(a: readonly T[], b: readonly T[]): T[] => (props.source ? [...a, ...b] : [...a])
+const everyPlate = () => both(props.tableau.plates(), sourceOf().plates())
+const everyTile = () => both(props.tableau.tiles(), sourceOf().tiles())
 
 const emit = defineEmits<{
   /** Cells to mark as the drop target, and whether dropping there is legal. */
@@ -186,7 +212,7 @@ const emit = defineEmits<{
 const { scene, camera, renderer, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
 const layout = useDrawerLayout(() => props.drawer)
-const sourceLayout = useSourceLayout(() => props.tableau.sourceLots, () => props.drawer)
+const sourceLayout = useSourceLayout(() => sourceOf().sourceLots, () => props.drawer)
 
 const tileGeometry: BufferGeometry = createTileGeometry({
   circumradius: TILE_SIZE,
@@ -401,7 +427,7 @@ function sourceTileScale(upp: number, plateHeightPx: number): number {
  */
 function draftKeyOfTile(tile: { id: string, fixed: boolean, location: TileLocation }): string {
   if (!tile.fixed || tile.location.kind !== 'onPlate') return tile.id
-  const plate = props.tableau.plate(tile.location.plateId)
+  const plate = plateOf(tile.location.plateId)
   return plate?.location.kind === 'source' ? plate.id : tile.id
 }
 
@@ -422,7 +448,7 @@ const scatterCache = new Map<string, ScatterOffset[]>()
 function scatterFor(heapKey: string): ScatterOffset[] {
   const cached = scatterCache.get(heapKey)
   if (cached) return cached
-  const computed = sourceScatter(props.gameId, heapKey, props.tableau.sourceTilesPerLot)
+  const computed = sourceScatter(props.gameId, heapKey, sourceOf().sourceTilesPerLot)
   scatterCache.set(heapKey, computed)
   return computed
 }
@@ -550,10 +576,10 @@ function pickSourceItem(canvasX: number, canvasY: number): string | null {
         if (owner.kind === 'stem') return null
         if (owner.kind === 'plate') {
           // The slab of a revealed source plate. A face-down one is not draftable and absorbs the press.
-          const plate = props.tableau.plate(owner.id)
+          const plate = plateOf(owner.id)
           return plate?.location.kind === 'source' && !plate.faceDown ? owner.id : null
         }
-        const tile = props.tableau.tile(owner.id)
+        const tile = tileOf(owner.id)
         if (!tile) return null
         // A loose source tile answers for itself; a plate's token answers for its plate.
         if (tile.location.kind === 'source') return tile.id
@@ -1084,7 +1110,8 @@ onBeforeRender(({ delta }) => {
 
   // Plates first: tiles are positioned through them.
   for (const [id, view] of plateViews) {
-    const plate = props.tableau.plate(id)
+    // Both models: the source column is drawn by this loop too.
+    const plate = plateOf(id)
     if (!plate) continue
 
     // Lit exactly when the plate's six petals are full — including provisionally, which is why this
@@ -1186,7 +1213,7 @@ onBeforeRender(({ delta }) => {
   }
 
   for (const [id, view] of tileViews) {
-    const tile = props.tableau.tile(id)
+    const tile = tileOf(id)
     if (!tile) continue
 
     /*
@@ -1321,7 +1348,7 @@ function reconcileViews(): void {
   // revision watcher will call again, and the load itself calls once.
   if (disposed || symbolTextures.length === 0) return
 
-  for (const plate of props.tableau.plates()) {
+  for (const plate of everyPlate()) {
     const existing = plateViews.get(plate.id)
     if (existing) {
       // A plate that turned over: its face is baked into the mesh, so rebuild rather than restyle.
@@ -1359,7 +1386,7 @@ function reconcileViews(): void {
     unregisters.push(registerGrabbable(group))
   }
 
-  for (const tile of props.tableau.tiles()) {
+  for (const tile of everyTile()) {
     if (tileViews.has(tile.id)) continue
     const faceY = tileFaceY(tile.fixed)
     const mesh = new Mesh(tile.fixed ? tokenGeometry : tileGeometry, tileMaterialFor(tile.color))
@@ -1428,7 +1455,8 @@ function reconcileViews(): void {
     stemViews.delete(id)
   }
   for (const [id, view] of [...plateViews]) {
-    if (props.tableau.plate(id)) continue
+    // Both models: a source plate is as real as one in a bay, and sweeping it would delete the column.
+    if (plateOf(id)) continue
     if (view.decor) disposeDraftDecor(view.decor)
     if (view.anchor) disposeAnchorVisual(view.anchor)
     scene.value?.remove(view.object)
@@ -1436,7 +1464,7 @@ function reconcileViews(): void {
     plateViews.delete(id)
   }
   for (const [id, view] of [...tileViews]) {
-    if (props.tableau.tile(id)) continue
+    if (tileOf(id)) continue
     if (view.decor) disposeDraftDecor(view.decor)
     view.object.parent?.remove(view.object)
     owners.delete(view.object)
