@@ -28,9 +28,11 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { MAX_PLAYERS } from '../rules/deck'
 import { parseGameSettings, type GameSettings } from '../rules/gameSettings'
 import type { GameStatus, GameView, SeatClaim } from '../rules/wire'
+import { DeskService } from '../desk/desk.service'
 import { PrismaService } from '../prisma.service'
 import type { CreateGame } from './dto'
 import { HeadsGateway } from './heads.gateway'
+import { TurnsService } from './turns.service'
 
 /** Whoever creates the game sits here, and turn order starts from it. */
 const CREATOR_SEAT = 0
@@ -48,6 +50,8 @@ interface GameRow {
 export class GamesService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly desks: DeskService,
+    private readonly turns: TurnsService,
     private readonly heads: HeadsGateway,
   ) {}
 
@@ -145,10 +149,34 @@ export class GamesService {
       return this.viewOf(game, token)
     }
 
+    /*
+     * The desks are built here, in the same breath as the start.
+     *
+     * Not at creation, because a bag is built from the settings and how many people are at the table
+     * is not final until the last chair is taken. Not by the client either — it never sees a desk id
+     * now, and the deal is the server's. Two ids on the row are all the game needs to deal for the
+     * rest of its life.
+     */
+    const [tiles, plates] = await Promise.all([
+      this.desks.create(id, 'tiles'),
+      this.desks.create(id, 'plates'),
+    ])
+
     await this.prisma.game.updateMany({
       where: { id, status: 'waiting' },
-      data: { status: 'running', seq: { increment: 1 } },
+      data: {
+        status: 'running',
+        seq: { increment: 1 },
+        tileDeskId: tiles.id,
+        plateDeskId: plates.id,
+      },
     })
+
+    /*
+     * The first lot, before anybody is told the game has started — so a client that arrives on the
+     * notification finds a source to draft from rather than an empty column.
+     */
+    await this.turns.open(id)
 
     // A table that just filled is what everyone waiting is waiting for.
     const started = await this.rowOf(id)

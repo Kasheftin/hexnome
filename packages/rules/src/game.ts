@@ -187,6 +187,15 @@ export type Command =
   | { readonly kind: 'pass', readonly seat: number }
 
 /**
+ * A command a **player** may issue: everything except the deal.
+ *
+ * The deal carries what the desk dealt, and the desk is the server's — one a client could submit
+ * would be a client choosing its own tiles. Saying so in the type means the refusal is not only a
+ * check in `parseCommand` but a thing the compiler will not let a caller forget.
+ */
+export type PlayerCommand = Exclude<Command, { readonly kind: 'deal' }>
+
+/**
  * What a command did that the caller has to act on.
  *
  * Only the desk. Spent and swept material goes back to the pile, and the pile is on a server — so the

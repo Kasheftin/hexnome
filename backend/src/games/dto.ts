@@ -51,10 +51,30 @@ export function joinBody(raw: unknown): { readonly name: string } {
 }
 
 /**
+ * A submitted turn: which turn it is, what it was built on, and the intent itself.
+ *
+ * The `command` is passed through as `unknown` and read by `parseCommand` in the rules package, for
+ * the same reason `settings` is: there is one definition of what a readable command is, and it is
+ * the one the fold uses.
+ */
+export function submitBody(raw: unknown): { cmdId: string, prevSeq: number, command: unknown } {
+  const value = body(raw)
+  const { cmdId, prevSeq } = value
+  if (typeof cmdId !== 'string' || cmdId.length === 0 || cmdId.length > 36) {
+    throw new BadRequestException('cmdId must be a string of 1 to 36 characters')
+  }
+  if (typeof prevSeq !== 'number' || !Number.isInteger(prevSeq) || prevSeq < 0) {
+    throw new BadRequestException('prevSeq must be a whole number, 0 or more')
+  }
+  return { cmdId, prevSeq, command: value.command }
+}
+
+/**
  * The seat token from an `Authorization: Seat <token>` header, or empty.
  *
- * Empty is not an error: reading a game is public, because the id is already the capability to do
- * it. The token only decides which seat `you` names.
+ * Empty is not an error on a read: the id is already the capability to look at a table, and the token
+ * only decides which seat `you` names. On a submit it is everything — the seat comes from here and
+ * nowhere else, so a client cannot claim one.
  */
 export function seatToken(header: string | undefined): string {
   const [scheme, value] = (header ?? '').split(' ')

@@ -1,4 +1,4 @@
-import type { Command } from './game'
+import type { PlayerCommand } from './game'
 import type { PlateLocation, TileLocation } from './tableau'
 
 /**
@@ -117,7 +117,7 @@ function plateLocation(value: unknown): PlateLocation | null {
  * is the server's — a client that could submit one would be choosing its own tiles. The server builds
  * its deals itself and never parses one, so there is nothing here to accidentally accept.
  */
-export function parseCommand(value: unknown): Command | null {
+export function parseCommand(value: unknown): PlayerCommand | null {
   const raw = record(value)
   if (!raw) return null
 

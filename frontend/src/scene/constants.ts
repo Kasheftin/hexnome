@@ -244,9 +244,6 @@ export const PLATE_SLOT_FILL = 0.92
  * what it is — a stack you work down, newest on top.
  */
 
-/** Loose tiles heaped on each lot's face-down plate. */
-export const SOURCE_TILES_PER_LOT = 4
-
 export const SOURCE_LEFT_PX = 14
 /** Clear of the title panel, which is 14px down and about 40px tall. */
 export const SOURCE_TOP_PX = 66

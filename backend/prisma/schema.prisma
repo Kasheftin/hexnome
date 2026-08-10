@@ -90,7 +90,18 @@ model Game {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  seats Seat[]
+  /**
+   * The two desks this game deals from, once it has started.
+   *
+   * Null while a table is still filling: a desk is built from the settings, and the settings are not
+   * final until the last chair is taken. They are the server's handles — a client never sees one, and
+   * the deal is the server's to make.
+   */
+  tileDeskId  String? @db.VarChar(36)
+  plateDeskId String? @db.VarChar(36)
+
+  seats    Seat[]
+  commands Command[]
 
   @@index([status, updatedAt])
 }
@@ -123,4 +134,73 @@ model Seat {
 
   @@id([gameId, seat])
   @@unique([gameId, token])
+}
+
+/// One committed turn, and the chain that orders them.
+///
+/// A game's log is these rows; the board, the drawers, the source and the score are all folded from
+/// them by `replayGame`. Nothing about a game in progress is stored anywhere else, so there is
+/// nothing that can drift from it.
+///
+/// ## The chain is the whole concurrency design
+///
+/// Every command names the one it was built on, and `@@unique([gameId, prevSeq])` makes the database
+/// refuse two children of one parent. There is no sequence to allocate, no row to lock and no
+/// transaction, because the insert itself adjudicates: forty simultaneous turns claiming one parent
+/// leave exactly one winner and thirty-nine conflicts.
+///
+/// The two halves need each other. Sparse autoincrement alone has a nasty window — A takes 10 and has
+/// not committed, B takes 11 and commits, a reader advances past 11, then A commits 10 and is never
+/// seen again. The chain is what stops two writes to one game being in flight together, so the window
+/// cannot open.
+model Command {
+  /// Globally unique and ascending. Only the **order** means anything.
+  ///
+  /// Allocated by the database, which is the point: there is nothing to read first, so nothing to
+  /// lock. Numbers are sparse within a game and may jump by any amount; a cursor only ever needs
+  /// "bigger than what I have".
+  seq Int @id @default(autoincrement())
+
+  gameId String @db.VarChar(36)
+
+  /// The `seq` this was built on, and the guard.
+  ///
+  /// `0` for the first command — not NULL, which MySQL permits repeatedly in a unique index and which
+  /// would therefore let the chain fork at its root.
+  prevSeq Int
+
+  /// The seat that submitted this, or null for the server's own — a deal.
+  ///
+  /// Derived from the seat token, never taken from the body: a client that could name its own seat
+  /// could take somebody else's turn. Authorization only, and it cannot double as the concurrency
+  /// guard, because two commands from one seat both pass it.
+  author Int?
+
+  /// Client-minted, and the deduplication guard.
+  ///
+  /// It earns its index on the retry path: the server commits, the response is lost, the client
+  /// resends. Without it the resend collides on `prevSeq` and the client cannot tell "refused" from
+  /// "already applied". With it, the conflict is recognised and the original row handed back.
+  cmdId String @db.VarChar(36)
+
+  /// The rules' `Command`, verbatim — an **intent**, not its effects.
+  ///
+  /// That is the whole reason this column is alone where attempt 1 needed two. Its log recorded
+  /// mutations, so a client that had applied its own turn optimistically needed the boundary between
+  /// what it already held and what the server added. An intent has no such halves: every client folds
+  /// the same row through the same `applyCommand` and arrives at the same board.
+  command Json
+
+  at DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  /// Two commands cannot share a parent. This is the concurrency design, in one line.
+  @@unique([gameId, prevSeq])
+
+  /// A retry is not a second command.
+  @@unique([gameId, cmdId])
+
+  /// The cursor, and the head.
+  @@index([gameId, seq])
 }

@@ -1,10 +1,12 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { ConflictException, NotFoundException } from '@nestjs/common'
 import { defaultGameSettings, SOLO, type GameSettings } from '../rules/gameSettings'
+import { DeskService } from '../desk/desk.service'
 import { PrismaService } from '../prisma.service'
 import { createGameBody } from './dto'
 import { GamesService } from './games.service'
 import { HeadsGateway } from './heads.gateway'
+import { TurnsService } from './turns.service'
 
 /**
  * The games service, against the real database.
@@ -27,7 +29,9 @@ const prisma = new PrismaService()
  * up. What the gateway itself does is `heads.gateway.spec.ts`.
  */
 const heads = new HeadsGateway()
-const games = new GamesService(prisma, heads)
+const desks = new DeskService(prisma)
+const turns = new TurnsService(prisma, desks, heads)
+const games = new GamesService(prisma, desks, turns, heads)
 const made: string[] = []
 
 function settingsFor(players: number): GameSettings {

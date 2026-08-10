@@ -1,5 +1,5 @@
 import { createRandom } from '@hexnome/rules/random'
-import { SOURCE_TILES_PER_LOT } from './constants'
+import { SOURCE_TILES_PER_LOT } from '@hexnome/rules/source'
 
 /**
  * Where a lot's loose tiles lie on its face-down plate.

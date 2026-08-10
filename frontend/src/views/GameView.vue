@@ -41,6 +41,7 @@ import {
   type DraftItem,
 } from '@hexnome/rules/draft'
 import { boardCells } from '@hexnome/rules/board'
+import { SOURCE_TILES_PER_LOT } from '@hexnome/rules/source'
 import {
   canAffordPlacement,
   canConfirmPayment,
@@ -97,7 +98,6 @@ import TurnAnnounce from '@/ui/TurnAnnounce.vue'
 import {
   COLORS,
   HEX_SIZE,
-  SOURCE_TILES_PER_LOT,
   departureMillis,
 } from '@/scene/constants'
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'

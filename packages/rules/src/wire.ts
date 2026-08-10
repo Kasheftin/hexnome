@@ -1,6 +1,6 @@
 /**
- * What the client and the server say to each other about a *game* — who is at the table and how far
- * along it is. Not yet about turns; those still live in the tab.
+ * What the client and the server say to each other: who is at the table, how far along it is, and
+ * every turn anybody has taken.
  *
  * Pure types. This module must not import from `vue` or `three` — see docs/tech-spec.md, "The one
  * hard architectural rule". ESLint enforces it.
@@ -13,10 +13,11 @@
  * Hand-written rather than generated. The surface is three endpoints, and a generator would be more
  * machinery than contract.
  */
+import type { Command } from './game'
 import type { GameSettings } from './gameSettings'
 
 /** Re-exported so a client needs one import for the whole contract. */
-export type { GameSettings }
+export type { Command, GameSettings }
 
 /**
  * What a game is waiting for, or that it is not waiting.
@@ -98,4 +99,72 @@ export interface CreateDeskBody {
 export interface JoinBody {
   /** Optional. An empty name leaves the seat showing its own label rather than a shared default. */
   readonly name?: string
+}
+
+/**
+ * A stored turn, as anyone reading the log sees it.
+ *
+ * One row is one intent, and folding it through `applyCommand` is the whole of applying it. There is
+ * no second half — see the `command` column in the schema for why attempt 1 needed one and this does
+ * not.
+ */
+export interface CommandRow {
+  readonly seq: number
+  readonly prevSeq: number
+  /** The seat that played it, or null for the server's own — a deal. */
+  readonly author: number | null
+  readonly cmdId: string
+  readonly command: Command
+}
+
+/** Where the chain currently ends. A new command must name this as its `prevSeq`. */
+export interface Head {
+  readonly seq: number
+}
+
+/**
+ * Everything after a cursor.
+ *
+ * A cursor rather than a timestamp: two rows can share a millisecond and clocks step backwards, so
+ * `?since=<time>` would silently skip a turn. The numbers are sparse and a game's may jump; only
+ * their order ever matters.
+ */
+export interface CommandSlice {
+  /** The cursor the caller passed, echoed so a response is self-describing. */
+  readonly since: number
+  /** The head at the moment of reading. Equal to `since` when there is nothing new. */
+  readonly head: Head
+  readonly commands: readonly CommandRow[]
+}
+
+export interface SubmitBody {
+  /**
+   * Client-minted, and stable across resends of the *same* turn.
+   *
+   * It is what lets a lost response be retried safely: the server recognises the id and hands back
+   * the row it already wrote instead of writing a second.
+   */
+  readonly cmdId: string
+  /** The `seq` this turn was built on — the head as the client last saw it. */
+  readonly prevSeq: number
+  /**
+   * The turn itself.
+   *
+   * No author: it is derived from the seat token on the request. A client that could name its own
+   * seat could take somebody else's turn, which is the whole reason the token exists.
+   */
+  readonly command: unknown
+}
+
+/**
+ * What a submit wrote — the turn, and anything the server added behind it.
+ *
+ * Plural because a turn can leave the source wanting a lot, and the deal that follows is the
+ * server's own command rather than part of the player's. They are written together, so a reader can
+ * never see the turn without the deal it caused.
+ */
+export interface SubmitResult {
+  readonly commands: readonly CommandRow[]
+  /** True when this `cmdId` had already been stored and these are the original rows. */
+  readonly duplicate: boolean
 }

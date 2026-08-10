@@ -137,6 +137,15 @@ export function shiftLotsDown(tableau: Tableau): void {
  * bag is empty. The opening deal and every later restock both go through here, so there is one code
  * path and the first lot cannot drift from the rest.
  */
+/**
+ * Loose tiles heaped on each lot's face-down plate.
+ *
+ * Here rather than in the scene, for the same reason as the playfield's extent: it decides how much
+ * a lot costs the bag, and the server draws that many. It was a scene constant while only the browser
+ * dealt, and a second copy of it there would be a second answer.
+ */
+export const SOURCE_TILES_PER_LOT = 4
+
 export function pushLot(tableau: Tableau, tiles: readonly TileSpec[]): boolean {
   shiftLotsDown(tableau)
   const plate = tableau.addPlate({ kind: 'source', lot: 0 }, { faceDown: true })
