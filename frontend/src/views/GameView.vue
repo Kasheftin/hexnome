@@ -930,6 +930,8 @@ const CARD_SAFETY_MS = 4000
 interface Announcement {
   readonly label: string
   readonly n: number
+  /** Who is about to play. Left off the round card, and off a solo game — see `whoseTurn`. */
+  readonly whose?: string
   /** Run once this card is fully up, and awaited before the hold starts. See `cardWork`. */
   readonly work?: () => void | Promise<void>
 }
@@ -1005,9 +1007,20 @@ function announce(cards: readonly Announcement[]): void {
   showCard(first)
 }
 
+/**
+ * Whose turn a card is about to announce, or undefined in a solo game.
+ *
+ * Read here, as the card is built, rather than in the card as it renders. A card is a snapshot of the
+ * moment it went up — and one of them is raised while the previous turn's pieces are still settling,
+ * so a live binding would be reading a seat that is on its way somewhere else.
+ */
+function whoseTurn(): string | undefined {
+  return state.seats.length > 1 ? activeName.value : undefined
+}
+
 /** A turn card, optionally restocking behind it once it is up. */
 function announceTurn(turn: number, work?: () => void | Promise<void>): void {
-  announce([{ label: 'Turn', n: turn, work }])
+  announce([{ label: 'Turn', n: turn, whose: whoseTurn(), work }])
 }
 
 /**
@@ -1018,7 +1031,9 @@ function announceTurn(turn: number, work?: () => void | Promise<void>): void {
  * the new lot needs to appear.
  */
 function announceRound(round: number, work?: () => void | Promise<void>): void {
-  announce([{ label: 'Round', n: round }, { label: 'Turn', n: 1, work }])
+  // Only the turn card names anybody: a round belongs to the table, and the card that follows this one
+  // is the one saying whose turn it is.
+  announce([{ label: 'Round', n: round }, { label: 'Turn', n: 1, whose: whoseTurn(), work }])
 }
 
 /**

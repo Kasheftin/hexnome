@@ -24,7 +24,18 @@ const props = defineProps<{
    * and giving a new round its own kind of card would say it is a different sort of event when it is
    * the same one at a larger scale.
    */
-  announcing: { readonly label: string, readonly n: number } | null
+  announcing: {
+    readonly label: string
+    readonly n: number
+    /**
+     * Who is about to play, or undefined in a solo game.
+     *
+     * The number says which turn this is; a table also needs to know whose. Omitted rather than
+     * spelled out when there is one seat, where the answer is never in doubt and printing it would
+     * read as the game addressing somebody else.
+     */
+    readonly whose?: string
+  } | null
   /** False once the card should start leaving. Separate from `announcing` so the exit can be watched. */
   visible: boolean
 }>()
@@ -57,10 +68,18 @@ const emit = defineEmits<{ shown: [] }>()
       role="status"
       aria-live="polite"
     >
-      <p class="card">
-        <span class="label">{{ props.announcing.label }}</span>
-        <span class="number">{{ props.announcing.n }}</span>
-      </p>
+      <div class="card">
+        <p class="headline">
+          <span class="label">{{ props.announcing.label }}</span>
+          <span class="number">{{ props.announcing.n }}</span>
+        </p>
+        <p
+          v-if="props.announcing.whose"
+          class="whose"
+        >
+          {{ props.announcing.whose }}'s turn
+        </p>
+      </div>
     </div>
   </Transition>
 </template>
@@ -91,7 +110,19 @@ const emit = defineEmits<{ shown: [] }>()
   z-index: 40;
 }
 
+/*
+ * A column, because the name is a caption to the number rather than another item beside it. The
+ * transitions below still take hold of `.card`, so the whole card travels as one thing.
+ */
 .card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.headline {
   display: flex;
   align-items: baseline;
   gap: 20px;
@@ -114,6 +145,23 @@ const emit = defineEmits<{ shown: [] }>()
   font-variant-numeric: tabular-nums;
   line-height: 1;
   text-shadow: 0 2px 30px rgb(0 0 0 / 90%), 0 0 4px rgb(0 0 0 / 95%);
+}
+
+/*
+ * The name, not the number: sentence case, no tracking, and warm rather than grey.
+ *
+ * Left as it was typed. Everything else on this card is set in the chrome's small-caps, and a name put
+ * through the same treatment stops looking like a person's name and starts looking like another label.
+ *
+ * Carries the number's shadow because it needs it for the same reason — the scrim thins toward the
+ * edges, and a long name reaches into the part of it that has already faded.
+ */
+.whose {
+  margin: 0;
+  color: #d8bd8b;
+  font-size: 22px;
+  font-weight: 500;
+  text-shadow: 0 2px 20px rgb(0 0 0 / 90%), 0 0 4px rgb(0 0 0 / 95%);
 }
 
 /*
