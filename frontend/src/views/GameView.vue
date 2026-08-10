@@ -58,6 +58,7 @@ import {
   needsDeal,
   paymentPurse,
   replayGame,
+  scoreAnchors,
   type Command,
   type CommandResult,
   type GameOptions,
@@ -529,7 +530,8 @@ const roundPoints = computed(() => {
   const fined = state.firstToPass === viewedSeat.value
     ? effectiveFirstPassFine(gameOptions.settings)
     : 0
-  return scored - fined
+  // Plus what the board's anchors are worth, which is a fact about the board as it stands.
+  return scored + scoreAnchors(board(), gameOptions.settings) - fined
 })
 
 /**
@@ -771,6 +773,7 @@ function roundRecord(round: number, seat = viewedSeat.value): RoundRecord {
      * board instead of hopping about in the order things happened to be placed.
      */
     tally: tallyRound(roundAgenda(agenda, round) ?? [], tilesInReadingOrder(asItWas)),
+    anchors: (asThen.seats[seat] ?? asThen.seats[0]!).anchored[round - 1] ?? 0,
     fine: (asThen.seats[seat] ?? asThen.seats[0]!).fined[round - 1] ?? 0,
     leftovers: describeLeftovers(asItWas),
   }

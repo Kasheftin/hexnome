@@ -17,6 +17,14 @@ export interface RoundRecord {
   readonly board: BoardDiagram
   readonly tally: RoundTally<Tile>
   /**
+   * Points the board's anchors paid this round, or 0.
+   *
+   * Beside the tally rather than inside it for the same reason as the fine: the tally counts tiles
+   * against the round's targets, and this is paid for the shape of the board rather than for anything
+   * on it.
+   */
+  readonly anchors: number
+  /**
    * Points taken off for being the first to pass this round, or 0.
    *
    * Kept beside the tally rather than folded into it, because it is not something the board can be

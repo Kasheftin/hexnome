@@ -81,6 +81,8 @@ export interface SeatState {
   banked: number[]
   /** The first-pass fine charged in each finished round, parallel to `banked`. Mostly zeroes. */
   fined: number[]
+  /** Points the board's anchors paid in each finished round, parallel to `banked`. */
+  anchored: number[]
   /** Out of *this* round — cleared when the round closes, not a state of the game. */
   passed: boolean
   /**
@@ -270,6 +272,7 @@ export function createGame(options: GameOptions): GameState {
       tableau,
       banked: [],
       fined: [],
+      anchored: [],
       passed: false,
       paidAnchors: new Set(),
     }
@@ -362,6 +365,29 @@ function revealEmptiedLots(state: GameState): void {
 }
 
 /**
+ * What a board's anchors pay this round, at the rates the game was set up with.
+ *
+ * **Exported so there is one of it.** The results panel prints this figure beside the tally it
+ * counted out, and a second copy written by hand is how the panel and the bank come to disagree —
+ * which has happened here before, with the payment purse.
+ *
+ * Every anchor counts, enclosed or not. The stem rates pay for closing a ring of six around a hole;
+ * this pays for the hole being there at all, which is what makes placing another plate worth a turn.
+ */
+export function scoreAnchors(board: Tableau, settings: {
+  pointsPerInternalAnchor: number
+  pointsPerExternalAnchor: number
+}): number {
+  let points = 0
+  for (const anchor of board.anchors()) {
+    points += anchor.kind === 'internal'
+      ? settings.pointsPerInternalAnchor
+      : settings.pointsPerExternalAnchor
+  }
+  return points
+}
+
+/**
  * Close the round: sweep the source, score every board, bank it.
  *
  * Reached only when the last seat passes, so it is a consequence rather than a command of its own —
@@ -390,8 +416,10 @@ function closeRound(state: GameState): DeskReturns {
   for (const seat of state.seats) {
     const charged = seat.seat === state.firstToPass ? fine : 0
     const scored = targets ? scoreTargets(targets, seat.tableau.tilesOnBoard()) : 0
-    seat.banked.push(scored - charged)
+    const anchors = scoreAnchors(seat.tableau, state.options.settings)
+    seat.banked.push(scored + anchors - charged)
     seat.fined.push(charged)
+    seat.anchored.push(anchors)
     seat.passed = false
   }
 

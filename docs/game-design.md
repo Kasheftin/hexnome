@@ -577,6 +577,26 @@ makes a run repeatable: the same link is the same game to beat.
 Classic reversed opens with the colour-heavy round, since Classic closes with one. That is a
 consequence of the shape rather than an oddity.
 
+### Anchor points, for building wide
+
+Every **anchor on your board** also pays at the end of every round: 0, 1 or 2 points for an internal
+one (1 by default) and the same choice for an external one (0 by default). A plate brings exactly one
+internal anchor with it, always, so this is simply what another plate is worth.
+
+**It is the only thing in the game that pays for width.** The targets above pay for tiles and so does
+the final scoring, so without this a player is best served by working one plate to death and the board
+never grows.
+
+It compounds, and that is the point: a plate placed in round 1 pays its anchor again in every round
+that follows — one extra plate in a four-round game is four points, not one. So the argument for
+spending a turn on width is strongest early and worth nothing at all by the last round.
+
+**No enclosure is required.** That is what separates these from the stems in
+[Anchors, and earning stems](#anchors-and-earning-stems): those pay for closing a ring of six tiles
+around a hole, which is a feat, while these pay for the hole being there, which is a decision about the
+shape of your board. External anchors default to 0 because a wrapped gap is a by-product of placing
+plates loosely rather than something worth chasing.
+
 ### The end of a round
 
 When the round ends its score is worked out and **shown**, target by target: each row lists the tiles

@@ -151,6 +151,28 @@ export const STRICT_BONUS_CHOICES: readonly number[] = [0, 1]
 export const DEFAULT_STRICT_ENCLOSURE_BONUS = 1
 
 /**
+ * Points paid for every anchor on the board, at the end of **every** round.
+ *
+ * The one reward for building *wide* rather than dense. Everything else pays for tiles — the round
+ * targets, the final groups — so without this a player is best served by one plate worked to death,
+ * and the board never grows. An anchor is what a plate brings with it: exactly one internal anchor
+ * each, always, plus whatever external ones the arrangement happens to wrap.
+ *
+ * It compounds, which is the point. A plate placed in round 1 pays its anchor again in every round
+ * that follows — one extra plate in a four-round game is four points, not one — so the argument for
+ * spending a turn on width is strongest early and fades to nothing by the last round.
+ *
+ * **Unlike the stem rates, an anchor need not be enclosed.** Those pay for the ring of six tiles around
+ * a hole, which is a feat; this pays for the hole existing, which is a decision about the shape of your
+ * board. The two are deliberately different rewards for the same feature, which is why external anchors
+ * default to 0 here — a wrapped gap is a by-product of placing plates loosely rather than something to
+ * encourage on its own.
+ */
+export const ANCHOR_POINT_CHOICES: readonly number[] = [0, 1, 2]
+export const DEFAULT_POINTS_PER_INTERNAL_ANCHOR = 1
+export const DEFAULT_POINTS_PER_EXTERNAL_ANCHOR = 0
+
+/**
  * What the first player to pass in a round gives up, in points.
  *
  * Passing first is not simply giving up: it also takes the **first turn of the next round**, which is
@@ -258,6 +280,10 @@ export interface GameSettings {
   readonly stemsPerExternalAnchor: number
   /** Extra stems for a strict enclosure. Always 0 when `placementRule` is `strict`. */
   readonly strictEnclosureBonus: number
+  /** Points per internal anchor on the board, banked at the end of every round. */
+  readonly pointsPerInternalAnchor: number
+  /** Points per external anchor on the board, banked at the end of every round. */
+  readonly pointsPerExternalAnchor: number
   /** Points charged to the first seat to pass in a round. Always 0 in a solo game. */
   readonly firstPassFine: number
   /** How strictly a placed tile must agree with its neighbours. See game/placement.ts. */
@@ -341,6 +367,10 @@ export function isStemsPerAnchor(value: unknown): boolean {
 
 export function isStrictBonus(value: unknown): boolean {
   return typeof value === 'number' && STRICT_BONUS_CHOICES.includes(value)
+}
+
+export function isAnchorPoints(value: unknown): boolean {
+  return typeof value === 'number' && ANCHOR_POINT_CHOICES.includes(value)
 }
 
 export function isFirstPassFine(value: unknown): boolean {
@@ -439,6 +469,8 @@ export function defaultGameSettings(createdAt: number, seed = ''): GameSettings 
     stemsPerInternalAnchor: DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
     stemsPerExternalAnchor: DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
     strictEnclosureBonus: DEFAULT_STRICT_ENCLOSURE_BONUS,
+    pointsPerInternalAnchor: DEFAULT_POINTS_PER_INTERNAL_ANCHOR,
+    pointsPerExternalAnchor: DEFAULT_POINTS_PER_EXTERNAL_ANCHOR,
     // Solo by default, and the fine means nothing there — see `effectiveFirstPassFine`.
     firstPassFine: 0,
     placementRule: DEFAULT_PLACEMENT_RULE,
@@ -524,6 +556,12 @@ export function parseGameSettings(value: unknown): GameSettings | null {
         ? (raw.strictEnclosureBonus as number)
         : DEFAULT_STRICT_ENCLOSURE_BONUS,
     }),
+    pointsPerInternalAnchor: isAnchorPoints(raw.pointsPerInternalAnchor)
+      ? (raw.pointsPerInternalAnchor as number)
+      : DEFAULT_POINTS_PER_INTERNAL_ANCHOR,
+    pointsPerExternalAnchor: isAnchorPoints(raw.pointsPerExternalAnchor)
+      ? (raw.pointsPerExternalAnchor as number)
+      : DEFAULT_POINTS_PER_EXTERNAL_ANCHOR,
     // The same, for the pairing with the seat count.
     firstPassFine: effectiveFirstPassFine({
       players,

@@ -20,6 +20,8 @@ import {
   TILE_SLOT_CHOICES,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
   DEFAULT_FIRST_PASS_FINE,
+  DEFAULT_POINTS_PER_EXTERNAL_ANCHOR,
+  DEFAULT_POINTS_PER_INTERNAL_ANCHOR,
   SINGLEPLAYER_MODES,
   effectiveGroupBonuses,
   defaultGameSettings,
@@ -45,6 +47,8 @@ const valid = {
   stemsPerExternalAnchor: 1,
   placementRule: 'strict',
   strictEnclosureBonus: 0,
+  pointsPerInternalAnchor: 2,
+  pointsPerExternalAnchor: 1,
   firstPassFine: 2,
   minGroupSize: 4,
   // Indexed by group size, and zeroed at or below the minimum — hence the leading run of noughts.
@@ -207,6 +211,48 @@ describe('the strict-enclosure bonus', () => {
     const older: Record<string, unknown> = { ...regular }
     delete older.strictEnclosureBonus
     expect(parseGameSettings(older)?.strictEnclosureBonus).toBe(DEFAULT_STRICT_ENCLOSURE_BONUS)
+  })
+})
+
+describe('the round anchor points', () => {
+  it('keeps every offered rate', () => {
+    for (const points of [0, 1, 2]) {
+      const parsed = parseGameSettings({
+        ...valid,
+        pointsPerInternalAnchor: points,
+        pointsPerExternalAnchor: points,
+      })
+      expect(parsed?.pointsPerInternalAnchor).toBe(points)
+      expect(parsed?.pointsPerExternalAnchor).toBe(points)
+    }
+  })
+
+  it('falls back for a value that is not on offer', () => {
+    for (const bad of [undefined, null, 3, -1, 0.5, '1', {}]) {
+      const parsed = parseGameSettings({
+        ...valid,
+        pointsPerInternalAnchor: bad,
+        pointsPerExternalAnchor: bad,
+      })
+      expect(parsed?.pointsPerInternalAnchor).toBe(DEFAULT_POINTS_PER_INTERNAL_ANCHOR)
+      expect(parsed?.pointsPerExternalAnchor).toBe(DEFAULT_POINTS_PER_EXTERNAL_ANCHOR)
+    }
+  })
+
+  it('defaults for a game saved before the setting existed', () => {
+    const older: Record<string, unknown> = { ...valid }
+    delete older.pointsPerInternalAnchor
+    delete older.pointsPerExternalAnchor
+    expect(parseGameSettings(older)?.pointsPerInternalAnchor)
+      .toBe(DEFAULT_POINTS_PER_INTERNAL_ANCHOR)
+    expect(parseGameSettings(older)?.pointsPerExternalAnchor)
+      .toBe(DEFAULT_POINTS_PER_EXTERNAL_ANCHOR)
+  })
+
+  /* An external anchor is a by-product of loose placement, not something to chase by default. */
+  it('pays for an internal anchor and not an external one by default', () => {
+    expect(DEFAULT_POINTS_PER_INTERNAL_ANCHOR).toBe(1)
+    expect(DEFAULT_POINTS_PER_EXTERNAL_ANCHOR).toBe(0)
   })
 })
 

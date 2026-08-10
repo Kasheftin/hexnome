@@ -40,7 +40,10 @@ import {
   DEFAULT_STEM_COUNT,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
+  ANCHOR_POINT_CHOICES,
   DEFAULT_FIRST_PASS_FINE,
+  DEFAULT_POINTS_PER_EXTERNAL_ANCHOR,
+  DEFAULT_POINTS_PER_INTERNAL_ANCHOR,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
   FIRST_PASS_FINE_CHOICES,
   STRICT_BONUS_CHOICES,
@@ -109,6 +112,8 @@ const initialStems = ref<number>(DEFAULT_STEM_COUNT)
 const stemsPerInternalAnchor = ref<number>(DEFAULT_STEMS_PER_INTERNAL_ANCHOR)
 const stemsPerExternalAnchor = ref<number>(DEFAULT_STEMS_PER_EXTERNAL_ANCHOR)
 const strictEnclosureBonus = ref<number>(DEFAULT_STRICT_ENCLOSURE_BONUS)
+const pointsPerInternalAnchor = ref<number>(DEFAULT_POINTS_PER_INTERNAL_ANCHOR)
+const pointsPerExternalAnchor = ref<number>(DEFAULT_POINTS_PER_EXTERNAL_ANCHOR)
 /** Only asked for multiplayer; a solo game passes first every round by definition. */
 const firstPassFine = ref<number>(DEFAULT_FIRST_PASS_FINE)
 
@@ -239,14 +244,14 @@ const STEM_DIALS: readonly Dial[] = [
   {
     key: 'stemsPerInternalAnchor',
     legend: 'Stems per enclosed internal anchor',
-    short: 'internal anchor',
+    short: 'internal stems',
     choices: STEMS_PER_ANCHOR_CHOICES,
     model: stemsPerInternalAnchor,
   },
   {
     key: 'stemsPerExternalAnchor',
     legend: 'Stems per enclosed external anchor',
-    short: 'external anchor',
+    short: 'external stems',
     choices: STEMS_PER_ANCHOR_CHOICES,
     model: stemsPerExternalAnchor,
   },
@@ -286,6 +291,37 @@ const PASSING_DIALS: readonly Dial[] = [
       + 'next round, at a source nobody has touched. At 0 there is no reason not to leave the moment '
       + 'the source turns awkward.',
     applies: () => kind.value === 'multiplayer',
+  },
+]
+
+/**
+ * The only reward for building *wide*.
+ *
+ * Everything else on this panel pays for tiles, so without these a player is best served by one plate
+ * worked to death. An anchor comes with a plate — one internal each, always — and it is paid for again
+ * at the end of every round, which is what makes an early plate worth more than a late one.
+ *
+ * Separate from the stem rates above, and deliberately so: those pay for *enclosing* an anchor, which
+ * is a feat, while these pay for it existing, which is a decision about the shape of the board.
+ */
+const ANCHOR_POINT_DIALS: readonly Dial[] = [
+  {
+    key: 'pointsPerInternalAnchor',
+    legend: 'Points per internal anchor each round',
+    short: 'internal points',
+    choices: ANCHOR_POINT_CHOICES,
+    model: pointsPerInternalAnchor,
+    hint: 'Every plate on your board has exactly one, so this is what another plate is worth — every '
+      + 'round, for the rest of the game. One placed in round 1 of a four-round game pays four.',
+  },
+  {
+    key: 'pointsPerExternalAnchor',
+    legend: 'Points per external anchor each round',
+    short: 'external points',
+    choices: ANCHOR_POINT_CHOICES,
+    model: pointsPerExternalAnchor,
+    hint: 'A bare cell your plates have wrapped on all six sides. Off by default: it is a by-product '
+      + 'of placing plates loosely rather than something worth chasing.',
   },
 ]
 
@@ -364,6 +400,13 @@ const SECTIONS: readonly DialSection[] = [
   { key: 'deck', title: 'Deck', dials: DECK_DIALS },
   { key: 'drawer', title: 'Drawer', dials: DRAWER_DIALS },
   { key: 'stems', title: 'Receiving stems', dials: STEM_DIALS },
+  {
+    key: 'anchorPoints',
+    title: 'Round anchor points',
+    dials: ANCHOR_POINT_DIALS,
+    note: 'Counted at the end of every round, over the whole board, enclosed or not — so a plate keeps '
+      + 'paying for as long as the game lasts.',
+  },
   {
     key: 'final',
     title: 'Final score',
@@ -447,6 +490,8 @@ function startGame(): void {
       placementRule: placementRule.value,
       strictEnclosureBonus: strictEnclosureBonus.value,
     }),
+    pointsPerInternalAnchor: pointsPerInternalAnchor.value,
+    pointsPerExternalAnchor: pointsPerExternalAnchor.value,
     firstPassFine: effectiveFirstPassFine({ players, firstPassFine: firstPassFine.value }),
     placementRule: placementRule.value,
     minGroupSize: minGroupSize.value,

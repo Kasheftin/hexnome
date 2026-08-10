@@ -255,6 +255,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
             :ref="el => { reveal = el as InstanceType<typeof ScoringReveal> | null }"
             :tally="record.tally"
             :board="record.board"
+            :anchors="record.anchors"
             :fine="record.fine"
             @done="done = true"
           />
@@ -264,6 +265,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
             :key="`${record.round}:${chosenSeat}`"
             :tally="record.tally"
             :board="record.board"
+            :anchors="record.anchors"
             :fine="record.fine"
             instant
           />

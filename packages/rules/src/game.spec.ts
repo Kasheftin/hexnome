@@ -82,6 +82,7 @@ function snapshot(state: GameState) {
       passed: seat.passed,
       banked: [...seat.banked],
       fined: [...seat.fined],
+      anchored: [...seat.anchored],
       // A receipt a replay failed to reproduce would pay for the same enclosure twice.
       paidAnchors: [...seat.paidAnchors].sort(),
       ...census(seat.tableau),
@@ -313,6 +314,103 @@ describe('closing a round', () => {
     expect(state.finished).toBe(true)
     expect(state.seats[0]?.banked).toHaveLength(rounds)
     expect(applyCommand(state, { kind: 'pass', seat: 0 })).toMatchObject({ ok: false })
+  })
+})
+
+describe('anchor points', () => {
+  /**
+   * A plate dropped straight onto a seat's board.
+   *
+   * Placing one properly means drafting it, holding it in a bay and paying for it — three turns of
+   * setup for a test about what a board is worth once the plate is on it. `closeRound` reads the
+   * board, so this is the board it would read.
+   */
+  function addPlateAt(state: GameState, seat: number, hole: { q: number, r: number }): void {
+    const placed = state.seats[seat]!.tableau.addPlate({ kind: 'board', hole })
+    if (!placed) throw new Error(`no room for a plate at ${hole.q},${hole.r}`)
+  }
+
+  function closeARound(state: GameState): void {
+    play(state, lot(1))
+    for (let i = 0; i < state.seats.length; i++) play(state, { kind: 'pass', seat: state.activeSeat })
+  }
+
+  it('pays for the opening plate, which every seat has', () => {
+    // One plate is one internal anchor, always — so at the default rate every board opens worth 1.
+    const state = createGame(options({ pointsPerInternalAnchor: 1, pointsPerExternalAnchor: 0 }))
+    closeARound(state)
+
+    expect(state.seats.map(seat => seat.anchored)).toEqual([[1], [1], [1]])
+  })
+
+  it('pays per anchor, so a wider board is worth more', () => {
+    const state = createGame(options({ pointsPerInternalAnchor: 1 }))
+    addPlateAt(state, 1, { q: 3, r: 0 })
+    addPlateAt(state, 1, { q: -3, r: 0 })
+    closeARound(state)
+
+    expect(state.seats[0]!.anchored).toEqual([1])
+    expect(state.seats[1]!.anchored).toEqual([3])
+  })
+
+  it('adds them to what the seat banks', () => {
+    const paying = createGame(options({ pointsPerInternalAnchor: 2 }))
+    const free = createGame(options({ pointsPerInternalAnchor: 0, pointsPerExternalAnchor: 0 }))
+    closeARound(paying)
+    closeARound(free)
+
+    expect(paying.seats[0]!.banked[0]).toBe(free.seats[0]!.banked[0]! + 2)
+    expect(free.seats[0]!.anchored).toEqual([0])
+  })
+
+  /**
+   * The compounding the rule exists for: a plate pays its anchor again every round it survives.
+   *
+   * One extra plate placed before the first round closes is worth one point per round for the rest of
+   * the game, which is what makes spending an early turn on width worth anything at all.
+   */
+  it('pays again in every round, so an early plate compounds', () => {
+    const state = createGame(options({ pointsPerInternalAnchor: 1 }))
+    addPlateAt(state, 1, { q: 3, r: 0 })
+
+    const rounds = state.options.agenda.length
+    for (let round = 0; round < rounds; round++) closeARound(state)
+
+    expect(state.seats[0]!.anchored).toEqual(Array.from({ length: rounds }, () => 1))
+    expect(state.seats[1]!.anchored).toEqual(Array.from({ length: rounds }, () => 2))
+    // Four rounds of one extra plate is four points, not one.
+    const gap = state.seats[1]!.anchored.reduce((a, b) => a + b, 0)
+      - state.seats[0]!.anchored.reduce((a, b) => a + b, 0)
+    expect(gap).toBe(rounds)
+  })
+
+  it('pays for an external anchor at its own rate', () => {
+    /*
+     * Two more plates, arranged so they wrap a bare cell at (-2, 1): covered on all six sides and
+     * covered by nothing, which is what an external anchor is. Plates need only connect, not
+     * interlock, so a gap like this is a thing a board can genuinely end up with.
+     */
+    const state = createGame(options({ pointsPerInternalAnchor: 0, pointsPerExternalAnchor: 2 }))
+    addPlateAt(state, 1, { q: -3, r: 0 })
+    addPlateAt(state, 1, { q: -3, r: 3 })
+    const wrapped = state.seats[1]!.tableau.anchors().filter(anchor => anchor.kind === 'external')
+    expect(wrapped).toHaveLength(1)
+
+    closeARound(state)
+
+    // Internal anchors pay nothing here, so the whole figure is the one wrapped gap.
+    expect(state.seats[0]!.anchored).toEqual([0])
+    expect(state.seats[1]!.anchored).toEqual([2])
+  })
+
+  /* Enclosure is what the *stem* rates pay for. These pay for the hole being there. */
+  it('does not ask whether an anchor is enclosed', () => {
+    const state = createGame(options({ pointsPerInternalAnchor: 1 }))
+    const board = state.seats[0]!.tableau
+    expect(board.anchors().every(anchor => !board.anchorIsEnclosed(anchor.cell))).toBe(true)
+    closeARound(state)
+
+    expect(state.seats[0]!.anchored).toEqual([1])
   })
 })
 

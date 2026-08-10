@@ -48,6 +48,14 @@ const props = defineProps<{
   tally: RoundTally<Tile>
   board: BoardDiagram
   /**
+   * Points the board's anchors paid, or 0.
+   *
+   * Shown for the same reason as the charge below: it is part of the round's score and it does not
+   * come from the tiles, so a panel that counted the tiles and then announced a larger number would be
+   * asking to be trusted about the difference.
+   */
+  anchors?: number
+  /**
    * Points charged for passing first, or 0.
    *
    * Shown rather than quietly subtracted. It is the only part of a round's score that does not come
@@ -136,8 +144,11 @@ const runningTotal = computed(() =>
  * A charge landing part-way through would be counted against a total still climbing, and the player
  * would have to work out which of the two numbers moving was the one they cared about.
  */
+const anchors = computed(() => props.anchors ?? 0)
 const fine = computed(() => props.fine ?? 0)
-const banked = computed(() => runningTotal.value - fine.value)
+const banked = computed(() => runningTotal.value + anchors.value - fine.value)
+/** Whether anything happened after the targets were counted. */
+const adjusted = computed(() => anchors.value > 0 || fine.value > 0)
 
 const chipVisible = (row: number, index: number): boolean =>
   index < (landed.value[row] ?? 0) || flights.pending.value.has(`${row}:${index}`)
@@ -312,8 +323,18 @@ const doubleCounted = computed(() =>
         <strong>{{ runningTotal }}</strong>
       </p>
 
-      <template v-if="finished && fine > 0">
-        <p class="total charge">
+      <template v-if="finished && adjusted">
+        <p
+          v-if="anchors > 0"
+          class="total aside"
+        >
+          <span>Anchors</span>
+          <strong>+{{ anchors }}</strong>
+        </p>
+        <p
+          v-if="fine > 0"
+          class="total aside charge"
+        >
           <span>Passed first</span>
           <strong>−{{ fine }}</strong>
         </p>
@@ -347,8 +368,14 @@ const doubleCounted = computed(() =>
         {{ nameOf(row) }}: {{ row.tiles.length }} tiles, {{ row.points }} points.
       </li>
       <li>Round total {{ props.tally.total }}.</li>
+      <li v-if="anchors > 0">
+        Anchors, plus {{ anchors }}.
+      </li>
       <li v-if="fine > 0">
-        Passed first, less {{ fine }}. Banked {{ props.tally.total - fine }}.
+        Passed first, less {{ fine }}.
+      </li>
+      <li v-if="adjusted">
+        Banked {{ props.tally.total + anchors - fine }}.
       </li>
     </ul>
 
@@ -472,18 +499,21 @@ const doubleCounted = computed(() =>
 }
 
 /*
- * A deduction, and it should not look like another way of earning. Quieter than the totals it sits
- * between, and no rule above it — it belongs to the total it is taken from rather than starting a
- * section of its own.
+ * An adjustment to the total above, not a section of its own — so no rule over it, and quieter than
+ * the totals it sits between.
  */
-.charge {
+.aside {
   padding-top: 6px;
   border-top: none;
 }
 
+.aside strong {
+  font-size: 15px;
+}
+
+/* A deduction should not look like another way of earning. */
 .charge strong {
   color: #c98a72;
-  font-size: 15px;
 }
 
 .note {
