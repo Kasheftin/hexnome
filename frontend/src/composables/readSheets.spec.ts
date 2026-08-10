@@ -5,6 +5,11 @@ beforeEach(() => {
   localStorage.clear()
 })
 
+/*
+ * The number is **rounds closed**, not `state.round`. They differ exactly once, at the end: a
+ * finished game does not advance its round, so keying on the round number files the last two sheets
+ * under one entry and the game ends without showing a score. See `readSheets`.
+ */
 describe('a score sheet you have read', () => {
   it('is unread until it is put away', () => {
     expect(sheetRead('a-game', 2)).toBe(false)
@@ -18,13 +23,13 @@ describe('a score sheet you have read', () => {
     expect(sheetRead('a-game', 2)).toBe(true)
   })
 
-  /** Round 3's sheet is a different sheet, and has not been read because round 2's was. */
+  /** A third closed round is a different sheet, and unread because the second one was read. */
   it('does not cover the next round', () => {
     rememberSheetRead('a-game', 2)
     expect(sheetRead('a-game', 3)).toBe(false)
   })
 
-  /** Reading round 3's leaves round 2's read — sheets are read in order and none comes back. */
+  /** Reading the third leaves the second read — sheets are read in order and none comes back. */
   it('covers every round before it', () => {
     rememberSheetRead('a-game', 3)
     expect(sheetRead('a-game', 2)).toBe(true)

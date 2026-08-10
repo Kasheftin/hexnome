@@ -11,8 +11,13 @@
  * Whether you have already read round 2's sheet is a fact about this browser, and this is where it
  * lives.
  *
- * Stored as the **highest round whose sheet is done with**, not a list: sheets are read in order, and
- * one number cannot disagree with itself.
+ * Stored as the **number of closed rounds whose sheet is done with**, not a list: sheets are read in
+ * order, and one number cannot disagree with itself.
+ *
+ * Rounds *closed*, deliberately, and not `state.round`. They agree for every round but the last, and
+ * the last is where it matters: a finished game does not advance its round, so round 4's sheet and
+ * round 3's would be filed under the same number and the game would end without ever showing a
+ * score. Counting what has been banked names each sheet once.
  */
 const KEY = 'hexnome:read-sheets'
 
@@ -47,16 +52,16 @@ function write(sheets: Read): void {
   }
 }
 
-/** Has the sheet standing at this round already been put away in this browser? */
-export function sheetRead(gameId: string, round: number): boolean {
-  return (read()[gameId] ?? 0) >= round
+/** Has the sheet for this many closed rounds already been put away in this browser? */
+export function sheetRead(gameId: string, roundsClosed: number): boolean {
+  return (read()[gameId] ?? 0) >= roundsClosed
 }
 
 /** Put it away. Newest first, so the cap drops games nobody has opened in a while. */
-export function rememberSheetRead(gameId: string, round: number): void {
+export function rememberSheetRead(gameId: string, roundsClosed: number): void {
   const sheets = read()
   const already = sheets[gameId] ?? 0
   delete sheets[gameId]
   const kept = Object.entries(sheets).slice(0, MAX_REMEMBERED - 1)
-  write({ [gameId]: Math.max(already, round), ...Object.fromEntries(kept) })
+  write({ [gameId]: Math.max(already, roundsClosed), ...Object.fromEntries(kept) })
 }

@@ -392,7 +392,7 @@ function absorb(rows: readonly CommandRow[]): void {
    * each: putting it away is a person finishing reading rather than a thing that happened to the
    * game, so it is remembered here and not in the log. See `readSheets`.
    */
-  if (closed && !sheetRead(gameId.value, state.round)) {
+  if (closed && !sheetRead(gameId.value, roundsFinished.value)) {
     showResults.value = true
     return
   }
@@ -583,6 +583,12 @@ const mySeat = computed(() => store.mySeat ?? 0)
 
 /** Whether the turn is yours to take — the question every control on the bar really asks. */
 const myTurn = computed(() => activeIndex.value === mySeat.value)
+
+/** The last round has closed and been scored. Nothing is playable after this. */
+const gameIsOver = computed(() => {
+  void revision.value
+  return state.finished
+})
 
 /**
  * Which seat's board and drawer are on screen.
@@ -807,12 +813,17 @@ const freeBays = computed(() => {
 /**
  * What the bar may offer.
  *
- * Two questions, and both must be yes. **Is the turn mine** — the rules would refuse a command from
- * anybody else anyway, but a live button answered with a refusal is a worse way to say so. And **am
- * I looking at my own board** — every control here acts on the player whose turn it is, and pressing
- * Take while reading somebody else's board is not something anyone means to do.
+ * Three questions, and all must be yes. **Is there a game left** — a finished one has no turns in it,
+ * and the server answers a command with a 409 that reads as a fault rather than as "it is over".
+ * **Is the turn mine** — the rules would refuse a command from anybody else anyway, but a live button
+ * answered with a refusal is a worse way to say so. And **am I looking at my own board** — every
+ * control here acts on the player whose turn it is, and pressing Take while reading somebody else's
+ * board is not something anyone means to do.
+ *
+ * The panel normally covers the bar once the last round closes, so this rarely decides anything. It
+ * is here because "the game is over" is a fact about the game rather than about what is on top of it.
  */
-const options = computed<TurnOptions>(() => (!myTurn.value || watching.value)
+const options = computed<TurnOptions>(() => (gameIsOver.value || !myTurn.value || watching.value)
   ? { take: false, put: false, pass: false }
   : turnOptions({
     sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
@@ -1080,7 +1091,7 @@ function startNextRound(): void {
 
   showResults.value = false
   // Remembered before anything else, so a refresh a heartbeat later does not put the sheet back.
-  rememberSheetRead(gameId.value, state.round)
+  rememberSheetRead(gameId.value, roundsFinished.value)
   /*
    * Let go of whatever seat the results panel was showing, so a new round opens on your own board
    * rather than on the one whose score you were reading last.
