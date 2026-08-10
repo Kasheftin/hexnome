@@ -190,7 +190,7 @@ onMounted(async () => {
   void checkRules()
 
   // Announced from wherever the log left the game, which for a fresh one is round 1, turn 1.
-  announceRound(count.value.round)
+  announceRound()
 })
 
 /**
@@ -386,13 +386,13 @@ function absorb(rows: readonly CommandRow[]): void {
       settleTimer = null
       settling.value = false
       arriving.value = []
-      if (state.turn !== before.turn) announceTurn(count.value.turn)
+      if (state.turn !== before.turn) announceTurn()
     }, AWARD_SETTLE_MS)
     return
   }
 
   // Announced only when a turn genuinely moved, so a deal arriving on its own is silent.
-  if (state.turn !== before.turn) announceTurn(count.value.turn)
+  if (state.turn !== before.turn) announceTurn()
 }
 
 /**
@@ -946,7 +946,7 @@ function startNextRound(): void {
    * rather than on the one whose score you were reading last.
    */
   pinnedSeat.value = null
-  announceRound(count.value.round)
+  announceRound()
 }
 
 const gameOver = shallowRef(false)
@@ -1092,22 +1092,36 @@ function whoseTurn(): string | undefined {
   return state.seats.length > 1 ? activeName.value : undefined
 }
 
-/** A turn card, optionally restocking behind it once it is up. */
-function announceTurn(turn: number, work?: () => void | Promise<void>): void {
-  announce([{ label: 'Turn', n: turn, whose: whoseTurn(), work }])
+/**
+ * The turn card, read from the state as the card is built.
+ *
+ * Like `whoseTurn`, and for the same reason: a card is a snapshot of the moment it went up rather
+ * than a live binding. Read here rather than passed in, because a number passed in is a second copy
+ * of where the game is, and the copy is the one that goes stale.
+ */
+function turnCard(work?: () => void | Promise<void>): Announcement {
+  return { label: 'Turn', n: count.value.turn, whose: whoseTurn(), work }
+}
+
+function announceTurn(work?: () => void | Promise<void>): void {
+  announce([turnCard(work)])
 }
 
 /**
- * A round card, then the first turn of it.
+ * A round card, then the turn within it.
  *
  * Two beats rather than one: a new round is a bigger event than a new turn, and saying so takes the
  * time to say it. The restock rides on the *turn* card, which is the one the player is watching when
  * the new lot needs to appear.
+ *
+ * That turn is nearly always 1, because this is nearly always a round opening — but not on a refresh,
+ * where the log has been folded to wherever the game really is, and the card has to say the same as
+ * the header above it.
  */
-function announceRound(round: number, work?: () => void | Promise<void>): void {
+function announceRound(work?: () => void | Promise<void>): void {
   // Only the turn card names anybody: a round belongs to the table, and the card that follows this one
   // is the one saying whose turn it is.
-  announce([{ label: 'Round', n: round }, { label: 'Turn', n: 1, whose: whoseTurn(), work }])
+  announce([{ label: 'Round', n: count.value.round }, turnCard(work)])
 }
 
 /**
