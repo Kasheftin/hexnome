@@ -106,3 +106,7 @@ a {
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+
+.chrome-title--offset {
+  margin: 0 0 16px 0;
+}
