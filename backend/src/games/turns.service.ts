@@ -145,7 +145,17 @@ export class TurnsService {
     if (state.finished) {
       await this.prisma.game.updateMany({ where: { id: gameId, status: 'running' }, data: { status: 'finished' } })
     }
-    await this.announce(gameId)
+    /*
+     * **Tidying a drawer is not announced.**
+     *
+     * The row is written and read like any other — a client that asks for it gets it. What it skips
+     * is the nudge: a player sorting their tiles during somebody else's turn would otherwise wake
+     * every tab at the table on every drag, to deliver something only a player peeking at their board
+     * would even see. The cost is that a peek is up to a poll behind (`watchHead`: 15s once the
+     * socket is live), or arrives immediately behind the next real command, which is soon enough for
+     * a drawer.
+     */
+    if (command.kind !== 'arrange') await this.announce(gameId)
     return written
   }
 

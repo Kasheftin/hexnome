@@ -409,6 +409,21 @@ export interface Tableau {
   swapDrawerItems(a: string, b: string): boolean
 
   /**
+   * Seat every drawer item at once: the whole arrangement, stated rather than stepped towards.
+   *
+   * `drawer` is one id per tile slot and `bays` one per bay, `null` for an empty seat, both exactly as
+   * long as the drawer is wide. Tiles and stems share the tile-slot index, as they do everywhere.
+   *
+   * **Refused unless it is a permutation of what is already seated** — same items, no id twice, none
+   * of them a plate's own tile or anything out on the board. That one rule is what makes this safe to
+   * hand to a network: it can only ever shuffle, so a malformed or stale arrangement cannot lose an
+   * item, mint one, or pull something back off the board. It also makes the operation *idempotent*,
+   * which `swapDrawerItems` is not — applying the same arrangement twice leaves the same drawer,
+   * so a caller may apply it locally and fold it again when it comes back from a server.
+   */
+  arrangeDrawer(drawer: readonly (string | null)[], bays: readonly (string | null)[]): boolean
+
+  /**
    * Remove a tile, plate or stem from the game entirely, and report what that destroyed.
    *
    * There is still no discard pile *here*. The pile is the caller's (`game/recycling.ts`), and keeping
@@ -1275,6 +1290,54 @@ export function createTableau({
       seatInBay(a, seatB.slot)
       seatInBay(b, seatA.slot)
       // Neither plate is on the board, so coverage cannot actually change — reindexed anyway so that
+      // every path which moves a plate leaves the same invariant behind.
+      reindexCoverage()
+      return true
+    },
+
+    arrangeDrawer(drawer, bays) {
+      if (drawer.length !== drawerSlots || bays.length !== plateSlots) return false
+
+      /*
+       * **A permutation of what is already here, or nothing.**
+       *
+       * Every listed id must already be seated in the index space it is listed under, no id twice,
+       * and as many listed as there are seated. Those three together mean the two sets are equal —
+       * so this can only ever shuffle, never lose an item, mint one, or drag something in off the
+       * board. Checked in full before the first write, like every other refusal here.
+       */
+      const listed = new Set<string>()
+      const counted = { tileSlot: 0, bay: 0 }
+      for (const [space, ids] of [['tileSlot', drawer], ['bay', bays]] as const) {
+        for (const id of ids) {
+          if (id === null) continue
+          if (listed.has(id)) return false
+          if (drawerSeat(id)?.kind !== space) return false
+          listed.add(id)
+          counted[space] += 1
+        }
+      }
+
+      let seatedTiles = 0
+      let seatedBays = 0
+      for (let slot = 0; slot < drawerSlots; slot++) {
+        if (occupants.has(tileLocationKey({ kind: 'drawer', slot }))) seatedTiles += 1
+      }
+      for (let slot = 0; slot < plateSlots; slot++) {
+        if (occupants.has(plateLocationKey({ kind: 'plateSlot', slot }))) seatedBays += 1
+      }
+      if (counted.tileSlot !== seatedTiles || counted.bay !== seatedBays) return false
+
+      // Emptied first, then filled: a slot-by-slot rewrite would evict whatever it landed on.
+      for (let slot = 0; slot < drawerSlots; slot++) {
+        occupants.delete(tileLocationKey({ kind: 'drawer', slot }))
+      }
+      for (let slot = 0; slot < plateSlots; slot++) {
+        occupants.delete(plateLocationKey({ kind: 'plateSlot', slot }))
+      }
+      drawer.forEach((id, slot) => { if (id !== null) seatInTileSlot(id, slot) })
+      bays.forEach((id, slot) => { if (id !== null) seatInBay(id, slot) })
+      // No plate here is on the board, so coverage cannot really change — reindexed anyway, so that
       // every path which moves a plate leaves the same invariant behind.
       reindexCoverage()
       return true

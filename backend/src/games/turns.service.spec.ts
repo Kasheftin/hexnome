@@ -229,6 +229,85 @@ describe('the deal', () => {
   })
 })
 
+/**
+ * The command that is not a turn.
+ *
+ * Everything else here is somebody's move, taken in order, announced to the table. Tidying a drawer
+ * is none of those things, and each of them is a way it could quietly become one.
+ */
+type Arrange = Extract<PlayerCommand, { kind: 'arrange' }>
+
+describe('arranging a drawer', () => {
+  /** The plan that puts seat `seat`'s drawer back exactly as it is — a legal no-op, and enough. */
+  async function asItStands(gameId: string, seat: number): Promise<Arrange> {
+    const state = await turns.stateOf(gameId)
+    const tableau = state.seats[seat]!.tableau
+    const settings = state.options.settings
+    return {
+      kind: 'arrange',
+      seat,
+      drawer: Array.from({ length: settings.tileSlots }, (_, slot) =>
+        tableau.drawerSlotOccupant(slot) ?? null),
+      bays: Array.from({ length: settings.plateSlots }, (_, slot) =>
+        tableau.plateSlotOccupant(slot) ?? null),
+    }
+  }
+
+  const seqOf = async (gameId: string): Promise<number> =>
+    (await prisma.game.findUnique({ where: { id: gameId } }))!.seq
+
+  /* The point of the whole change: seat 1 may tidy while seat 0 is still thinking. */
+  it('is stored from a seat whose turn it is not, and does not move the turn', async () => {
+    const { id, tokens } = await table(2)
+    const state = await turns.stateOf(id)
+    expect(state.activeSeat).toBe(0)
+
+    const result = await turns.submit(
+      id, randomUUID(), await head(id), await asItStands(id, 1), tokens[1]!,
+    )
+
+    expect(result.commands.map(row => row.command.kind)).toEqual(['arrange'])
+    expect((await turns.stateOf(id)).activeSeat).toBe(0)
+    expect((await turns.stateOf(id)).turn).toBe(state.turn)
+  })
+
+  /**
+   * Quiet on the wire.
+   *
+   * `Game.seq` is what the socket broadcasts and what tells a watching tab to go and look. An arrange
+   * deliberately leaves it alone, so a player fidgeting with their drawer does not wake the table.
+   */
+  it('does not announce itself, where a turn does', async () => {
+    const { id, tokens } = await table(2)
+    const quiet = await seqOf(id)
+
+    await turns.submit(id, randomUUID(), await head(id), await asItStands(id, 1), tokens[1]!)
+    expect(await seqOf(id)).toBe(quiet)
+
+    await turns.submit(id, randomUUID(), await head(id), pass(0), tokens[0]!)
+    expect(await seqOf(id)).toBeGreaterThan(quiet)
+  })
+
+  /** The seat comes from the token, as it does for every other command. */
+  it('cannot be sent for somebody else´s drawer', async () => {
+    const { id, tokens } = await table(2)
+
+    await expect(turns.submit(id, randomUUID(), await head(id), await asItStands(id, 1), tokens[0]!))
+      .rejects.toBeInstanceOf(ForbiddenException)
+  })
+
+  it('is refused when it is not an arrangement of that drawer', async () => {
+    const { id, tokens } = await table(2)
+    const plan = await asItStands(id, 1)
+    const before = (await turns.since(id, 0)).commands.length
+
+    await expect(turns.submit(
+      id, randomUUID(), await head(id), { ...plan, drawer: [...plan.drawer, 'nope'] }, tokens[1]!,
+    )).rejects.toBeInstanceOf(UnprocessableEntityException)
+    expect((await turns.since(id, 0)).commands).toHaveLength(before)
+  })
+})
+
 describe('the chain', () => {
   it('reads everything after a cursor, and nothing before it', async () => {
     const { id, tokens } = await table(2)

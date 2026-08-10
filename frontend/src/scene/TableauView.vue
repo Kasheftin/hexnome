@@ -233,6 +233,14 @@ const emit = defineEmits<{
   /** A drawer item was clicked while paying. */
   selectPayment: [id: string]
   changed: []
+  /**
+   * The drawer was **rearranged and nothing left it** — a sort, not a move in the game.
+   *
+   * Separate from `changed`, which also fires for a placement and for turning a plate in its bay.
+   * Those two are carried by the `put` that follows them; this is the one the turn has to write down
+   * itself, and telling them apart here is cheaper than working it out afterwards.
+   */
+  rearranged: []
 }>()
 
 const { scene, camera, renderer, sizes } = useTresContext()
@@ -1103,7 +1111,11 @@ function onWindowPointerUp(): void {
      * Handled in its own branch rather than folded in below, so that "a stem does not reach the board"
      * is something the compiler checks: `placed` is not even reachable from here.
      */
-    if (dropHeld(current)) emit('changed')
+    // A stem never reaches the board, so a stem that moved is always a rearrangement.
+    if (dropHeld(current)) {
+      emit('changed')
+      emit('rearranged')
+    }
   } else if (targetValid && current.kind !== 'stem') {
     const ontoBoard = current.kind === 'tile'
       // A tile only ever goes into a petal, so "onto the board" means its plate is on the board.
@@ -1118,6 +1130,7 @@ function onWindowPointerUp(): void {
       emit('changed')
       // Reaching the board opens the payment; rearranging the drawer does not.
       if (ontoBoard && origin) emit('placed', current, origin)
+      else emit('rearranged')
     } else {
       // The highlight said yes and the model said no — rarer than a red drop, and worse.
       reportRefusedDrop(current)

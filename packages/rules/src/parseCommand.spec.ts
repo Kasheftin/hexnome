@@ -14,6 +14,7 @@ import { parseCommand } from './parseCommand'
 
 const PASS = { kind: 'pass', seat: 1 }
 const DRAFT = { kind: 'draft', seat: 0, ids: ['src:t1', 'src:t2'] }
+const ARRANGE = { kind: 'arrange', seat: 0, drawer: ['0:t1', null, '0:s2'], bays: [null, '0:p3'] }
 const PUT = {
   kind: 'put',
   seat: 2,
@@ -29,6 +30,21 @@ describe('what it reads', () => {
 
   it('takes a draft', () => {
     expect(parseCommand(DRAFT)).toEqual({ kind: 'draft', seat: 0, ids: ['src:t1', 'src:t2'] })
+  })
+
+  /* Holes and all: a plan says what is in every slot, and most drawers have empty ones. */
+  it('takes an arrangement, keeping its empty slots', () => {
+    expect(parseCommand(ARRANGE)).toEqual({
+      kind: 'arrange',
+      seat: 0,
+      drawer: ['0:t1', null, '0:s2'],
+      bays: [null, '0:p3'],
+    })
+  })
+
+  it('takes an arrangement of an empty drawer', () => {
+    expect(parseCommand({ kind: 'arrange', seat: 0, drawer: [], bays: [] }))
+      .toEqual({ kind: 'arrange', seat: 0, drawer: [], bays: [] })
   })
 
   it('takes a put, and leaves a tile without a rotation', () => {
@@ -91,6 +107,29 @@ describe('what it refuses', () => {
     for (const bad of [[''], [7], [null], ['x'.repeat(65)], 'src:t1', { 0: 'src:t1' }]) {
       expect(parseCommand({ ...DRAFT, ids: bad })).toBeNull()
     }
+  })
+
+  /*
+   * `null` is a slot with nothing in it and is the one non-string a plan may hold. Everything else
+   * that is not an id is refused, in both indexes.
+   */
+  it('a seating plan holding anything but ids and empty slots', () => {
+    for (const bad of [[''], [7], [undefined], [{}], [['0:t1']], '0:t1', { 0: '0:t1' }, null]) {
+      expect(parseCommand({ ...ARRANGE, drawer: bad })).toBeNull()
+      expect(parseCommand({ ...ARRANGE, bays: bad })).toBeNull()
+    }
+  })
+
+  /* Length is the tableau's to check exactly; this only refuses an array nobody could have a drawer for. */
+  it('a seating plan longer than a drawer could be', () => {
+    const many = Array.from({ length: 65 }, (_, at) => `0:t${at}`)
+    expect(parseCommand({ ...ARRANGE, drawer: many })).toBeNull()
+    expect(parseCommand({ ...ARRANGE, bays: many })).toBeNull()
+  })
+
+  it('an arrangement missing one of its two indexes', () => {
+    expect(parseCommand({ kind: 'arrange', seat: 0, drawer: ['0:t1'] })).toBeNull()
+    expect(parseCommand({ kind: 'arrange', seat: 0, bays: ['0:p1'] })).toBeNull()
   })
 
   it('a draft or a payment longer than a game could produce', () => {

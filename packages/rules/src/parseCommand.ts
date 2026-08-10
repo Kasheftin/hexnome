@@ -28,6 +28,16 @@ const MAX_PAYING = 32
 /** The most items one draft may take. A lot is five, and a sweep cannot reach every lot. */
 const MAX_DRAFT = 64
 
+/**
+ * The longest seating plan this will read, per index.
+ *
+ * A plan is one entry per slot whether or not the slot holds anything, so its length is the drawer's
+ * width — `tileSlots` and `plateSlots`, both dials with far smaller ceilings than this. The tableau
+ * refuses any plan whose length is not exactly right; this only stops an arbitrarily long array
+ * arriving from the network before anybody has counted the slots.
+ */
+const MAX_SEATS = 64
+
 function record(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -45,6 +55,22 @@ function index(value: unknown): number | null {
 
 function id(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_ID ? value : null
+}
+
+/** A seating plan: ids by slot, with `null` for an empty one. */
+function seats(value: unknown, limit: number): Array<string | null> | null {
+  if (!Array.isArray(value) || value.length > limit) return null
+  const out: Array<string | null> = []
+  for (const entry of value) {
+    if (entry === null) {
+      out.push(null)
+      continue
+    }
+    const one = id(entry)
+    if (one === null) return null
+    out.push(one)
+  }
+  return out
 }
 
 function ids(value: unknown, limit: number): string[] | null {
@@ -131,6 +157,13 @@ export function parseCommand(value: unknown): PlayerCommand | null {
     case 'draft': {
       const taking = ids(raw.ids, MAX_DRAFT)
       return taking === null ? null : { kind: 'draft', seat, ids: taking }
+    }
+
+    case 'arrange': {
+      const drawer = seats(raw.drawer, MAX_SEATS)
+      const bays = seats(raw.bays, MAX_SEATS)
+      if (drawer === null || bays === null) return null
+      return { kind: 'arrange', seat, drawer, bays }
     }
 
     case 'put': {

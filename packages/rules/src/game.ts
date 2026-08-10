@@ -185,6 +185,31 @@ export type Command =
   }
   /** Out of the round. Not a skipped turn — see docs/game-design.md. */
   | { readonly kind: 'pass', readonly seat: number }
+  /**
+   * Tidying your own drawer. **Not a turn**, and the only command that is not.
+   *
+   * Allowed whenever the game is running: during somebody else's turn, after you have passed, while
+   * the score sheet is up, and as often as you like. Nothing about the round moves.
+   *
+   * It is in the log rather than kept beside it because drawer order is not only decoration — a draft
+   * fills `freeDrawerSlots()` in order and a minted stem takes the first of them, so where the next
+   * tile lands depends on how you left the last one. A copy kept outside the log would put the
+   * server's fold and your screen in different slots.
+   *
+   * Carries the **whole arrangement** rather than the swap that produced it. Absolute means applying
+   * it twice is applying it once, so a client may seat things the moment you let go of a tile and
+   * fold the same command again when it comes back; and a rearrangement that lost a race can be
+   * re-derived from the drawer as it now stands rather than replayed against a board that moved.
+   * See {@link Tableau.arrangeDrawer}, which will only accept a permutation.
+   */
+  | {
+    readonly kind: 'arrange'
+    readonly seat: number
+    /** Item id per tile slot, null for an empty one. Tiles and stems share this index. */
+    readonly drawer: readonly (string | null)[]
+    /** Plate id per bay, null for an empty one. */
+    readonly bays: readonly (string | null)[]
+  }
 
 /**
  * A command a **player** may issue: everything except the deal.
@@ -509,6 +534,20 @@ export function applyCommand(state: GameState, command: Command): CommandResult 
 
   const seat = state.seats[command.seat]
   if (!seat) return refuse(`there is no seat ${command.seat}`)
+
+  /*
+   * **Above the turn guards, because tidying your drawer is not taking a turn.** Its own affair
+   * entirely: it touches one seat's drawer, moves nothing on the board, and leaves `turn`,
+   * `activeSeat` and `firstToPass` exactly as it found them. So a player waiting for their turn, or
+   * out of the round already, may still sort their tiles.
+   */
+  if (command.kind === 'arrange') {
+    if (!seat.tableau.arrangeDrawer(command.drawer, command.bays)) {
+      return refuse(`that is not an arrangement of seat ${command.seat}'s drawer`)
+    }
+    return done()
+  }
+
   if (command.seat !== state.activeSeat) return refuse(`it is not seat ${command.seat}'s turn`)
   if (seat.passed) return refuse(`seat ${command.seat} has passed this round`)
 

@@ -999,6 +999,110 @@ describe('putting something on the board', () => {
   })
 })
 
+/**
+ * The one command that is not a turn.
+ *
+ * Everything else in the log is somebody's move and the round moves with it. Tidying your own drawer
+ * is not a move — it touches one seat's slots and nothing else — so it sits above the turn guards and
+ * changes nothing about whose turn it is. These are the ways that could quietly stop being true.
+ */
+describe('arranging your drawer', () => {
+  const settings = defaultGameSettings(0)
+
+  /** How a seat's drawer reads right now: ids by slot, null where a slot is empty. */
+  function seating(seat: { tableau: Tableau }) {
+    return {
+      drawer: Array.from({ length: settings.tileSlots }, (_, slot) =>
+        seat.tableau.drawerSlotOccupant(slot) ?? null),
+      bays: Array.from({ length: settings.plateSlots }, (_, slot) =>
+        seat.tableau.plateSlotOccupant(slot) ?? null),
+    }
+  }
+
+  /** A seat with its opening stems, and the plan that turns its drawer back to front. */
+  function tidying(seatNumber: number) {
+    const state = createGame(options())
+    const seat = state.seats[seatNumber]!
+    const now = seating(seat)
+    const reversed = [...now.drawer].reverse()
+    return {
+      state,
+      seat,
+      reversed,
+      command: { kind: 'arrange' as const, seat: seatNumber, drawer: reversed, bays: now.bays },
+    }
+  }
+
+  it('is taken from the seat whose turn it is', () => {
+    const { state, seat, command, reversed } = tidying(0)
+    expect(state.activeSeat).toBe(0)
+    // The opening stems are at one end, so reversing them is a change and not a no-op dressed up.
+    expect(seating(seat).drawer).not.toEqual(reversed)
+
+    expect(applyCommand(state, command)).toMatchObject({ ok: true })
+    expect(seating(seat).drawer).toEqual(reversed)
+  })
+
+  /* The whole point of the change: waiting for your turn does not stop you sorting your tiles. */
+  it('is taken from a seat whose turn it is not', () => {
+    const { state, command } = tidying(2)
+    expect(state.activeSeat).not.toBe(2)
+
+    expect(applyCommand(state, command)).toMatchObject({ ok: true })
+  })
+
+  it('is taken from a seat that has already passed the round', () => {
+    const { state, command } = tidying(1)
+    play(state, { kind: 'pass', seat: 0 })
+    play(state, { kind: 'pass', seat: 1 })
+    expect(state.seats[1]!.passed).toBe(true)
+
+    expect(applyCommand(state, command)).toMatchObject({ ok: true })
+  })
+
+  it('moves neither the turn nor the round', () => {
+    const { state, command } = tidying(0)
+    const before = snapshot(state)
+
+    play(state, command)
+    play(state, command)
+
+    const after = snapshot(state)
+    expect(after.turn).toBe(before.turn)
+    expect(after.round).toBe(before.round)
+    expect(after.activeSeat).toBe(before.activeSeat)
+    expect(after.firstToPass).toBe(before.firstToPass)
+  })
+
+  /* Applying the same plan twice is applying it once — what lets a client fold back its own command. */
+  it('leaves the same drawer when it arrives twice', () => {
+    const { state, command } = tidying(0)
+
+    play(state, command)
+    const once = snapshot(state)
+    play(state, command)
+
+    expect(snapshot(state)).toEqual(once)
+  })
+
+  it('is refused when it is not an arrangement of that seat´s drawer', () => {
+    const { state, command } = tidying(0)
+    const before = snapshot(state)
+
+    const result = applyCommand(state, { ...command, drawer: [...command.drawer, 'nope'] })
+
+    expect(result).toMatchObject({ ok: false })
+    expect(snapshot(state)).toEqual(before)
+  })
+
+  it('is refused once the game is over, like everything else', () => {
+    const { state, command } = tidying(0)
+    state.finished = true
+
+    expect(applyCommand(state, command)).toMatchObject({ ok: false })
+  })
+})
+
 describe('a refused command', () => {
   /*
    * Nothing moves. A half-applied command is worse than a refused one: the log and the board then

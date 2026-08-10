@@ -614,6 +614,126 @@ describe('rearranging the drawer', () => {
 })
 
 /**
+ * The whole arrangement at once, stated rather than stepped towards.
+ *
+ * `swapDrawerItems` describes a *move*, which is what a drag is. This describes a *seating plan*,
+ * which is what survives being written down: a plan applied twice is the same plan, and a move
+ * applied twice undoes itself. That difference is the reason this exists.
+ */
+describe('arranging the whole drawer', () => {
+  /** Room for four tile slots and two bays — small enough to write the plan out in full. */
+  const small = () => createTableau({ cells: hexRectangle(6, 6), drawerSlots: 4, plateSlots: 2 })
+
+  /** Ids by slot, in the order a plan would name them, so an expectation reads like the drawer. */
+  const seating = (t: ReturnType<typeof small>, slots: number) =>
+    Array.from({ length: slots }, (_, slot) => t.drawerSlotOccupant(slot) ?? null)
+
+  it('seats everything where the plan says', () => {
+    const t = small()
+    const a = t.addTile(RED, inDrawer(0))!
+    const b = t.addTile(BLUE, inDrawer(1))!
+
+    expect(t.arrangeDrawer([null, null, b.id, a.id], [null, null])).toBe(true)
+    expect(seating(t, 4)).toEqual([null, null, b.id, a.id])
+    expect(t.tile(a.id)!.location).toEqual(inDrawer(3))
+    expect(t.tile(b.id)!.location).toEqual(inDrawer(2))
+  })
+
+  /** A rotation, not a swap: no pair trades places, so nothing here could be done a pair at a time. */
+  it('rotates a full drawer, which no sequence of legal swaps would reach in one step', () => {
+    const t = small()
+    const ids = Array.from({ length: 4 }, (_, slot) => t.addTile(RED, inDrawer(slot))!.id)
+
+    expect(t.arrangeDrawer([ids[3]!, ids[0]!, ids[1]!, ids[2]!], [null, null])).toBe(true)
+    expect(seating(t, 4)).toEqual([ids[3], ids[0], ids[1], ids[2]])
+    expect(t.freeDrawerSlots()).toEqual([])
+  })
+
+  it('moves stems and plates too, each in its own index', () => {
+    const t = small()
+    const tile = t.addTile(RED, inDrawer(0))!
+    const stem = t.addStem(1)!
+    const plate = t.addPlate(inPlateSlot(0))!
+
+    expect(t.arrangeDrawer([stem.id, null, tile.id, null], [null, plate.id])).toBe(true)
+    expect(t.stems()[0]!.slot).toBe(0)
+    expect(t.tile(tile.id)!.location).toEqual(inDrawer(2))
+    expect(t.plate(plate.id)!.location).toEqual(inPlateSlot(1))
+  })
+
+  /**
+   * The property the network relies on. A plan is a description of where things are, so applying it
+   * to a drawer that already matches is a no-op — which is what lets a client seat things locally and
+   * then fold the very same command again when the server hands it back.
+   */
+  it('leaves the same drawer when applied twice', () => {
+    const t = small()
+    const a = t.addTile(RED, inDrawer(0))!
+    const b = t.addTile(BLUE, inDrawer(1))!
+    const plan = [b.id, null, a.id, null]
+
+    expect(t.arrangeDrawer(plan, [null, null])).toBe(true)
+    const once = seating(t, 4)
+    expect(t.arrangeDrawer(plan, [null, null])).toBe(true)
+    expect(seating(t, 4)).toEqual(once)
+  })
+
+  /**
+   * Every way a plan can name something other than what is seated, and one assertion for all of them:
+   * refused, and the drawer untouched.
+   */
+  it('refuses anything that is not a permutation of what is seated', () => {
+    const t = small()
+    const a = t.addTile(RED, inDrawer(0))!.id
+    const b = t.addTile(BLUE, inDrawer(1))!.id
+    const plate = t.addPlate(inPlateSlot(0))!.id
+    const before = seating(t, 4)
+
+    const refusals: Array<[string, (string | null)[], (string | null)[]]> = [
+      ['the same tile twice', [a, a, null, null], [plate, null]],
+      ['a tile left out', [a, null, null, null], [plate, null]],
+      ['a plate in a tile slot', [a, b, plate, null], [null, null]],
+      ['a tile in a bay', [a, null, null, null], [b, plate]],
+      /*
+       * The one that counting alone will not catch: a tile and a plate trade index spaces, so the
+       * plan holds the right number of each and still names a seat neither could sit in.
+       */
+      ['a tile and a plate trading places', [a, plate, null, null], [b, null]],
+      ['an id nobody has', [a, b, 'nope', null], [plate, null]],
+      ['too few slots', [a, b], [plate, null]],
+      ['too many slots', [a, b, null, null, null], [plate, null]],
+      ['too few bays', [a, b, null, null], [plate]],
+    ]
+
+    for (const [why, drawer, bays] of refusals) {
+      expect(`${why}: ${t.arrangeDrawer(drawer, bays)}`).toBe(`${why}: false`)
+      expect(seating(t, 4)).toEqual(before)
+      expect(t.plate(plate)!.location).toEqual(inPlateSlot(0))
+    }
+  })
+
+  /** A plate's own tile has no seat of its own, so no plan may name one. */
+  it('refuses a plate´s own tile', () => {
+    const t = small()
+    const plate = t.addPlate(inPlateSlot(0))!
+    const token = t.addTile(RED, onPetal(plate.id, 0), { fixed: true })!
+    const loose = t.addTile(BLUE, inDrawer(0))!
+
+    expect(t.arrangeDrawer([loose.id, token.id, null, null], [plate.id, null])).toBe(false)
+  })
+
+  /** Nor anything out on the board: a plan shuffles the drawer, it does not reach into the game. */
+  it('refuses to pull something back off the board', () => {
+    const t = small()
+    const onTable = t.addPlate(onBoard(0, 0))!
+    const loose = t.addTile(BLUE, inDrawer(0))!
+
+    expect(t.arrangeDrawer([loose.id, null, null, null], [onTable.id, null])).toBe(false)
+    expect(t.plate(onTable.id)!.location).toEqual(onBoard(0, 0))
+  })
+})
+
+/**
  * Distance in cells between two holes. Local to the spec: the rule under test is about *touching*,
  * and this only exists to describe the answer compactly.
  */

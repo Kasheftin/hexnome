@@ -370,17 +370,19 @@ function absorb(rows: readonly CommandRow[]): void {
    * sheet back on screen after every refresh of round 2, for the rest of the round.
    *
    * A round closing raises it; anything a player did afterwards means the table has moved on without
-   * it. The deal behind a close does not count: the server writes the new round's opening lot in the
-   * same breath as the pass that ended the old one, so it arrives before anybody could have read
-   * anything.
+   * it. Two kinds do not count as moving on. The deal behind a close, because the server writes the
+   * new round's opening lot in the same breath as the pass that ended the old one, so it arrives
+   * before anybody could have read anything. And an arrange, because sorting your drawer while the
+   * sheet is up is a thing people do *while reading it*.
    */
+  const idles = new Set(['deal', 'arrange'])
   let closed = false
   for (const row of rows) {
     const wasRound = state.round
     const played = commit(row.command, { tell: false })
     if (played) awarded.push(...played.awarded)
     if (state.round !== wasRound || state.finished) closed = true
-    else if (row.command.kind !== 'deal') closed = false
+    else if (!idles.has(row.command.kind)) closed = false
   }
   if (awarded.length > 0) arriving.value = awarded
   revision.value++
@@ -434,6 +436,7 @@ async function submitTurn(
    */
   beforeFold?: () => void,
 ): Promise<boolean> {
+  await settleArrangement()
   const outcome = await sync.submit(command)
   if (outcome.failure) {
     /*
@@ -448,6 +451,119 @@ async function submitTurn(
   beforeFold?.()
   absorb(outcome.commands)
   return true
+}
+
+/**
+ * Sorting your own drawer, which is not a turn.
+ *
+ * The one place this page acts before the server has agreed — and it has no choice, because the scene
+ * has already done it. A drag ends by seating the item where it was dropped (`TableauView.dropHeld`),
+ * and making that wait on a round trip would put a half-second of lag inside the one gesture in the
+ * game that should feel like moving a physical thing. So the model moves, and this catches up.
+ *
+ * That is safe here and nowhere else, because an `arrange` states **where everything sits** rather
+ * than what moved. Folding the row when it comes back re-seats what is already seated. A rearrangement
+ * that lost a race is not replayed but re-read off the drawer as it now stands. And one that never
+ * lands costs a drawer order, which the next drag states again in full.
+ */
+const ARRANGE_SETTLE_MS = 400
+
+/** How many times to lose the race before giving the drawer up as not worth another round trip. */
+const ARRANGE_ATTEMPTS = 4
+
+let arrangeTimer: number | null = null
+let arrangeInFlight: Promise<void> | null = null
+let arrangeAgain = false
+
+/** How your drawer is seated right now, in the words an `arrange` uses. */
+function myArrangement(): PlayerCommand {
+  const mine = boardOf(mySeat.value)
+  return {
+    kind: 'arrange',
+    seat: mySeat.value,
+    drawer: Array.from({ length: drawerShape.tileSlots }, (_, slot) =>
+      mine.drawerSlotOccupant(slot) ?? null),
+    bays: Array.from({ length: drawerShape.plateSlots }, (_, slot) =>
+      mine.plateSlotOccupant(slot) ?? null),
+  }
+}
+
+/**
+ * The scene rearranged something. Redraw, and — if it was yours to rearrange — write it down.
+ *
+ * Two gates. **A seat**, because a spectator has no drawer and no token to send with. And an **idle
+ * phase**: while a placement is provisional the tile is on the board here and still in the drawer in
+ * the log, so an arrangement listing what is left would not be an arrangement of the drawer the
+ * server holds, and would be refused for a reason that is not the player's fault.
+ */
+function onRearranged(): void {
+  revision.value++
+  if (store.mySeat === null) return
+  if (viewedSeat.value !== mySeat.value) return
+  if (phase.value.kind !== 'idle') return
+
+  if (arrangeTimer !== null) window.clearTimeout(arrangeTimer)
+  arrangeTimer = window.setTimeout(() => {
+    arrangeTimer = null
+    void startArrange()
+  }, ARRANGE_SETTLE_MS)
+}
+
+/**
+ * Send the drawer as it stands, losing the race as often as it takes.
+ *
+ * A rearrangement takes a link in the chain like any other command, so one taken while somebody else
+ * is playing may find the head has moved. Catching up and asking again is safe *because the
+ * arrangement is re-read* each time: what goes out the second time describes the drawer after the
+ * turn that beat it, not before.
+ */
+async function sendArrangement(): Promise<void> {
+  for (let attempt = 1; attempt <= ARRANGE_ATTEMPTS; attempt++) {
+    const outcome = await sync.submit(myArrangement())
+    if (!outcome.failure) {
+      absorb(outcome.commands)
+      return
+    }
+    if (outcome.failure !== 'stale') {
+      console.warn(`[hexnome] the drawer order was not saved: ${outcome.message ?? outcome.failure}`)
+      return
+    }
+    absorb(await sync.catchUp())
+  }
+  // Not worth a banner: the order is how the drawer looks, not what is in it, and the next drag
+  // states the whole arrangement again — as does a reload, from the log.
+  console.warn(`[hexnome] the drawer order lost ${ARRANGE_ATTEMPTS} races and was not saved.`)
+}
+
+/** One in flight at a time, with at most one waiting behind it. */
+function startArrange(): Promise<void> {
+  if (arrangeInFlight) {
+    arrangeAgain = true
+    return arrangeInFlight
+  }
+  arrangeInFlight = sendArrangement().finally(() => {
+    arrangeInFlight = null
+    if (!arrangeAgain) return
+    arrangeAgain = false
+    void startArrange()
+  })
+  return arrangeInFlight
+}
+
+/**
+ * Get a pending rearrangement into the log before asking the server for anything else.
+ *
+ * Two commands racing for one link in the chain means one of them loses, and a turn losing to your
+ * own drawer-tidying would be this page beating itself. The arrangement is already on screen, so it
+ * goes first and the turn follows it.
+ */
+async function settleArrangement(): Promise<void> {
+  if (arrangeTimer !== null) {
+    window.clearTimeout(arrangeTimer)
+    arrangeTimer = null
+    void startArrange()
+  }
+  while (arrangeInFlight) await arrangeInFlight
 }
 
 /** Whose turn it is, read through `revision` so it follows the state rather than shadowing it. */
@@ -1644,6 +1760,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         @drawer-target="onDrawerTarget"
         @hover-plate-slot="onHoverPlateSlot"
         @changed="revision++"
+        @rearranged="onRearranged"
       />
 
       <!--
