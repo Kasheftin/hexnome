@@ -331,31 +331,49 @@ const activeIndex = computed(() => {
 })
 
 /**
+ * Which chair is **yours**, as the server worked it out from the seat token.
+ *
+ * Zero for a spectator, who has none: they get a board to look at rather than a blank screen, and
+ * every gate below turns on `myTurn`, which a spectator never satisfies. A solo game is seat 0 too,
+ * so nothing about one player is special-cased.
+ */
+const mySeat = computed(() => store.mySeat ?? 0)
+
+/** Whether the turn is yours to take — the question every control on the bar really asks. */
+const myTurn = computed(() => activeIndex.value === mySeat.value)
+
+/**
  * Which seat's board and drawer are on screen.
  *
  * A player is a **viewport**, not a slice of the truth: everyone holds the same state and differs
- * only in what they are looking at. Null means *follow whoever is playing*, which is what a hot-seat
- * game wants — otherwise every turn would begin with a click that carries no meaning. Clicking a seat
- * in the score panel pins the view there, to see what somebody else is building.
+ * only in what they are looking at. Null means *your own board*, which is where a player should be
+ * almost always — a view that followed the turn would whip your board away the moment somebody else
+ * played, which is exactly what it used to do. Clicking a seat in the score panel pins the view
+ * there, to see what they are building; clicking it again comes home.
  */
 const pinnedSeat = shallowRef<number | null>(null)
 const viewedSeat = computed(() => {
   const pinned = pinnedSeat.value
-  return pinned !== null && pinned < state.seats.length ? pinned : activeIndex.value
+  return pinned !== null && pinned < state.seats.length ? pinned : mySeat.value
 })
 
 /** The seat being looked at, and the column everyone drafts from. */
 const board = (): Tableau => (state.seats[viewedSeat.value] ?? state.seats[0]!).tableau
 const source = (): Tableau => state.source
 
+/** A named seat's own board, for the paths that must act on the player rather than on the view. */
+const boardOf = (seat: number): Tableau => (state.seats[seat] ?? state.seats[0]!).tableau
+
 /**
- * Watching somebody else's turn: the table is live, but not for you.
+ * Reading somebody else's board: the table is live, but this is not your part of it.
  *
- * False while a turn is settling. The view is held on the player who just acted so their pieces can
- * be seen arriving, and the turn has moved on underneath — but "watching" is about reading another
- * player's board, and calling it that would put a badge on your own turn as it finishes.
+ * About the **viewport**, and only the viewport, which is what the word means. Whether you may *act*
+ * is `myTurn`, and the two are independent: your own board while another player thinks is neither
+ * watching nor yours to play on.
+ *
+ * False while a turn is settling, so a badge does not flash over your own board as its pieces land.
  */
-const watching = computed(() => !settling.value && viewedSeat.value !== activeIndex.value)
+const watching = computed(() => !settling.value && viewedSeat.value !== mySeat.value)
 
 /** Every seat, for the score panel: who is playing, who has passed, what they have banked. */
 const seatRows = computed(() => {
@@ -367,6 +385,7 @@ const seatRows = computed(() => {
     total: seat.banked.reduce((sum, points) => sum + points, 0),
     active: seat.seat === state.activeSeat,
     viewed: seat.seat === viewedSeat.value,
+    mine: seat.seat === mySeat.value,
   }))
 })
 
@@ -599,10 +618,12 @@ const freeBays = computed(() => {
 /**
  * What the bar may offer.
  *
- * Everything closes while watching another seat. The rules would refuse the command anyway — a turn
- * belongs to one seat — but a live button that is answered with a refusal is a worse way to say so.
+ * Two questions, and both must be yes. **Is the turn mine** — the rules would refuse a command from
+ * anybody else anyway, but a live button answered with a refusal is a worse way to say so. And **am
+ * I looking at my own board** — every control here acts on the player whose turn it is, and pressing
+ * Take while reading somebody else's board is not something anyone means to do.
  */
-const options = computed<TurnOptions>(() => watching.value
+const options = computed<TurnOptions>(() => (!myTurn.value || watching.value)
   ? { take: false, put: false, pass: false }
   : turnOptions({
     sourceTiles: sourceItems.value.filter(item => item.kind === 'tile').length,
@@ -673,25 +694,21 @@ const draftAttr = computed(() => draftAttribute(sourceItems.value, selectedIds.v
 /** Which sweeps are finished — what the bar names, and what makes Take legal. */
 const completed = computed(() => completedStrategies(sourceItems.value, selectedIds.value))
 
-/**
- * In singleplayer it is always your turn, so this is a status line. Multiplayer will put
- * "Player 2's turn" here and hide the actions.
- */
-/** The name of whoever is playing, for the bar and the header. */
+/** The name of whoever is playing, for the bar to name when the turn is not yours. */
 const activeName = computed(() => {
   void revision.value
   return state.seats[state.activeSeat]?.name ?? ''
 })
 
 /**
- * Whose turn the bar is announcing.
+ * What the bar says about whose turn it is.
  *
- * While you are looking at somebody else's board the bar names them instead, because every control on
- * it would act for the player whose turn it is — and pressing Take while reading another board is not
- * something anybody means to do.
+ * "Your turn" is now a claim about **ownership** rather than about the viewport. It used to be
+ * printed whenever you were not reading another board, which in a hot-seat game was true and at a
+ * real table told every player they were up at once.
  */
 const turnLabel = computed(() =>
-  watching.value ? `Waiting for ${activeName.value}` : 'Your turn')
+  myTurn.value ? 'Your turn' : `Waiting for ${activeName.value}`)
 
 function chooseAction(action: TurnAction): void {
   if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
@@ -869,8 +886,8 @@ function startNextRound(): void {
 
   showResults.value = false
   /*
-   * Let go of whatever seat the results panel was showing. Play follows the turn; staying pinned to
-   * the player whose score you were reading would start the next round watching somebody else.
+   * Let go of whatever seat the results panel was showing, so a new round opens on your own board
+   * rather than on the one whose score you were reading last.
    */
   pinnedSeat.value = null
   announceRound(count.value.round, beginTurn)
@@ -1113,31 +1130,26 @@ function onSelectTile(id: string): void {
  *
  * What it needed was time. The rules hand the turn on as part of the draft, and the view follows
  * whoever is playing — so the tiles arrived in a drawer that was already somebody else's, which is to
- * say they were never seen at all. Holding the view on the drafting seat for the length of the glide
- * is the whole fix; the turn is announced when it finishes.
+ * say they were never seen at all.
+ *
+ * The view no longer moves: it sits on your own board, and the tiles are landing in your own drawer.
+ * What is still needed is the **time** — the turn is announced once the glide has finished, so the
+ * card does not come up over pieces still travelling.
  */
 function confirmTake(): void {
   if (!canConfirm.value || settling.value) return
   const seat = activeIndex.value
   // Which slot each takes is the rules' business: the draft crosses from the source's model into this
   // seat's, and only one of them can decide where things land.
-  /*
-   * Held **before** the command, not after. Applying it hands the turn on, and the view follows the
-   * turn — so a pin set afterwards would flip to the next player and back again within the tick.
-   */
   settling.value = true
-  pinnedSeat.value = seat
   if (!commit({ kind: 'draft', seat, ids: [...selectedIds.value] })) {
     settling.value = false
-    pinnedSeat.value = null
     return
   }
 
   settleTimer = window.setTimeout(() => {
     settleTimer = null
     settling.value = false
-    // Back to following the turn, which by now belongs to somebody else.
-    pinnedSeat.value = null
     endTurn()
   }, DRAFT_SETTLE_MS)
 }
@@ -1344,8 +1356,17 @@ function commitPayment(
   origin: TileLocation | PlateLocation,
   paying: readonly string[],
 ): void {
-  if (item.kind === 'tile') board().moveTile(item.id, origin as TileLocation)
-  else board().movePlate(item.id, origin as PlateLocation)
+  /*
+   * **The acting seat's board, named, not `board()`.**
+   *
+   * `board()` is whatever is *on screen*, and these three lines undo and redo a placement in the
+   * model. They were only ever right because the view used to follow the turn, so the two coincided.
+   * With the view sitting on your own board they part company the moment anybody peeks, and this
+   * would move a piece on the wrong player's board.
+   */
+  const playing = boardOf(seat)
+  if (item.kind === 'tile') playing.moveTile(item.id, origin as TileLocation)
+  else playing.movePlate(item.id, origin as PlateLocation)
 
   // Silent: the scene is told once `arriving` is set, so a reward is known to be one before it is seen.
   const played = commit({
@@ -1356,30 +1377,27 @@ function commitPayment(
     paying: [...paying],
     // How the plate was turned in the bay. Turning is not a turn and so not a command of its own,
     // but it decides which cell each petal lands on — a replay without it refuses the placement.
-    rotation: item.kind === 'plate' ? board().plate(item.id)?.rotation : undefined,
+    rotation: item.kind === 'plate' ? playing.plate(item.id)?.rotation : undefined,
   }, { tell: false })
   if (!played) {
     // Refused after all: put it back where the player left it rather than silently undoing their move.
-    if (item.kind === 'tile') board().moveTile(item.id, to as TileLocation)
-    else board().movePlate(item.id, to as PlateLocation)
+    if (item.kind === 'tile') playing.moveTile(item.id, to as TileLocation)
+    else playing.movePlate(item.id, to as PlateLocation)
     revision.value++
     return
   }
 
   /*
-   * An enclosure pays in stems, and they arrive from the left. Same treatment as a draft: the view is
-   * held on the player who earned them long enough to see them come in, because the turn has already
-   * moved on underneath.
+   * An enclosure pays in stems, and they arrive from the left. Same treatment as a draft: the turn
+   * waits for them, so the card does not come up over stems still travelling.
    */
   if (played.awarded.length > 0) {
     arriving.value = [...played.awarded]
     revision.value++
     settling.value = true
-    pinnedSeat.value = seat
     settleTimer = window.setTimeout(() => {
       settleTimer = null
       settling.value = false
-      pinnedSeat.value = null
       arriving.value = []
       endTurn()
     }, AWARD_SETTLE_MS)
@@ -1738,11 +1756,11 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       </p>
 
       <!--
-        Everyone at the table, and which of them you are looking at.
+        Everyone at the table: whose turn it is, which of them you are, and which you are looking at.
 
-        The view follows whoever is playing, so in an ordinary hot-seat turn this reads rather than
-        being clicked. Clicking a seat pins the view to it — to see what somebody else is building —
-        and clicking it again lets go and follows the turn once more.
+        The view sits on your own board and stays there, so this reads rather than being clicked.
+        Clicking a seat pins the view to it — to see what somebody else is building — and clicking it
+        again comes home.
       -->
       <ul
         v-if="seatRows.length > 1"
@@ -1760,6 +1778,14 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
           >
             <span class="seat-mark">{{ row.active ? '▸' : '' }}</span>
             <span class="seat-name">{{ row.name }}</span>
+            <!--
+              Which one is you. Only at a table: in a solo game it would be the only row, saying
+              something nobody could have wondered about.
+            -->
+            <span
+              v-if="row.mine"
+              class="seat-you"
+            >you</span>
             <span class="seat-note">{{ row.passed ? 'passed' : '' }}</span>
             <span class="seat-score">{{ row.total }}</span>
           </button>
@@ -2156,6 +2182,17 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * Brass, because it is the one row that is about the reader rather than about the game — the same
+ * colour the lobby marks your chair in. Quiet enough not to compete with the name it follows.
+ */
+.seat-you {
+  color: #e8c878;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .seat-note {
