@@ -93,6 +93,7 @@ import TileEnvironment from '@/scene/TileEnvironment.vue'
 import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
 import RoundResults from '@/ui/RoundResults.vue'
+import HintTip from '@/ui/HintTip.vue'
 import PresenceMark from '@/ui/PresenceMark.vue'
 import TileChip from '@/ui/TileChip.vue'
 import TurnAnnounce from '@/ui/TurnAnnounce.vue'
@@ -1909,36 +1910,44 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       @pointerenter="overButtons = true"
       @pointerleave="overButtons = false"
     >
-      <button
-        type="button"
-        class="rotate-button left"
-        title="Rotate counter-clockwise (Q while dragging)"
-        aria-label="Rotate plate counter-clockwise"
-        @click="rotate(-1)"
+      <HintTip
+        text="Rotate counter-clockwise (Q while dragging)"
+        side="below"
       >
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          focusable="false"
+        <button
+          type="button"
+          class="rotate-button left"
+          aria-label="Rotate plate counter-clockwise"
+          @click="rotate(-1)"
         >
-          <path :d="ROTATE_ICONS.counterClockwise" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="rotate-button right"
-        title="Rotate clockwise (E while dragging)"
-        aria-label="Rotate plate clockwise"
-        @click="rotate(1)"
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path :d="ROTATE_ICONS.counterClockwise" />
+          </svg>
+        </button>
+      </HintTip>
+      <HintTip
+        text="Rotate clockwise (E while dragging)"
+        side="below"
       >
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          focusable="false"
+        <button
+          type="button"
+          class="rotate-button right"
+          aria-label="Rotate plate clockwise"
+          @click="rotate(1)"
         >
-          <path :d="ROTATE_ICONS.clockwise" />
-        </svg>
-      </button>
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path :d="ROTATE_ICONS.clockwise" />
+          </svg>
+        </button>
+      </HintTip>
     </div>
 
     <Transition name="bar">
@@ -2492,7 +2501,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .seats button {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   width: 100%;
   padding: 5px 6px;
   border: 1px solid transparent;

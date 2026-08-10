@@ -15,6 +15,7 @@
  * is already running (stores/game.ts).
  */
 import { mdiCog, mdiDiceMultiple } from '@mdi/js'
+import HintTip from '@/ui/HintTip.vue'
 import { computed, nextTick, ref, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -564,21 +565,22 @@ const selectedMode = computed(() => modeInfo(mode.value))
             Deliberately outside the label: a button nested in one is also a click on the label, so
             every reroll would drag focus into the field it just filled.
           -->
-          <button
-            type="button"
-            class="reroll"
-            aria-label="Suggest another name"
-            title="Suggest another name"
-            @click="reroll"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
+          <HintTip text="Suggest another name">
+            <button
+              type="button"
+              class="reroll"
+              aria-label="Suggest another name"
+              @click="reroll"
             >
-              <path :d="mdiDiceMultiple" />
-            </svg>
-          </button>
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path :d="mdiDiceMultiple" />
+              </svg>
+            </button>
+          </HintTip>
         </div>
 
         <fieldset class="group kinds">

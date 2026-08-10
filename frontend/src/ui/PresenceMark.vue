@@ -16,29 +16,52 @@
  * tighter one. So a player who is there always shows present, and one who has just closed the tab
  * goes on showing present for a while yet. Erring that way is deliberate: *away* should mean gone.
  */
+import { computed } from 'vue'
 import { mdiAlert, mdiCircle } from '@mdi/js'
+import HintTip from './HintTip.vue'
 
-defineProps<{
+const props = defineProps<{
   online: boolean
   /** Whose presence it is, for the word only a screen reader hears. */
   name: string
 }>()
+
+/** What the mark means for a screen reader: short, because it is read out with the name beside it. */
+const said = computed(() =>
+  props.online ? `${props.name} is here` : `${props.name} has not been heard from`)
+
+/**
+ * And what it means in a tooltip, which has room to say the part that is genuinely unobvious.
+ *
+ * A green dot could as easily mean "their turn" or "still in the round", and a red triangle could
+ * read as an error the reader is supposed to do something about. So both name the actual test — when
+ * the server last heard from them — and the red one says outright that it might be nothing.
+ */
+const explained = computed(() => props.online
+  ? `${props.name} is at the table — their game checked in within the last minute.`
+  : `${props.name} has not checked in for a minute or two. They may have closed the tab, or just lost their connection.`)
 </script>
 
 <template>
-  <span
-    class="mark"
-    :class="{ away: !online }"
-  >
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      focusable="false"
+  <HintTip :text="explained">
+    <span
+      class="mark"
+      :class="{ away: !online }"
     >
-      <path :d="online ? mdiCircle : mdiAlert" />
-    </svg>
-    <span class="sr-only">{{ online ? `${name} is here` : `${name} has not been heard from` }}</span>
-  </span>
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path :d="online ? mdiCircle : mdiAlert" />
+      </svg>
+      <!--
+        The short form, not the tooltip's. A screen reader is reading a list of players and wants the
+        fact; the tooltip exists for someone looking at a shape and wondering what it is.
+      -->
+      <span class="sr-only">{{ said }}</span>
+    </span>
+  </HintTip>
 </template>
 
 <style scoped>
