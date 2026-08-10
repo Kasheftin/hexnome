@@ -35,7 +35,11 @@ export default defineConfig({
      */
     proxy: {
       '/desk': 'http://localhost:3000',
+      '/games': 'http://localhost:3000',
       '/health': 'http://localhost:3000',
+      // The head socket. `ws` is what makes the proxy pass an upgrade through rather than answering
+      // it with a 200 and leaving the client waiting for a handshake that never comes.
+      '/watch': { target: 'http://localhost:3000', ws: true },
     },
   },
   test: {

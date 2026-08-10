@@ -30,6 +30,7 @@ import { parseGameSettings, type GameSettings } from '../rules/gameSettings'
 import type { GameStatus, GameView, SeatClaim } from '../rules/wire'
 import { PrismaService } from '../prisma.service'
 import type { CreateGame } from './dto'
+import { HeadsGateway } from './heads.gateway'
 
 /** Whoever creates the game sits here, and turn order starts from it. */
 const CREATOR_SEAT = 0
@@ -45,7 +46,10 @@ interface GameRow {
 
 @Injectable()
 export class GamesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly heads: HeadsGateway,
+  ) {}
 
   /**
    * Open a table and sit down at it.
@@ -149,12 +153,26 @@ export class GamesService {
       where: { id, status: 'waiting' },
       data: { status: 'running', seq: { increment: 1 } },
     })
-    return this.viewOf(await this.rowOf(id), token)
+
+    // A table that just filled is what everyone waiting is waiting for.
+    const started = await this.rowOf(id)
+    this.heads.moved(id, started.seq)
+    return this.viewOf(started, token)
   }
 
-  /** Say that something about this game changed, without saying what. */
+  /**
+   * Say that something about this game changed, without saying what.
+   *
+   * The broadcast goes out *after* the write, never before: a watcher told to look before the row
+   * has moved fetches the old game, sees nothing new, and stops. Being late is a delay; being early
+   * is a miss.
+   */
   private async touch(id: string): Promise<void> {
-    await this.prisma.game.update({ where: { id }, data: { seq: { increment: 1 } } })
+    const game = await this.prisma.game.update({
+      where: { id },
+      data: { seq: { increment: 1 } },
+    })
+    this.heads.moved(id, game.seq)
   }
 
   private async rowOf(id: string): Promise<GameRow> {

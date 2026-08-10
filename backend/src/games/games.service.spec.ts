@@ -3,6 +3,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common'
 import { defaultGameSettings, SOLO, type GameSettings } from '../rules/gameSettings'
 import { PrismaService } from '../prisma.service'
 import { GamesService } from './games.service'
+import { HeadsGateway } from './heads.gateway'
 
 /**
  * The games service, against the real database.
@@ -19,7 +20,13 @@ import { GamesService } from './games.service'
  */
 
 const prisma = new PrismaService()
-const games = new GamesService(prisma)
+/*
+ * A real gateway with nothing attached. `moved` finds no room and returns, so the service is
+ * exercised exactly as it runs — no stub to fall out of step with it, and no socket server to tidy
+ * up. What the gateway itself does is `heads.gateway.spec.ts`.
+ */
+const heads = new HeadsGateway()
+const games = new GamesService(prisma, heads)
 const made: string[] = []
 
 function settingsFor(players: number): GameSettings {
