@@ -402,7 +402,17 @@ function absorb(rows: readonly CommandRow[]): void {
  * fly, so a round trip hides inside an animation that was there anyway — and waiting is what makes
  * every client's copy of the log the same copy.
  */
-async function submitTurn(command: PlayerCommand): Promise<boolean> {
+async function submitTurn(
+  command: PlayerCommand,
+  /**
+   * Run between the server's answer and the fold, in the same tick as both.
+   *
+   * One caller needs it. A `put` is submitted with the item still on the board, and the fold expects
+   * it back in the drawer — so the two have to happen with nothing rendered in between, or the piece
+   * is seen returning to the drawer and setting out again.
+   */
+  beforeFold?: () => void,
+): Promise<boolean> {
   const outcome = await sync.submit(command)
   if (outcome.failure) {
     /*
@@ -414,6 +424,7 @@ async function submitTurn(command: PlayerCommand): Promise<boolean> {
     absorb(await sync.catchUp())
     return false
   }
+  beforeFold?.()
   absorb(outcome.commands)
   return true
 }
@@ -1345,14 +1356,15 @@ function applyPayment(): void {
    * board it was paid from. Only when it has landed is the turn sent — which also means the round
    * trip runs after an animation rather than before one, and is invisible inside it.
    *
-   * `settling` closes Apply while it plays, so a second press cannot pay twice.
+   * `settling` closes Apply while it plays — and stays closed through the submit, because the turn is
+   * not taken until the server says so and a second press in that window would send it twice.
+   * `commitPayment` releases it.
    */
   const seat = mySeat.value
   settling.value = true
   spending.value = [...current.selected]
   settleTimer = window.setTimeout(() => {
     settleTimer = null
-    settling.value = false
     spending.value = []
     void commitPayment(seat, item, to, current.origin, current.selected)
   }, departureMillis(current.selected.length))
@@ -1394,29 +1406,50 @@ async function commitPayment(
   /*
    * **The acting seat's board, named, not `board()`.**
    *
-   * `board()` is whatever is *on screen*, and these three lines undo and redo a placement in the
-   * model. They were only ever right because the view used to follow the turn, so the two coincided.
-   * With the view sitting on your own board they part company the moment anybody peeks, and this
-   * would move a piece on the wrong player's board.
+   * `board()` is whatever is *on screen*, and the undo below moves a piece in the model. It was only
+   * ever right because the view used to follow the turn, so the two coincided. With the view sitting
+   * on your own board they part company the moment anybody peeks.
    */
   const playing = boardOf(seat)
-  if (item.kind === 'tile') playing.moveTile(item.id, origin as TileLocation)
-  else playing.movePlate(item.id, origin as PlateLocation)
-
   /*
-   * The rotation is read before the submit, because the plate is back in its bay by then and the
-   * turn it was placed at is the thing the server has to be told. Turning is free and not a command
-   * of its own, but it decides which cell each petal lands on.
+   * How the plate was turned in the bay. Turning is free, repeatable and not a turn, so it is not a
+   * command of its own — but it decides which cell each petal lands on, and a replay without it
+   * refuses the placement and rebuilds a board with a tile missing. Rotation survives a move, so it
+   * reads the same before the undo below or after it.
    */
   const rotation = item.kind === 'plate' ? playing.plate(item.id)?.rotation : undefined
 
-  const took = await submitTurn({ kind: 'put', seat, item, to, paying: [...paying], rotation })
-  if (!took) {
-    // Refused: put it back where the player left it rather than silently undoing their move.
-    if (item.kind === 'tile') playing.moveTile(item.id, to as TileLocation)
-    else playing.movePlate(item.id, to as PlateLocation)
-    revision.value++
-  }
+  /*
+   * **Submitted with the placement still on the board.**
+   *
+   * The fold wants the item back in the drawer — a `put` carries the placement and its payment
+   * together, so the live path has to start where a replay starts. But the *server* does not: it
+   * folds its own log, where the item never left the drawer. So the undo waits until the answer is
+   * in hand and happens in the same tick as the fold, with nothing rendered between them.
+   *
+   * Undoing first is what the player saw as the tile flying back to the drawer and out again: the
+   * scene eases every piece toward its model position each frame, so a model change is visible
+   * whether or not `revision` moves, and the round trip was long enough to watch.
+   */
+  await submitTurn({ kind: 'put', seat, item, to, paying: [...paying], rotation }, () => {
+    if (item.kind === 'tile') playing.moveTile(item.id, origin as TileLocation)
+    else playing.movePlate(item.id, origin as PlateLocation)
+    /*
+     * And the turn is over. Set here rather than after the fold because `absorb` renders: leaving it
+     * for a line later showed the bar still offering Apply on a placement that had already been
+     * paid for, and pressing it a second time earned "that tile is not in your drawer".
+     */
+    phase.value = IDLE
+  })
+  /*
+   * Released here rather than before the submit, so Apply is dead for the whole round trip.
+   *
+   * Unless `absorb` has taken it over: an enclosure that paid out holds the turn again while the
+   * stems come in, and its own timer is what ends that.
+   */
+  if (arriving.value.length === 0) settling.value = false
+
+  // A refusal leaves the placement exactly where the player left it, since it was never undone.
   // Everything else — the fold, the arrivals, the card — is `absorb`'s, for every client alike.
 }
 
