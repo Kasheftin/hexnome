@@ -29,7 +29,6 @@ import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@hexnome/rules/agenda'
-import { openingPlateCodes } from '@hexnome/rules/deck'
 import { createDesk as createLocalDesk, tileCode, tileFromCode } from '@hexnome/rules/desk'
 import { finalTally, NOTHING_LEFT } from '@hexnome/rules/groups'
 import {
@@ -112,8 +111,6 @@ import {
   DEFAULT_PLATE_SLOTS,
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
-  DEFAULT_TILE_COPIES,
-  DEFAULT_PLATE_COPIES,
   DEFAULT_TILE_SLOTS,
   DEFAULT_STEMS_PER_EXTERNAL_ANCHOR,
   DEFAULT_STEMS_PER_INTERNAL_ANCHOR,
@@ -173,17 +170,14 @@ onMounted(async () => {
   }
 
   /*
-   * Two desks, one per kind, told apart by their seed alone — the service has no idea which is which.
-   * The plate desk is told to hold back the opening plates, which are already on the board.
+   * Two desks, one per kind, and the game is all this end says about either. How big each bag is,
+   * what order it deals in and which plates it holds back are the server's to work out from the game
+   * it already has — see backend/src/desk/desk.service.ts.
    */
   try {
-    const copies = {
-      tiles: settings.value.tileCopies ?? DEFAULT_TILE_COPIES,
-      plates: settings.value.plateCopies ?? DEFAULT_PLATE_COPIES,
-    }
     ;[tileDesk, plateDesk] = await Promise.all([
-      createDesk({ seed: `${seed.value}:tiles`, copies: copies.tiles }),
-      createDesk({ seed: `${seed.value}:plates`, copies: copies.plates, exclude: opening }),
+      createDesk({ gameId: gameId.value, kind: 'tiles' }),
+      createDesk({ gameId: gameId.value, kind: 'plates' }),
     ])
   } catch (error) {
     reportDeskTrouble(error)
@@ -413,15 +407,6 @@ function showSeat(seat: number): void {
  * the model and not on the screen, which is the failure mode this whole design exists to avoid.
  */
 watch(viewedSeat, () => { revision.value++ })
-
-/**
- * The codes the plate desk must hold back: the players' opening plates.
- *
- * Chosen from the seed rather than drawn, because finding "the first value-1 plate in the bag" means
- * being able to see the bag. `createGame` puts them on the boards from the same list, so the two
- * cannot disagree about which plates never entered the desk.
- */
-const opening = openingPlateCodes(seed.value, gameOptions.settings.players)
 
 /**
  * The two desks, once the server has made them.

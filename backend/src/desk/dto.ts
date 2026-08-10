@@ -10,6 +10,7 @@
  * cannot disagree about a game they both partly understand.
  */
 import { BadRequestException } from '@nestjs/common'
+import type { CreateDeskBody } from '../rules/wire'
 
 /** The most codes one request may carry. A round-end sweep is a few dozen; this is room to spare. */
 const MAX_BATCH = 500
@@ -32,22 +33,24 @@ function numbers(value: unknown, field: string): number[] {
   return value as number[]
 }
 
-export interface CreateDeskBody {
-  readonly seed: string
-  readonly copies: number
-  readonly exclude: number[]
-}
-
+/**
+ * Which game, and which of its two desks — and nothing else.
+ *
+ * It used to be `{ seed, copies, exclude }`, all three from the client. Every one of them is a fact
+ * about the game, and the server now holds the game: the seed is its own and never sent out, the
+ * copies are in its settings, and the plates to hold back follow from them. A client that cannot
+ * state them cannot misstate them.
+ */
 export function createDeskBody(raw: unknown): CreateDeskBody {
   const value = body(raw)
-  const { seed, copies } = value
-  if (typeof seed !== 'string' || seed.length === 0 || seed.length > 200) {
-    throw new BadRequestException('seed must be a string of 1 to 200 characters')
+  const { gameId, kind } = value
+  if (typeof gameId !== 'string' || gameId.length === 0 || gameId.length > 64) {
+    throw new BadRequestException('gameId must be a string of 1 to 64 characters')
   }
-  if (typeof copies !== 'number' || !Number.isInteger(copies)) {
-    throw new BadRequestException('copies must be a whole number')
+  if (kind !== 'tiles' && kind !== 'plates') {
+    throw new BadRequestException("kind must be 'tiles' or 'plates'")
   }
-  return { seed, copies, exclude: value.exclude === undefined ? [] : numbers(value.exclude, 'exclude') }
+  return { gameId, kind }
 }
 
 export function drawBody(raw: unknown): number {

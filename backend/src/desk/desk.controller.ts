@@ -2,13 +2,14 @@
  * Three routes, and nothing else.
  *
  * ```
- * POST /desk              { seed, copies, exclude? }  → { id, remaining }
+ * POST /desk              { gameId, kind }             → { id, remaining }
  * POST /desk/:id/draw     { n }                       → { id, remaining, codes }
  * POST /desk/:id/discard  { codes } | [ … ]           → { id, remaining }
  * ```
  *
- * A code is 11–66: colour then value. That is the whole vocabulary — the service has no idea whether
- * the row it is serving holds a game's tiles or its plates, and does not need one.
+ * A code is 11–66: colour then value. That is the whole vocabulary once a desk exists — the row has
+ * no idea whether it holds a game's tiles or its plates. `kind` is only how the *builder* is told
+ * which of a game's two bags to make.
  *
  * All three are POSTs, including the two that read like reads: drawing changes the desk, and so does
  * discarding. Nothing here is safe to repeat.
@@ -23,8 +24,8 @@ export class DeskController {
 
   @Post()
   create(@Body() raw: unknown): Promise<DeskSummary> {
-    const { seed, copies, exclude } = createDeskBody(raw)
-    return this.desks.create(seed, copies, exclude)
+    const { gameId, kind } = createDeskBody(raw)
+    return this.desks.create(gameId, kind)
   }
 
   @Post(':id/draw')

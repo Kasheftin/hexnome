@@ -84,6 +84,17 @@ export interface CreateGameBody {
   readonly name?: string
 }
 
+/**
+ * Which of a game's two desks. They differ only in what they are built from, and the desk service
+ * has no idea which is which — see `backend/src/desk`.
+ */
+export type DeskKind = 'tiles' | 'plates'
+
+export interface CreateDeskBody {
+  readonly gameId: string
+  readonly kind: DeskKind
+}
+
 export interface JoinBody {
   /** Optional. An empty name leaves the seat showing its own label rather than a shared default. */
   readonly name?: string

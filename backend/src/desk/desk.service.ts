@@ -19,6 +19,7 @@
  * prevents is invisible.
  */
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
+import { openingPlateCodes } from '../rules/deck'
 import {
   createDesk,
   deskRemaining,
@@ -26,6 +27,8 @@ import {
   drawFromDesk,
   type DeskState,
 } from '../rules/desk'
+import { parseGameSettings } from '../rules/gameSettings'
+import type { DeskKind } from '../rules/wire'
 import { PrismaService } from '../prisma.service'
 
 /** What every route answers with, on top of whatever it drew. */
@@ -39,9 +42,38 @@ export interface DeskSummary {
 export class DeskService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(seed: string, copies: number, exclude: readonly number[]): Promise<DeskSummary> {
+  /**
+   * Build one of a game's two desks, from the game.
+   *
+   * Everything the bag needs is a fact about the game, and the client states none of it: the order
+   * comes from the game's own seed, which never leaves the server, and how many copies from its
+   * settings. A client that cannot say what it is dealt from cannot predict it either, which is the
+   * whole point of the bag living here.
+   *
+   * ## Two seeds, and they are not interchangeable
+   *
+   * The **order** comes from `game.seed`, the secret. The plates to hold back come from `game.id`,
+   * the *public* one — because the client works out the same opening plates for itself when it lays
+   * out the boards, and it can only do that from something it knows. They must agree exactly or the
+   * bag would deal a plate that is already on somebody's board. Hence the id here, deliberately, and
+   * not the seed a line above it.
+   */
+  async create(gameId: string, kind: DeskKind): Promise<DeskSummary> {
+    const game = await this.prisma.game.findUnique({ where: { id: gameId } })
+    if (!game) throw new NotFoundException(`no game ${gameId}`)
+
+    const settings = parseGameSettings(game.settings)
+    if (!settings) throw new ConflictException(`game ${gameId} has settings this server cannot read`)
+
+    const copies = kind === 'tiles' ? settings.tileCopies : settings.plateCopies
+    const exclude = kind === 'plates'
+      ? openingPlateCodes(game.id, settings.players)
+      : []
+
+    // Distinct per kind, so one game's two desks deal different orders from one secret.
+    const seed = `${game.seed}:${kind}`
     const built = createDesk(seed, { copies, exclude })
-    // A refusal here is the caller's fault — an unbuildable bag, not a missing row.
+    // A refusal here is the game's fault — an unbuildable bag, not a missing row.
     if (!built.ok) throw new ConflictException(built.error)
 
     const id = crypto.randomUUID()

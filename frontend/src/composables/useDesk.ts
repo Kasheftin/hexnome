@@ -5,6 +5,11 @@
  * was sitting in memory where anyone could read it. It now lives on the server (`backend/src/desk`) and
  * this is the whole of what the client knows: a handle, and three calls.
  *
+ * **And it is asked for by game, not by recipe.** The request was once `{ seed, copies, exclude }`,
+ * every field a fact about the game that the client happened to be holding. The server holds the game
+ * now, so it works all three out for itself — and the seed, which is what the order comes from, never
+ * reaches this file at all. A client that cannot say what a bag is built from cannot predict it.
+ *
  * The API is the one the local bag had — draw, discard — so the game's plumbing reads the same. What
  * is genuinely different is that both are now `async`, and that a draw can fail.
  *
@@ -19,6 +24,8 @@
  * make one wait for the other.
  */
 
+import type { DeskKind } from '@hexnome/rules/wire'
+
 export interface Desk {
   /** The server's handle for this desk. */
   readonly id: string
@@ -31,10 +38,9 @@ export interface Desk {
 }
 
 export interface DeskRequest {
-  readonly seed: string
-  readonly copies: number
-  /** Codes to keep out of the bag entirely — the players' opening plates. */
-  readonly exclude?: readonly number[]
+  /** Which game's desk. Everything about the bag follows from it, on the server. */
+  readonly gameId: string
+  readonly kind: DeskKind
 }
 
 interface DeskAnswer {
@@ -69,8 +75,8 @@ async function post(path: string, body: unknown): Promise<DeskAnswer> {
   return await response.json() as DeskAnswer
 }
 
-export async function createDesk({ seed, copies, exclude }: DeskRequest): Promise<Desk> {
-  const created = await post('/desk', { seed, copies, exclude })
+export async function createDesk({ gameId, kind }: DeskRequest): Promise<Desk> {
+  const created = await post('/desk', { gameId, kind })
 
   let remaining = created.remaining
   // The tail of the chain. Every call appends to it, so requests reach the server in the order the

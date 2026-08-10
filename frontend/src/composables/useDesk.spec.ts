@@ -51,19 +51,26 @@ beforeEach(stubFetch)
 afterEach(() => { vi.unstubAllGlobals() })
 
 async function desk() {
-  const built = createDesk({ seed: 's', copies: 1 })
+  const built = createDesk({ gameId: 'a-game', kind: 'tiles' })
   await flush()
   return await built
 }
 
 describe('creating a desk', () => {
-  it('asks for the bag it was told to, opening plates held back', async () => {
-    const built = createDesk({ seed: 's:plates', copies: 2, exclude: [11, 31] })
+  /**
+   * The request names the game and which of its two bags, and nothing else.
+   *
+   * It used to carry the seed, the copy count and the plates to hold back — every one of them a fact
+   * the server already has, and the seed one it should never have been told. This is the assertion
+   * that stops any of them creeping back.
+   */
+  it('asks for a game´s bag by name, and says nothing about how to build it', async () => {
+    const built = createDesk({ gameId: 'a-game', kind: 'plates' })
     await flush()
     await built
 
     expect(calls[0]?.path).toBe('/desk')
-    expect(calls[0]?.body).toEqual({ seed: 's:plates', copies: 2, exclude: [11, 31] })
+    expect(calls[0]?.body).toEqual({ gameId: 'a-game', kind: 'plates' })
   })
 })
 
