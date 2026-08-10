@@ -714,6 +714,8 @@ function viewSeat(seat: number): void {
 const seatTabs = computed(() => seatRows.value.map(row => ({
   seat: row.seat,
   name: row.name,
+  rounds: row.rounds,
+  final: row.final,
   total: row.total,
   viewed: row.viewed,
 })))

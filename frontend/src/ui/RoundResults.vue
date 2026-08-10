@@ -27,7 +27,10 @@ import ScoringReveal from './ScoringReveal.vue'
 export interface SeatTab {
   readonly seat: number
   readonly name: string
-  /** Banked across every finished round. */
+  /** Banked across every finished round, and what the finished board added — null until it is asked for. */
+  readonly rounds: number
+  readonly final: number | null
+  /** `rounds` plus `final`, which is the number the game is decided on. */
   readonly total: number
   readonly viewed: boolean
 }
@@ -204,13 +207,13 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
       aria-modal="true"
       :aria-label="showingFinal ? 'Final score' : `Round ${latest?.round} results`"
     >
-      <h2 class="chrome-title">
+      <h2 class="chrome-title chrome-title--offset">
         {{ showingFinal ? 'Final score' : `Round ${latest?.round} results` }}
       </h2>
 
       <!--
         Whose score this is, and what everyone else came to.
-        
+
         Tabs rather than a list of every board at once: the working takes a whole board diagram, and
         four of those is a scroll. The totals are on the tabs, so the comparison — which is the actual
         question at a table — needs no clicking at all.
@@ -231,6 +234,14 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           @click="emit('select', tab.seat)"
         >
           <span class="seat-tab-name">{{ tab.name }}</span>
+          <!--
+            Once the closing reckoning is in, the tab shows the sum rather than its answer. This is
+            where a table compares, and "9" beside "5" invites the question the working answers.
+          -->
+          <span
+            v-if="tab.final !== null"
+            class="seat-tab-sum"
+          >{{ tab.rounds }} + {{ tab.final }} =</span>
           <strong class="seat-tab-total">{{ tab.total }}</strong>
         </button>
       </div>
@@ -605,8 +616,16 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 }
 
 .seat-tab-name {
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The working, quieter than the answer it leads to. */
+.seat-tab-sum {
+  color: #6b7382;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
