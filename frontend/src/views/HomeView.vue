@@ -71,6 +71,7 @@ import {
   PLACEMENT_RULES,
   type PlacementRule,
 } from '@hexnome/rules/placement'
+import RulesPanel from '@/ui/RulesPanel.vue'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { ApiError, createGame } from '@/api/games'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
@@ -516,6 +517,15 @@ const pillValue = (dial: Dial): string =>
 const settingsOpen = ref(false)
 const gear = ref<HTMLButtonElement | null>(null)
 
+const rulesOpen = ref(false)
+const rulesButton = ref<HTMLButtonElement | null>(null)
+
+/** Focus goes back to the button that opened it, as the settings flyout does. */
+function closeRules(): void {
+  rulesOpen.value = false
+  void nextTick(() => rulesButton.value?.focus())
+}
+
 /** Focus goes back where it came from, so closing the panel does not strand a keyboard at the top. */
 function closeSettings(): void {
   settingsOpen.value = false
@@ -682,6 +692,19 @@ const selectedMode = computed(() => modeInfo(mode.value))
             >Soon</span>
           </button>
         </fieldset>
+
+        <!--
+          Below the kinds and quieter than them: it starts nothing, and somebody who came here to
+          play should not have to read past it.
+        -->
+        <button
+          ref="rulesButton"
+          type="button"
+          class="rules-link"
+          @click="rulesOpen = true"
+        >
+          Game rules
+        </button>
       </template>
 
       <!-- Step 2 -->
@@ -824,6 +847,11 @@ const selectedMode = computed(() => modeInfo(mode.value))
       </button>
     </section>
 
+    <RulesPanel
+      :open="rulesOpen"
+      @close="closeRules"
+    />
+
     <SettingsFlyout
       :open="settingsOpen"
       title="Game settings"
@@ -903,6 +931,38 @@ const selectedMode = computed(() => modeInfo(mode.value))
 
 <style scoped>
 /* Quieter than anything that starts a game: undoing is allowed, not encouraged. */
+/* A way out of the menu, not another way in: underlined text rather than another framed option. */
+.rules-link {
+  justify-self: center;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: #79808f;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 140ms;
+}
+
+.rules-link:hover {
+  color: #e8c878;
+}
+
+.rules-link:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rules-link {
+    transition: none;
+  }
+}
+
 .reset {
   flex: 0 0 auto;
   padding: 9px 14px;
