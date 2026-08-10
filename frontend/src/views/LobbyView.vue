@@ -19,6 +19,7 @@ import { RouterLink } from 'vue-router'
 import { MAX_NAME_LENGTH } from '@hexnome/rules/gameSettings'
 import { ApiError } from '@/api/games'
 import { playerName, rememberName } from '@/composables/playerName'
+import PresenceMark from '@/ui/PresenceMark.vue'
 import { useGameStore } from '@/stores/game'
 
 const store = useGameStore()
@@ -105,6 +106,15 @@ async function join(): Promise<void> {
           :class="{ empty: !seat.joined, mine: seat.seat === store.mySeat }"
         >
           <span class="seat-number">{{ seat.seat + 1 }}</span>
+          <!--
+            Only for a chair somebody holds. An empty one already says so in words, and a red mark
+            beside "Empty chair" would read as a fault rather than as a vacancy.
+          -->
+          <PresenceMark
+            v-if="seat.joined"
+            :online="seat.online"
+            :name="seat.name || `Player ${seat.seat + 1}`"
+          />
           <span class="seat-name">
             {{ seat.joined ? (seat.name || `Player ${seat.seat + 1}`) : 'Empty chair' }}
           </span>

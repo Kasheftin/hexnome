@@ -93,6 +93,7 @@ import TileEnvironment from '@/scene/TileEnvironment.vue'
 import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
 import RoundResults from '@/ui/RoundResults.vue'
+import PresenceMark from '@/ui/PresenceMark.vue'
 import TileChip from '@/ui/TileChip.vue'
 import TurnAnnounce from '@/ui/TurnAnnounce.vue'
 import {
@@ -689,6 +690,12 @@ const seatRows = computed(() => {
       seat: seat.seat,
       name: seat.name,
       passed: seat.passed,
+      /*
+       * Presence comes from the *server's* seat list, not the folded state, because it is not part
+       * of the game — see `SeatView.online`. Merged by seat number, which is the same index both
+       * lists are built on.
+       */
+      online: store.game?.seats[seat.seat]?.online ?? false,
       /** The rounds alone. Null `final` means that is the whole story so far. */
       rounds,
       final,
@@ -2096,6 +2103,10 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
             @click="viewSeat(row.seat)"
           >
             <span class="seat-mark">{{ row.active ? '▸' : '' }}</span>
+            <PresenceMark
+              :online="row.online"
+              :name="row.name"
+            />
             <span class="seat-name">{{ row.name }}</span>
             <!--
               Which one is you. Only at a table: in a solo game it would be the only row, saying

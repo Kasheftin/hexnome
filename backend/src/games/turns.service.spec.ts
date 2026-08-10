@@ -7,6 +7,7 @@ import { DeskService } from '../desk/desk.service'
 import { PrismaService } from '../prisma.service'
 import { GamesService } from './games.service'
 import { HeadsGateway } from './heads.gateway'
+import { PresenceService } from './presence.service'
 import { TurnsService } from './turns.service'
 
 /**
@@ -23,9 +24,10 @@ import { TurnsService } from './turns.service'
 
 const prisma = new PrismaService()
 const heads = new HeadsGateway()
+const presence = new PresenceService()
 const desks = new DeskService(prisma)
 const turns = new TurnsService(prisma, desks, heads)
-const games = new GamesService(prisma, desks, turns, heads)
+const games = new GamesService(prisma, desks, turns, heads, presence)
 
 const made: string[] = []
 

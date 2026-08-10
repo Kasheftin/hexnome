@@ -32,6 +32,7 @@ import { DeskService } from '../desk/desk.service'
 import { PrismaService } from '../prisma.service'
 import type { CreateGame } from './dto'
 import { HeadsGateway } from './heads.gateway'
+import { PresenceService } from './presence.service'
 import { TurnsService } from './turns.service'
 
 /** Whoever creates the game sits here, and turn order starts from it. */
@@ -53,6 +54,7 @@ export class GamesService {
     private readonly desks: DeskService,
     private readonly turns: TurnsService,
     private readonly heads: HeadsGateway,
+    private readonly presence: PresenceService,
   ) {}
 
   /**
@@ -221,6 +223,21 @@ export class GamesService {
     const settings: GameSettings | null = parseGameSettings(game.settings)
     if (!settings) throw new ConflictException(`game ${game.id} has settings this server cannot read`)
 
+    /*
+     * **This request is also the caller saying they are still here.**
+     *
+     * Every client refetches its game on every watch tick, and that request carries a seat token
+     * because it is how a client learns which seat is its own. So presence needs no heartbeat and no
+     * endpoint of its own — it is a property of traffic that was already flowing. See
+     * `PresenceService`.
+     *
+     * The seat is *derived* from the token, like every other authority here, and recorded before the
+     * answer is built so that a caller is always present in their own copy of it.
+     */
+    const mine = token ? game.seats.find(seat => seat.token === token)?.seat ?? null : null
+    if (mine !== null) this.presence.seen(game.id, mine)
+    const online = this.presence.online(game.id)
+
     return {
       id: game.id,
       status: game.status as GameStatus,
@@ -230,9 +247,10 @@ export class GamesService {
         seat: seat.seat,
         name: seat.name ?? '',
         joined: seat.token !== null,
+        // A chair nobody has claimed cannot be anywhere, however recently the server was restarted.
+        online: seat.token !== null && online.has(seat.seat),
       })),
-      // An empty token must not match a free seat, whose token is null in the row and '' here.
-      you: token ? game.seats.find(seat => seat.token === token)?.seat ?? null : null,
+      you: mine,
     }
   }
 }

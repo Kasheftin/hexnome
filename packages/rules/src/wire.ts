@@ -34,6 +34,15 @@ export interface SeatView {
   /** What they called themselves, or empty if they did not say. */
   readonly name: string
   readonly joined: boolean
+  /**
+   * Whether the server has heard from this seat lately.
+   *
+   * Not part of the game and not folded from anything — a log is what happened at the table, and
+   * somebody's browser being open is not that. It is answered from what the server remembers of its
+   * own recent traffic, and is false for an unclaimed chair and for the whole table after a restart
+   * until each player's next poll. See `backend/src/games/presence.service.ts`.
+   */
+  readonly online: boolean
 }
 
 /**

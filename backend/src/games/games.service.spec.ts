@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma.service'
 import { createGameBody } from './dto'
 import { GamesService } from './games.service'
 import { HeadsGateway } from './heads.gateway'
+import { PresenceService } from './presence.service'
 import { TurnsService } from './turns.service'
 
 /**
@@ -29,9 +30,19 @@ const prisma = new PrismaService()
  * up. What the gateway itself does is `heads.gateway.spec.ts`.
  */
 const heads = new HeadsGateway()
+/**
+ * The clock presence is measured against, in the spec's hand.
+ *
+ * Held here rather than slept through: the only interesting question about presence is what happens
+ * ninety seconds after somebody stops reading.
+ */
+let now = Date.now()
+const presence = new PresenceService()
+presence.clock = () => now
+const after = (seconds: number): void => { now += seconds * 1000 }
 const desks = new DeskService(prisma)
 const turns = new TurnsService(prisma, desks, heads)
-const games = new GamesService(prisma, desks, turns, heads)
+const games = new GamesService(prisma, desks, turns, heads, presence)
 const made: string[] = []
 
 function settingsFor(players: number): GameSettings {
@@ -149,6 +160,80 @@ describe('reading a game', () => {
     const { game } = await newGame(3)
 
     expect((await games.find(game.id, '')).you).toBeNull()
+  })
+})
+
+/**
+ * Who is still at the table, answered from the traffic already flowing.
+ *
+ * There is no heartbeat to test, because reading a game *is* the heartbeat: every client refetches
+ * its game on every watch tick, with its token. So these are about that read having the side effect,
+ * and about it being the reader's own seat and nobody else's.
+ */
+describe('who is present', () => {
+  it('counts the caller as present, in the answer to their own read', async () => {
+    const { game, token } = await newGame(2, 'Ember')
+
+    const seen = await games.find(game.id, token)
+
+    expect(seen.seats[0]?.online).toBe(true)
+  })
+
+  /**
+   * Creating and joining count too, and should: both are somebody doing a thing at the table, which
+   * is better evidence than a poll. This is about what happens once they stop.
+   */
+  it('forgets a seat that has stopped reading, and keeps the one that has not', async () => {
+    const { game, token } = await newGame(2, 'Ember')
+    await games.join(game.id, 'Flux')
+    expect((await games.find(game.id, token)).seats.map(seat => seat.online)).toEqual([true, true])
+
+    // Ember keeps polling for two minutes; Flux closed the tab.
+    for (let poll = 0; poll < 8; poll++) {
+      after(15)
+      await games.find(game.id, token)
+    }
+
+    const seen = await games.find(game.id, token)
+    expect(seen.seats.map(seat => seat.online)).toEqual([true, false])
+  })
+
+  it('is told by whoever reads, so two players are both present', async () => {
+    const { game, token } = await newGame(2, 'Ember')
+    const second = await games.join(game.id, 'Flux')
+
+    await games.find(game.id, token)
+    const seen = await games.find(game.id, second.token)
+
+    expect(seen.seats.map(seat => seat.online)).toEqual([true, true])
+  })
+
+  /** A watcher is not a player. Reading with no token puts nobody at the table, including them. */
+  it('is not moved by a spectator, who has no seat to be present in', async () => {
+    const { game } = await newGame(2, 'Ember')
+    after(120)
+
+    const seen = await games.find(game.id)
+
+    expect(seen.seats.every(seat => !seat.online)).toBe(true)
+  })
+
+  /**
+   * A chair nobody has claimed cannot be anywhere, whatever the presence service happens to hold.
+   *
+   * Marked present directly, because that disagreement is the whole point of the guard: presence is
+   * keyed by seat *number* and knows nothing about who holds one, so the two can only be reconciled
+   * where they meet. No path in the app produces this today — which is precisely why it has to be
+   * produced here rather than waited for.
+   */
+  it('never calls an empty chair present', async () => {
+    const { game, token } = await newGame(3, 'Ember')
+    presence.seen(game.id, 1)
+
+    const seen = await games.find(game.id, token)
+
+    expect(seen.seats[1]?.joined).toBe(false)
+    expect(seen.seats[1]?.online).toBe(false)
   })
 })
 
