@@ -39,18 +39,11 @@ export const VIEW_HEIGHT_MIN = 4
 export const VIEW_HEIGHT_MAX = 70
 
 /**
- * Half-extent of the board, in cells, measured from the centre.
- *
- * The playfield is a **rectangle** in world space, not a hex disc: 20 cells in every
- * direction comes to 1661 plates. Large enough that, with panning
- * clamped by PAN_MARGIN_CELLS, the edge can never be reached — so the board reads as
- * endless without pretending to be infinite.
- */
-export const BOARD_HALF_COLS = 20
-export const BOARD_HALF_ROWS = 20
-
-/**
  * How many cells of board to keep beyond the viewport at all times.
+ *
+ * The extent it is measured against is `BOARD_HALF_COLS` in `@hexnome/rules/board` — the playfield
+ * is a rules input as much as a scene one, because it decides whether a plate has room, and the
+ * server has to agree with this end about it.
  *
  * Both pan and zoom are clamped against the board bounds inset by this much, so the
  * outermost ring of plates never comes into view. Zoom has to be clamped too: a view

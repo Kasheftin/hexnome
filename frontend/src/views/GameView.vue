@@ -40,7 +40,7 @@ import {
   toggleDraftSelection,
   type DraftItem,
 } from '@hexnome/rules/draft'
-import { hexRectangle } from '@hexnome/rules/hex'
+import { boardCells } from '@hexnome/rules/board'
 import {
   canAffordPlacement,
   canConfirmPayment,
@@ -95,8 +95,6 @@ import RoundResults from '@/ui/RoundResults.vue'
 import TileChip from '@/ui/TileChip.vue'
 import TurnAnnounce from '@/ui/TurnAnnounce.vue'
 import {
-  BOARD_HALF_COLS,
-  BOARD_HALF_ROWS,
   COLORS,
   HEX_SIZE,
   SOURCE_TILES_PER_LOT,
@@ -219,7 +217,7 @@ async function checkRules(): Promise<void> {
  * A rectangular playfield of 1661 cells (~41 × 41). Panning is clamped so its edge is
  * unreachable, which is what makes it read as endless.
  */
-const cells = hexRectangle(BOARD_HALF_COLS, BOARD_HALF_ROWS)
+const cells = boardCells()
 /**
  * How many seats the drawer has, from the game's settings.
  *

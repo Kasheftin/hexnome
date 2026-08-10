@@ -21,14 +21,13 @@
 import { useTresContext } from '@tresjs/core'
 import { OrthographicCamera, Raycaster, Vector2, Vector3 } from 'three'
 import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { BOARD_HALF_COLS, BOARD_HALF_ROWS } from '@hexnome/rules/board'
 import {
   hexRectangleBounds,
   insetBounds,
   type WorldBounds,
 } from '@hexnome/rules/hex'
 import {
-  BOARD_HALF_COLS,
-  BOARD_HALF_ROWS,
   BOARD_TILT_DEG,
   CAMERA_DISTANCE,
   HEX_SIZE,
