@@ -69,9 +69,9 @@ import {
   type PlacementRule,
 } from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
-import { createGameId } from '@/composables/createGameId'
+import { ApiError, createGame } from '@/api/games'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
-import { useSavedGames } from '@/composables/useSavedGames'
+import { rememberSeat } from '@/composables/useSeat'
 
 type Step = 'title' | 'setup'
 
@@ -80,7 +80,6 @@ const SWITCH_CHOICES: readonly number[] = [0, 1]
 const SWITCH_LABELS: readonly string[] = ['No', 'Yes']
 
 const router = useRouter()
-const savedGames = useSavedGames()
 
 /** Read once on mount, so the field arrives filled rather than empty and then populated. */
 const name = ref(playerName())
@@ -455,29 +454,42 @@ function back(): void {
   kind.value = null
 }
 
+/** True while the server is opening the table, so Start cannot be pressed twice. */
+const starting = ref(false)
+const startProblem = ref('')
+
 /**
- * Mint the game and go where its kind leads.
+ * Open the table on the server, and go where it says.
  *
- * Solo games open on the board. A table has people to name first, so it opens on the lobby — which is
- * a real screen rather than a step of this one, because it is where a refresh has to land.
+ * The **server** mints the game, its id and its seed; this only says what was chosen. That is the
+ * whole difference from before, when a game was a localStorage entry and the id was minted here —
+ * and it is what makes a game something another person can be handed a link to.
+ *
+ * Where to go is decided from the status that comes back rather than from the kind that went out. A
+ * solo game is already `running`, because its only seat was claimed in the same request; a table is
+ * `waiting`. Reading it off the answer means this screen has no opinion about which kinds have
+ * lobbies, and the store would put a wrong guess right anyway (stores/game.ts).
  */
-function startGame(): void {
+async function startGame(): Promise<void> {
+  if (starting.value) return
+  starting.value = true
+  startProblem.value = ''
+
   const multiplayer = kind.value === 'multiplayer'
   const players = multiplayer ? playerCount.value : SOLO
-  const id = savedGames.create({
+  const settings = {
     kind: multiplayer ? 'multiplayer' : 'singleplayer',
     players,
-    // Seat 0 is whoever made the game. The rest are named in the lobby.
+    // Seat 0 is whoever made the game. The rest name themselves as they join.
     playerNames: [name.value],
     mode: mode.value,
     /*
-     * Minted here and stored with the game, separately from its id.
-     *
-     * The desks are built from it on the server, so the same seed always deals the same game — which
-     * is what makes a reload deal what it dealt before. It is deliberately not the id: the id is in
-     * the URL and gets shared, and this is the value that becomes a secret once the server mints it.
+     * Left empty on purpose. What a game is dealt from is the server's, minted with the game and
+     * never sent back — a client holding it could rebuild the whole deal. The field survives for the
+     * rules that still want a *public* seed, the opening plates and the petal stream, and an empty
+     * one falls back to the game id, which is shared anyway.
      */
-    seed: createGameId(),
+    seed: '',
     platesPerRound: platesPerRound.value,
     tileCopies: tileCopies.value,
     plateCopies: plateCopies.value,
@@ -498,8 +510,21 @@ function startGame(): void {
     groupBonuses: groupBonuses.value,
     fineUnplaced: fineUnplaced.value === 1,
     rewardStems: rewardStems.value === 1,
-  })
-  void router.push({ path: multiplayer ? '/lobby' : '/game', query: { id } })
+    createdAt: 0,
+  }
+
+  try {
+    const claim = await createGame(settings, name.value)
+    // Before navigating: the store's first fetch must carry the token, or the creator arrives at
+    // their own table as a spectator.
+    rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
+    const path = claim.game.status === 'waiting' ? '/join' : '/game'
+    await router.push({ path, query: { id: claim.game.id } })
+  } catch (error) {
+    startProblem.value = error instanceof ApiError ? error.message : 'Cannot reach the table.'
+  } finally {
+    starting.value = false
+  }
 }
 
 const selectedMode = computed(() => modeInfo(mode.value))
@@ -695,10 +720,20 @@ const selectedMode = computed(() => modeInfo(mode.value))
         <button
           type="button"
           class="option start"
+          :disabled="starting"
           @click="startGame"
         >
-          <span class="option-label">Start game</span>
+          <span class="option-label">{{ starting ? 'Opening…' : 'Start game' }}</span>
         </button>
+
+        <!-- The one failure this screen can have of its own: the table would not open. -->
+        <p
+          v-if="startProblem"
+          class="problem"
+          role="alert"
+        >
+          {{ startProblem }}
+        </p>
       </template>
 
       <button
@@ -884,6 +919,13 @@ legend {
   border-color: #8fe6c0;
   background: rgb(143 230 192 / 8%);
   color: #8fe6c0;
+}
+
+.problem {
+  margin: 8px 0 0;
+  color: #d98b74;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .option.start {

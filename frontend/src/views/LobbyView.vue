@@ -1,88 +1,88 @@
 <script setup lang="ts">
 /**
- * The table, before it starts: who is playing.
+ * The table, before it starts: who is here, and the link that brings the rest.
  *
- * **Deliberately temporary.** The real panel — game name, read-only settings, a seat list and a Ready
- * button per player — is on `backend-attempt1` and comes back when there is a server to fill it from.
- * This is the placeholder that lets the flow exist first: a row per seat, all of them on one screen,
- * because local multiplayer means everyone is already here and there is nobody to wait for.
+ * **A game at a different moment, not a different place.** `/join` and `/game` are two screens for
+ * one id, and which of them a client belongs on is the server's answer rather than the link's — see
+ * `stores/game.ts`. So the link this screen hands out is the *game* link: whoever opens it lands here
+ * while the table is filling and on the board once it has, and the host never sends a second one.
  *
- * The names are stored against the game as they are typed, so a refresh comes back to the same table
- * rather than rolling everyone a new name (composables/useSavedGames.ts).
+ * Everything on it comes from the store, which reloads whenever the server says the game moved. A
+ * chair taken in another browser appears here within a socket message, and within two seconds even if
+ * the socket never connected.
+ *
+ * **There is no Start button, and that is the rule rather than an omission.** A game starts when its
+ * last chair is taken (backend/src/games/games.service.ts). Nobody decides it, so nobody can press it.
  */
-import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, ref, shallowRef } from 'vue'
+import { RouterLink } from 'vue-router'
 import { MAX_NAME_LENGTH } from '@hexnome/rules/gameSettings'
-import { playerName, suggestNames } from '@/composables/playerName'
-import { useSavedGames } from '@/composables/useSavedGames'
+import { ApiError } from '@/api/games'
+import { playerName, rememberName } from '@/composables/playerName'
+import { useGameStore } from '@/stores/game'
 
-const route = useRoute()
-const router = useRouter()
-const savedGames = useSavedGames()
+const store = useGameStore()
 
-const gameId = computed(() => {
-  const id = route.query.id
-  return typeof id === 'string' ? id : ''
-})
+/** What to arrive under. The person's name, not the game's — filled in from the last visit. */
+const name = ref(playerName())
 
-const settings = computed(() => savedGames.get(gameId.value))
+const joining = shallowRef(false)
+const problem = shallowRef('')
 
-/** One box per seat, in seating order. Seat 0 is whoever made the game. */
-const names = ref<string[]>([])
+const seats = computed(() => store.game?.seats ?? [])
+const waitingFor = computed(() => seats.value.filter(seat => !seat.joined).length)
+
+/** There is a chair to take, and nobody in this browser has taken one. */
+const canJoin = computed(() => store.mySeat === null && waitingFor.value > 0)
 
 /**
- * Fill every seat that has no name yet.
+ * The link to hand out — the **game**, not this screen.
  *
- * Seat 0 is you — the name from the menu, or the one this browser arrived under. The rest are dealt
- * suggestions in one go, so no two of them collide, and nothing already typed is overwritten.
+ * Absolute, because it is going into a message to somebody else. Built from the page's own origin, so
+ * it is right in development, behind a proxy, and wherever this ends up hosted.
  */
-function seatEveryone(): void {
-  const s = settings.value
-  if (!s) return
+const shareLink = computed(() =>
+  `${globalThis.location.origin}/game?id=${encodeURIComponent(store.id)}`)
 
-  const seated = Array.from({ length: s.players }, (_, seat) => s.playerNames[seat] ?? '')
-  if (!seated[0]) seated[0] = playerName()
+const copied = shallowRef(false)
 
-  const empty = seated.reduce<number[]>((at, name, seat) => (name ? at : [...at, seat]), [])
-  const dealt = suggestNames(empty.length, seated.filter(Boolean))
-  empty.forEach((seat, index) => {
-    const name = dealt[index]
-    if (name) seated[seat] = name
-  })
-
-  names.value = seated
-}
-
-onMounted(() => {
-  // No id, or one we cannot read: there is no game here, so send them somewhere that works.
-  if (!settings.value) {
-    void router.replace('/')
-    return
+async function copyLink(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(shareLink.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1600)
+  } catch {
+    // No permission, or an insecure origin. The field selects itself on focus, which is the fallback.
   }
-  seatEveryone()
-  remember()
-})
-
-function remember(): void {
-  savedGames.update(gameId.value, { playerNames: names.value.map(name => name.trim()) })
 }
 
-/*
- * Stored as they are typed rather than on blur. A lobby is a form nobody presses Save on — the next
- * thing to happen is Start, and a half-typed name reaching the board is better than a lost one.
+/**
+ * Take a chair.
+ *
+ * A 409 means somebody took the last one between this screen rendering and the button being pressed
+ * — which is exactly what the conditional claim on the server is for, and is a thing to say rather
+ * than a thing to retry.
  */
-watch(names, remember, { deep: true })
+async function join(): Promise<void> {
+  if (joining.value) return
+  joining.value = true
+  problem.value = ''
+  rememberName(name.value)
 
-function start(): void {
-  void router.push({ path: '/game', query: { id: gameId.value } })
+  try {
+    await store.join(name.value.trim())
+  } catch (error) {
+    problem.value = error instanceof ApiError && error.status === 409
+      ? 'Somebody took the last chair. This game is full.'
+      : error instanceof ApiError ? error.message : 'Cannot reach the table.'
+  } finally {
+    joining.value = false
+  }
 }
 </script>
 
 <template>
-  <main
-    v-if="settings"
-    class="lobby"
-  >
+  <main class="lobby">
     <div class="lockup">
       <h1>hexnome</h1>
       <p class="tagline">
@@ -94,40 +94,89 @@ function start(): void {
       class="panel"
       aria-label="Players"
     >
-      <fieldset class="group">
-        <legend>At the table</legend>
-        <label
-          v-for="(_, seat) in names"
-          :key="seat"
+      <h2 class="legend">
+        At the table
+      </h2>
+      <ol class="seats">
+        <li
+          v-for="seat in seats"
+          :key="seat.seat"
           class="seat"
+          :class="{ empty: !seat.joined, mine: seat.seat === store.mySeat }"
         >
-          <span class="seat-number">{{ seat + 1 }}</span>
+          <span class="seat-number">{{ seat.seat + 1 }}</span>
+          <span class="seat-name">
+            {{ seat.joined ? (seat.name || `Player ${seat.seat + 1}`) : 'Empty chair' }}
+          </span>
+          <span
+            v-if="seat.seat === store.mySeat"
+            class="seat-tag"
+          >you</span>
+        </li>
+      </ol>
+
+      <!-- Yours to take. Gone once you have a chair — there is nothing left to press. -->
+      <div
+        v-if="canJoin"
+        class="claim"
+      >
+        <label class="field">
+          <span class="field-label">Your name</span>
           <input
-            v-model="names[seat]"
+            v-model="name"
             type="text"
             :maxlength="MAX_NAME_LENGTH"
-            :placeholder="`Player ${seat + 1}`"
-            :aria-label="`Name for player ${seat + 1}`"
+            placeholder="Player"
+            @keyup.enter="join"
           >
         </label>
-      </fieldset>
+        <button
+          type="button"
+          class="option start"
+          :disabled="joining"
+          @click="join"
+        >
+          <span class="option-label">{{ joining ? 'Sitting…' : 'Join' }}</span>
+        </button>
+      </div>
 
-      <!--
-        Said out loud because the screen implies otherwise. The board still deals one seat and plays
-        as a solo game; this screen is the part that exists so far.
-      -->
-      <p class="description">
-        The board is still single-seat — starting from here plays a solo game. This screen is
-        groundwork, and the real lobby comes back with the server behind it.
+      <p
+        v-else-if="store.mySeat !== null"
+        class="description"
+      >
+        You are seated.
+        {{ waitingFor === 1 ? 'One more player' : `${waitingFor} more players` }}
+        and the game starts on its own.
       </p>
 
-      <button
-        type="button"
-        class="option start"
-        @click="start"
+      <p
+        v-if="problem"
+        class="problem"
+        role="alert"
       >
-        <span class="option-label">Start game</span>
-      </button>
+        {{ problem }}
+      </p>
+
+      <div class="share">
+        <span class="field-label">Share this link</span>
+        <div class="share-row">
+          <input
+            class="link"
+            type="text"
+            readonly
+            :value="shareLink"
+            aria-label="Link to this game"
+            @focus="(event) => (event.target as HTMLInputElement).select()"
+          >
+          <button
+            type="button"
+            class="copy"
+            @click="copyLink"
+          >
+            {{ copied ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
+      </div>
 
       <RouterLink
         to="/"
@@ -193,42 +242,88 @@ h1 {
   box-shadow: 0 2px 24px rgb(0 0 0 / 45%);
 }
 
-.group {
+.legend,
+.field-label {
   margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-legend {
-  padding: 0 0 8px;
   color: #6b7382;
   font-size: 10px;
+  font-weight: 500;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+}
+
+.seats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .seat {
   display: flex;
   gap: 10px;
-  align-items: center;
+  align-items: baseline;
+  padding: 9px 10px;
+  border: 1px solid #2a2e35;
+  border-radius: 3px;
+  color: #cfd4de;
+  font-size: 13px;
 }
 
 .seat + .seat {
-  margin-top: 8px;
+  margin-top: 6px;
+}
+
+/* An empty chair is drawn as the outline of one: present, and plainly not filled. */
+.seat.empty {
+  border-style: dashed;
+  color: #575d68;
+}
+
+.seat.mine {
+  border-color: #7d6a41;
 }
 
 /* The seat's number, not the player's — it is where they sit, and turn order follows it. */
 .seat-number {
-  width: 22px;
+  width: 18px;
   color: #6b7382;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
 
-.seat input {
+.seat-name {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-tag {
+  color: #e8c878;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.claim {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  margin-top: 12px;
+}
+
+.field {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+input {
+  width: 100%;
   padding: 8px 10px;
   border: 1px solid #33383f;
   border-radius: 3px;
@@ -238,29 +333,72 @@ legend {
   font-size: 13px;
 }
 
-.seat input::placeholder {
+input::placeholder {
   color: #575d68;
 }
 
-.seat input:focus-visible {
+input:focus-visible {
   border-color: #7d6a41;
   outline: none;
 }
 
 .description {
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   color: #79808f;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.option {
+.problem {
+  margin: 4px 0 0;
+  color: #d98b74;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.share {
   display: flex;
-  gap: 12px;
-  align-items: baseline;
-  justify-content: center;
-  width: 100%;
-  padding: 12px 14px;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #2a2e35;
+}
+
+.share-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Monospaced, because it is a thing to read character by character before sending it on. */
+.link {
+  color: #9aa2b1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.copy {
+  flex: none;
+  padding: 8px 12px;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  background: transparent;
+  color: #cfd4de;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.copy:hover {
+  border-color: #7d6a41;
+  color: #e8c878;
+}
+
+.option {
+  flex: none;
+  padding: 8px 16px;
   border: 1px solid #33383f;
   border-radius: 3px;
   background: transparent;
@@ -277,18 +415,22 @@ legend {
 }
 
 .option.start {
-  margin-top: 14px;
   border-color: #7d6a41;
   color: #e8c878;
 }
 
-.option.start:hover {
+.option.start:hover:not(:disabled) {
   background: rgb(232 200 120 / 14%);
+}
+
+.option:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .back {
   align-self: flex-start;
-  margin-top: 6px;
+  margin-top: 10px;
   padding: 6px 0;
   color: #6b7382;
   font-size: 11px;
@@ -300,7 +442,7 @@ legend {
   color: #e8c878;
 }
 
-:is(.option, .back):focus-visible {
+:is(.option, .copy, .back):focus-visible {
   outline: 2px solid #8fe6c0;
   outline-offset: 2px;
 }

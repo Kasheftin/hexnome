@@ -125,19 +125,26 @@ import {
   type GameSettings,
   defaultGameSettings,
 } from '@hexnome/rules/gameSettings'
-import { useSavedGames } from '@/composables/useSavedGames'
+import { useGameStore } from '@/stores/game'
 
 const route = useRoute()
 const router = useRouter()
-const savedGames = useSavedGames()
+const store = useGameStore()
 
 const gameId = computed(() => {
   const id = route.query.id
   return typeof id === 'string' ? id : ''
 })
 
-/** Restored from storage on every load, including a refresh. */
-const settings = shallowRef<GameSettings | null>(savedGames.get(gameId.value))
+/**
+ * The settings, from the server, read once.
+ *
+ * Once because that is what they are: everything below is built from them at setup — the drawer's
+ * shape, the agenda, the tableau — and a game whose settings changed under it would be a different
+ * game with the same board on screen. The store guarantees they are here: App.vue mounts nothing
+ * about a game until it has loaded (stores/game.ts).
+ */
+const settings = shallowRef<GameSettings | null>(store.game?.settings ?? null)
 
 const modeLabel = computed(() => {
   const s = settings.value
@@ -284,6 +291,15 @@ const gameOptions: GameOptions = {
   settings: {
     ...(settings.value ?? defaultGameSettings(0, seed.value)),
     seed: seed.value,
+    /*
+     * Who is in each chair comes from the **seats**, not from the settings.
+     *
+     * `playerNames` was the setting a lobby wrote into when the lobby was a form. Now a name arrives
+     * with the person, as they claim a seat, and the settings only carry whatever the creator typed
+     * before anybody else was there. Reading the stale copy put "Player 2" on a board somebody had
+     * already given a name to.
+     */
+    playerNames: store.game?.seats.map(seat => seat.name) ?? [],
     tileSlots: drawerShape.tileSlots,
     plateSlots: drawerShape.plateSlots,
     platesPerRound,
