@@ -1,14 +1,14 @@
 /**
  * The games endpoint, over the wire.
  *
- * Three calls and one error type. The shapes come from `@hexnome/rules/wire`, which both sides
+ * Five calls and one error type. The shapes come from `@hexnome/rules/wire`, which both sides
  * import, so a field that changes on the server fails a typecheck here rather than arriving as
  * `undefined` in a browser.
  *
  * Nothing here holds state. Which game is open, and what it currently says, is the store's business
  * (`stores/game.ts`); this is the transport under it.
  */
-import type { GameView, SeatClaim } from '@hexnome/rules/wire'
+import type { CommandSlice, GameView, SeatClaim, SubmitResult } from '@hexnome/rules/wire'
 
 /**
  * A request the server answered, and refused.
@@ -21,6 +21,21 @@ export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message)
     this.name = 'ApiError'
+  }
+
+  /** The log moved on: somebody else wrote before us, or this tab is a turn behind. */
+  get isStale(): boolean {
+    return this.status === 409
+  }
+
+  /** The server would not have the move. A bug in one of the two ends, not a network hiccup. */
+  get isRefused(): boolean {
+    return this.status === 422
+  }
+
+  /** Nothing answered. The only failure worth sending again unchanged. */
+  get isUnreachable(): boolean {
+    return this.status === UNREACHABLE
   }
 }
 
@@ -72,4 +87,27 @@ export function getGame(id: string, token = ''): Promise<GameView> {
 /** Take the lowest free chair. 409 if the table filled up while you were reading it. */
 export function joinGame(id: string, name: string): Promise<SeatClaim> {
   return send<SeatClaim>(`/games/${encodeURIComponent(id)}/join`, { name })
+}
+
+/** Everything after a cursor. `since=0` is the whole log, which is how a fresh page loads. */
+export function getCommands(id: string, since = 0): Promise<CommandSlice> {
+  return request<CommandSlice>(`/games/${encodeURIComponent(id)}/commands?since=${since}`)
+}
+
+/**
+ * Take a turn.
+ *
+ * The seat is not in the body — it comes from the token, because a client that could name its own
+ * seat could take somebody else's turn.
+ */
+export function submitCommand(
+  id: string,
+  turn: { cmdId: string, prevSeq: number, command: unknown },
+  token: string,
+): Promise<SubmitResult> {
+  return request<SubmitResult>(`/games/${encodeURIComponent(id)}/commands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...asSeat(token) },
+    body: JSON.stringify(turn),
+  })
 }

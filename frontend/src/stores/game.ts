@@ -52,6 +52,21 @@ export const useGameStore = defineStore('game', () => {
   /** True while the first load of a game is outstanding — the only load with nothing to show. */
   const loading = ref(false)
 
+  /**
+   * Told whenever the server says this game moved.
+   *
+   * The board subscribes so it can go and fetch the turns. It lives here rather than in the board
+   * because the socket is per game and the board is per mount — a seat change or a reload should not
+   * cost a reconnection, and two subscriptions to one game would fetch everything twice.
+   */
+  const listeners = new Set<() => void>()
+
+  /** Listen for "this game moved". Returns the way to stop. */
+  function onMoved(listener: () => void): () => void {
+    listeners.add(listener)
+    return () => listeners.delete(listener)
+  }
+
   /** Which seat is ours, as the server works it out from the token we sent. */
   const mySeat = computed(() => game.value?.you ?? null)
 
@@ -148,10 +163,17 @@ export const useGameStore = defineStore('game', () => {
      * a socket that is open but silently broken looks exactly like a quiet game.
      */
     watcher = watchHead(gameId, (seq) => {
+      /*
+       * The listeners are told **whatever the number says**, and the game is reloaded only when the
+       * number is new. They are two different questions: the game row's `seq` moves on every write,
+       * including a turn — but a turn is fetched from the log rather than from the game, and a client
+       * that already saw the row would otherwise never go and look for the commands behind it.
+       */
+      for (const listener of listeners) listener()
       if (seq !== null && game.value && seq <= game.value.seq) return
       void loadGame(gameId)
     })
   }, { immediate: true })
 
-  return { id, game, loadingError, loading, mySeat, loadGame, join, clear }
+  return { id, game, loadingError, loading, mySeat, loadGame, join, clear, onMoved }
 })

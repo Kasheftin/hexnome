@@ -13,11 +13,11 @@
  * Hand-written rather than generated. The surface is three endpoints, and a generator would be more
  * machinery than contract.
  */
-import type { Command } from './game'
+import type { Command, PlayerCommand } from './game'
 import type { GameSettings } from './gameSettings'
 
 /** Re-exported so a client needs one import for the whole contract. */
-export type { Command, GameSettings }
+export type { Command, GameSettings, PlayerCommand }
 
 /**
  * What a game is waiting for, or that it is not waiting.

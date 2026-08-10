@@ -29,7 +29,7 @@ import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@hexnome/rules/agenda'
-import { createDesk as createLocalDesk, tileCode, tileFromCode } from '@hexnome/rules/desk'
+import { createDesk as createLocalDesk } from '@hexnome/rules/desk'
 import { finalTally, NOTHING_LEFT } from '@hexnome/rules/groups'
 import {
   canConfirmDraft,
@@ -55,7 +55,6 @@ import {
   applyCommand,
   createGame,
   draftItems,
-  needsDeal,
   paymentPurse,
   replayGame,
   scoreAnchors,
@@ -63,14 +62,15 @@ import {
   type CommandResult,
   type GameOptions,
 } from '@hexnome/rules/game'
-import { createDesk, rulesHealth, type Desk } from '@/composables/useDesk'
+import type { CommandRow, PlayerCommand } from '@hexnome/rules/wire'
+import { rulesHealth } from '@/composables/useDesk'
+import { useGameSync } from '@/composables/useGameSync'
 import { colorName, tileName } from '@/scene/explainRefusal'
 import type { RoundRecord } from '@/ui/roundRecord'
 import {
   type PlateLocation,
   type Tableau,
   type TileLocation,
-  type TileSpec,
 } from '@hexnome/rules/tableau'
 import { DEFAULT_PLACEMENT_RULE } from '@hexnome/rules/placement'
 import {
@@ -147,17 +147,21 @@ const modeLabel = computed(() => {
 })
 
 /**
- * What the player is told while the desks are being made, and if they cannot be.
+ * What the player is told while the log is being fetched, and if it cannot be.
  *
- * The bag is on the server now, so a game genuinely cannot start without it. Saying nothing would
+ * The game is on the server now, so a page genuinely cannot start without it. Saying nothing would
  * leave an empty board with a starting plate on it and no explanation — which reads as a broken game
  * rather than an unreachable one.
+ *
+ * The same line carries a turn the server refused, and the rare case of this page folding a command
+ * differently from the server. Both mean the table is not where this screen thinks it is, which is
+ * the one thing a player needs to know.
  */
-const dealing = shallowRef(true)
-const deskTrouble = shallowRef<string | null>(null)
+const loadingLog = shallowRef(true)
+const trouble = shallowRef<string | null>(null)
 
-function reportDeskTrouble(error: unknown): void {
-  deskTrouble.value = error instanceof Error ? error.message : 'The table is not answering.'
+function reportTrouble(error: unknown): void {
+  trouble.value = error instanceof Error ? error.message : 'The table is not answering.'
 }
 
 onMounted(async () => {
@@ -168,30 +172,24 @@ onMounted(async () => {
   }
 
   /*
-   * Two desks, one per kind, and the game is all this end says about either. How big each bag is,
-   * what order it deals in and which plates it holds back are the server's to work out from the game
-   * it already has — see backend/src/desk/desk.service.ts.
+   * The whole log, folded before anything is drawn.
+   *
+   * This is what makes a refresh mid-game work, and a share link opened on turn nine: the board is
+   * not restarted, it is rebuilt. The opening lot is in there too — the server wrote it when the game
+   * started, so a page never deals anything for itself.
    */
   try {
-    ;[tileDesk, plateDesk] = await Promise.all([
-      createDesk({ gameId: gameId.value, kind: 'tiles' }),
-      createDesk({ gameId: gameId.value, kind: 'plates' }),
-    ])
+    absorb(await sync.load())
   } catch (error) {
-    reportDeskTrouble(error)
+    reportTrouble(error)
     return
   } finally {
-    dealing.value = false
+    loadingLog.value = false
   }
 
   void checkRules()
 
-  /*
-   * The first turn is announced like any other. Its lot is dealt just before the card rather than behind
-   * it — see `cardWork`. The board's starting plate and the player's stems are part of neither: they are
-   * the tableau, not a deal.
-   */
-  await beginTurn()
+  // Announced from wherever the log left the game, which for a fresh one is round 1, turn 1.
   announceRound(count.value.round)
 })
 
@@ -209,7 +207,7 @@ async function checkRules(): Promise<void> {
   const mine = createLocalDesk('health-check', { copies: 1 })
   const expected = mine.ok ? mine.value.desk.slice(0, health.fingerprint.length) : []
   if (String(expected) !== String(health.fingerprint)) {
-    deskTrouble.value = 'The server is running different rules from this page. Restart the backend.'
+    trouble.value = 'The server is running different rules from this page. Restart the backend.'
   }
 }
 
@@ -306,12 +304,29 @@ const gameOptions: GameOptions = {
  * The game: one shared source, one board and drawer per seat, and the log it is folded from.
  *
  * Changed only through `commit`, so the log is a complete account of what happened and
- * `replayGame(gameOptions, log)` rebuilds this exactly. That is what makes rolling back a command a
- * server refuses a matter of dropping it and folding again, rather than of writing an inverse for
- * every move.
+ * `replayGame(gameOptions, log)` rebuilds this exactly. The log itself is the **server's** — this is
+ * a copy of it, extended only by rows that have already been stored.
  */
 const log: Command[] = []
 const state = createGame(gameOptions)
+
+/** The log over the wire: what has happened, and the only way to add to it. */
+const sync = useGameSync(gameId.value)
+
+/**
+ * Go and look whenever the server says the game moved.
+ *
+ * The nudge carries a number and no game data, so this is where it turns into turns. It fires for
+ * this client's own writes too and costs a request that finds nothing — which is the price of the
+ * socket being an optimisation rather than a source of truth, and `catchUp` stands aside while a
+ * submit is in flight so its own turn cannot arrive twice.
+ */
+const stopListening = store.onMoved(() => { void catchUp() })
+onBeforeUnmount(stopListening)
+
+async function catchUp(): Promise<void> {
+  absorb(await sync.catchUp())
+}
 
 /**
  * Bumped on every committed move, so the readouts and the scene recompute.
@@ -321,6 +336,87 @@ const state = createGame(gameOptions)
  * a board at once.
  */
 const revision = shallowRef(0)
+
+/**
+ * Fold rows the server has stored, and let the table catch up with what they did.
+ *
+ * The one path by which anything reaches the board, whoever played it. A turn of your own arrives in
+ * the answer to the request that submitted it; somebody else's arrives in a catch-up; a deal arrives
+ * behind either. Nothing here can tell them apart, and nothing needs to.
+ *
+ * **The card is raised by the rows, not by the player who pressed something.** A round that closed
+ * closes for everybody, and a turn that moved on moves on for everybody — so this is where both are
+ * noticed, rather than in the three places a turn can be started from.
+ */
+function absorb(rows: readonly CommandRow[]): void {
+  if (rows.length === 0) return
+  const before = { round: state.round, turn: state.turn, finished: state.finished }
+
+  /*
+   * Folded silently, then told about once.
+   *
+   * The scene builds a view for anything new the moment `revision` moves, so a stem minted by an
+   * enclosure has to be *known to be an arrival* before that happens — otherwise it is already in
+   * place by the time anyone could animate it. One bump for the batch also means a turn and the deal
+   * behind it reach the screen together rather than a frame apart.
+   */
+  const awarded: string[] = []
+  for (const row of rows) {
+    const played = commit(row.command, { tell: false })
+    if (played) awarded.push(...played.awarded)
+  }
+  if (awarded.length > 0) arriving.value = awarded
+  revision.value++
+
+  if (state.finished || state.round !== before.round) {
+    // A round closed. Everyone sees the sheet, not only whoever played the last pass.
+    showResults.value = true
+    return
+  }
+
+  /*
+   * Stems come in from the left, and the turn card waits for them — otherwise it comes up over
+   * pieces still travelling. Whoever earned them: on somebody else's board it costs a beat nobody is
+   * looking at, which is cheaper than a second path through here.
+   */
+  if (awarded.length > 0) {
+    settling.value = true
+    if (settleTimer !== null) window.clearTimeout(settleTimer)
+    settleTimer = window.setTimeout(() => {
+      settleTimer = null
+      settling.value = false
+      arriving.value = []
+      if (state.turn !== before.turn) announceTurn(count.value.turn)
+    }, AWARD_SETTLE_MS)
+    return
+  }
+
+  // Announced only when a turn genuinely moved, so a deal arriving on its own is silent.
+  if (state.turn !== before.turn) announceTurn(count.value.turn)
+}
+
+/**
+ * Take a turn: send it, and fold what comes back.
+ *
+ * Nothing is applied before the server has it. The board already waits half a second for pieces to
+ * fly, so a round trip hides inside an animation that was there anyway — and waiting is what makes
+ * every client's copy of the log the same copy.
+ */
+async function submitTurn(command: PlayerCommand): Promise<boolean> {
+  const outcome = await sync.submit(command)
+  if (outcome.failure) {
+    /*
+     * A stale turn is not an error to shout about: somebody moved first, and the catch-up that
+     * follows brings this page level. A refusal is worth saying — the two ends disagreed about a
+     * game they are both folding, which is a bug rather than a move.
+     */
+    if (outcome.failure !== 'stale') trouble.value = outcome.message ?? 'That turn was not taken.'
+    absorb(await sync.catchUp())
+    return false
+  }
+  absorb(outcome.commands)
+  return true
+}
 
 /** Whose turn it is, read through `revision` so it follows the state rather than shadowing it. */
 const activeIndex = computed(() => {
@@ -423,68 +519,15 @@ function showSeat(seat: number): void {
 watch(viewedSeat, () => { revision.value++ })
 
 /**
- * The two desks, once the server has made them.
+ * The single way the game changes here: fold one command the server has already accepted.
  *
- * Null until then, and the game does not start until they exist — there is no local bag any more, so
- * without these there is nothing to deal. `onMounted` builds them; `dealing` and `deskError` are what
- * the player sees in the meantime.
+ * **Nothing reaches this that has not been stored.** A turn of your own arrives in the answer to the
+ * request that submitted it, and somebody else's arrives in a catch-up; they take the same path, so
+ * there is no optimistic copy of the board to reconcile and no rollback to write.
  *
- * They are **not** stored. The board resets on reload, so a returning player starts the game again,
- * and two fresh desks from the same seed deal exactly what they dealt before. Keeping their ids would
- * resume a half-drawn bag against an empty board, which is a different game.
- */
-let tileDesk: Desk | null = null
-let plateDesk: Desk | null = null
-
-/** A code from the wire, as the model wants it. */
-function specOf(code: number): TileSpec {
-  const spec = tileFromCode(code)
-  if (!spec) throw new Error(`the desk dealt ${code}, which is not a tile`)
-  return spec
-}
-
-/**
- * The one command whose payload comes from outside: what the desk dealt.
- *
- * Everything else a command needs the state already knows, which is what makes a replay possible. A
- * deal cannot be worked out, so the codes are asked for once and carried, and the fold never asks
- * again.
- *
- * **Room is checked before anything is drawn**, because a drawn tile is gone from the server's desk
- * whether or not it lands anywhere, and nothing on this side could put it back. `needsDeal` is that
- * precondition, and asking it first is the whole guard.
- *
- * A desk with nothing left is the end of the supply rather than a failure: the round simply stops
- * restocking. The server refuses a draw it cannot cover rather than answering short, so the two would
- * otherwise arrive as the same rejection — asking what it last said is left is what tells them apart.
- */
-async function dealLot(): Promise<boolean> {
-  if (!tileDesk || !plateDesk) return false
-  if (!needsDeal(state)) return false
-  if (plateDesk.remaining() < 1) return false
-  if (tileDesk.remaining() < SOURCE_TILES_PER_LOT) return false
-
-  let plate: TileSpec
-  let tiles: TileSpec[]
-  try {
-    plate = specOf((await plateDesk.draw(1))[0] as number)
-    tiles = (await tileDesk.draw(SOURCE_TILES_PER_LOT)).map(specOf)
-  } catch (error) {
-    reportDeskTrouble(error)
-    return false
-  }
-  return commit({ kind: 'deal', plate, tiles }) !== null
-}
-
-/**
- * The single way the game changes: apply, append, and settle up with the desks.
- *
- * A refusal is reported rather than thrown. The view and the rules can disagree about what is legal —
- * a stale button, a phase the player has left — and the rules are the ones that are right.
- *
- * Spent and swept material goes back to the pile, which lives on the server. Not awaited: it has
- * already left the board, the desk queues the request behind whatever is in flight, and a slow round
- * trip should not hold up the turn.
+ * A refusal here is therefore not a player pressing something they should not have — the server
+ * refused that already — but this end disagreeing with the server about a game they are both folding.
+ * That is a bug rather than a move, and it is said out loud.
  */
 function commit(
   command: Command,
@@ -492,7 +535,8 @@ function commit(
 ): Extract<CommandResult, { ok: true }> | null {
   const result = applyCommand(state, command)
   if (!result.ok) {
-    console.warn(`[hexnome] ${command.kind} refused: ${result.error}`)
+    console.error(`[hexnome] the server accepted a ${command.kind} this page cannot apply: ${result.error}`, command)
+    trouble.value = 'This page has fallen out of step with the table. Reload to catch up.'
     return null
   }
   log.push(command)
@@ -506,9 +550,8 @@ function commit(
    * put them in place.
    */
   if (tell) revision.value++
-
-  void tileDesk?.discard(result.toDesk.tiles.map(tileCode)).catch(reportDeskTrouble)
-  void plateDesk?.discard(result.toDesk.plates.map(tileCode)).catch(reportDeskTrouble)
+  // Spent and swept material goes back to the pile by the server's own hand, in the same request
+  // that accepted the turn. This end no longer touches a desk at all.
   return result
 }
 
@@ -729,15 +772,19 @@ function chooseAction(action: TurnAction): void {
  * Pass: out of the round, not a skipped turn.
  *
  * The rules decide what that means — the others play on, and the round closes only once the last of
- * them has passed, sweeping the source and banking every board. So this says what the player did and
- * then looks at what happened.
+ * them has passed, sweeping the source and banking every board. The **server** decides it, and what
+ * comes back says what happened; `absorb` raises the results panel if a round closed, for everybody
+ * rather than only for whoever played the last pass.
  */
-function endRoundByPassing(): void {
-  const before = state.round
+async function endRoundByPassing(): Promise<void> {
+  if (settling.value) return
   phase.value = IDLE
-  if (!commit({ kind: 'pass', seat: activeIndex.value })) return
-  if (state.round !== before || state.finished) showResults.value = true
-  else announceTurn(count.value.turn, beginTurn)
+  settling.value = true
+  try {
+    await submitTurn({ kind: 'pass', seat: mySeat.value })
+  } finally {
+    settling.value = false
+  }
 }
 
 /* ── the end of a round ───────────────────────────────────────────────────────── */
@@ -888,7 +935,7 @@ function startNextRound(): void {
    * rather than on the one whose score you were reading last.
    */
   pinnedSeat.value = null
-  announceRound(count.value.round, beginTurn)
+  announceRound(count.value.round)
 }
 
 const gameOver = shallowRef(false)
@@ -1075,23 +1122,6 @@ async function onCardShown(): Promise<void> {
 
 onBeforeUnmount(clearCardTimers)
 
-function endTurn(): void {
-  phase.value = IDLE
-  announceTurn(count.value.turn, beginTurn)
-}
-
-onBeforeUnmount(clearCardTimers)
-
-/**
- * The start of a turn: restock the source if it wants restocking.
- *
- * `needsDeal` owns the conditions — newest lot touched, round has a plate left, room to shift into —
- * and `dealLot` asks the desk for the one thing the state cannot work out for itself.
- */
-async function beginTurn(): Promise<void> {
-  await dealLot()
-}
-
 /**
  * A source item was clicked.
  *
@@ -1134,21 +1164,28 @@ function onSelectTile(id: string): void {
  * What is still needed is the **time** — the turn is announced once the glide has finished, so the
  * card does not come up over pieces still travelling.
  */
-function confirmTake(): void {
+async function confirmTake(): Promise<void> {
   if (!canConfirm.value || settling.value) return
-  const seat = activeIndex.value
   // Which slot each takes is the rules' business: the draft crosses from the source's model into this
   // seat's, and only one of them can decide where things land.
   settling.value = true
-  if (!commit({ kind: 'draft', seat, ids: [...selectedIds.value] })) {
+  const taking = [...selectedIds.value]
+  phase.value = IDLE
+
+  /*
+   * The submit and the glide run together rather than one after the other.
+   *
+   * The tiles cannot start moving until the rows come back — nothing is applied before the server has
+   * it — but once they are moving the turn should not wait a second time. So the settle is timed from
+   * the moment the board changes, and a localhost round trip disappears into it.
+   */
+  if (!await submitTurn({ kind: 'draft', seat: mySeat.value, ids: taking })) {
     settling.value = false
     return
   }
-
   settleTimer = window.setTimeout(() => {
     settleTimer = null
     settling.value = false
-    endTurn()
   }, DRAFT_SETTLE_MS)
 }
 
@@ -1304,20 +1341,20 @@ function applyPayment(): void {
   /*
    * The pieces leave first, and the turn waits for them.
    *
-   * Applying at once would end the turn on the same frame, and ending a turn hands the view to the
-   * next player — so the payment would be paid on a board nobody is looking at any more. The flight
-   * is told to begin here, before the model changes, and the turn follows it.
+   * The flight is told to begin here, before the model changes, so the payment is seen leaving the
+   * board it was paid from. Only when it has landed is the turn sent — which also means the round
+   * trip runs after an animation rather than before one, and is invisible inside it.
    *
    * `settling` closes Apply while it plays, so a second press cannot pay twice.
    */
-  const seat = activeIndex.value
+  const seat = mySeat.value
   settling.value = true
   spending.value = [...current.selected]
   settleTimer = window.setTimeout(() => {
     settleTimer = null
     settling.value = false
     spending.value = []
-    commitPayment(seat, item, to, current.origin, current.selected)
+    void commitPayment(seat, item, to, current.origin, current.selected)
   }, departureMillis(current.selected.length))
 }
 
@@ -1347,13 +1384,13 @@ onBeforeUnmount(() => {
  * **committed turns**, so a `put` carries the placement and its payment together, and the live path
  * has to start from the same board a replay would.
  */
-function commitPayment(
+async function commitPayment(
   seat: number,
   item: { kind: 'tile' | 'plate', id: string },
   to: TileLocation | PlateLocation,
   origin: TileLocation | PlateLocation,
   paying: readonly string[],
-): void {
+): Promise<void> {
   /*
    * **The acting seat's board, named, not `board()`.**
    *
@@ -1366,43 +1403,21 @@ function commitPayment(
   if (item.kind === 'tile') playing.moveTile(item.id, origin as TileLocation)
   else playing.movePlate(item.id, origin as PlateLocation)
 
-  // Silent: the scene is told once `arriving` is set, so a reward is known to be one before it is seen.
-  const played = commit({
-    kind: 'put',
-    seat,
-    item,
-    to,
-    paying: [...paying],
-    // How the plate was turned in the bay. Turning is not a turn and so not a command of its own,
-    // but it decides which cell each petal lands on — a replay without it refuses the placement.
-    rotation: item.kind === 'plate' ? playing.plate(item.id)?.rotation : undefined,
-  }, { tell: false })
-  if (!played) {
-    // Refused after all: put it back where the player left it rather than silently undoing their move.
+  /*
+   * The rotation is read before the submit, because the plate is back in its bay by then and the
+   * turn it was placed at is the thing the server has to be told. Turning is free and not a command
+   * of its own, but it decides which cell each petal lands on.
+   */
+  const rotation = item.kind === 'plate' ? playing.plate(item.id)?.rotation : undefined
+
+  const took = await submitTurn({ kind: 'put', seat, item, to, paying: [...paying], rotation })
+  if (!took) {
+    // Refused: put it back where the player left it rather than silently undoing their move.
     if (item.kind === 'tile') playing.moveTile(item.id, to as TileLocation)
     else playing.movePlate(item.id, to as PlateLocation)
     revision.value++
-    return
   }
-
-  /*
-   * An enclosure pays in stems, and they arrive from the left. Same treatment as a draft: the turn
-   * waits for them, so the card does not come up over stems still travelling.
-   */
-  if (played.awarded.length > 0) {
-    arriving.value = [...played.awarded]
-    revision.value++
-    settling.value = true
-    settleTimer = window.setTimeout(() => {
-      settleTimer = null
-      settling.value = false
-      arriving.value = []
-      endTurn()
-    }, AWARD_SETTLE_MS)
-    return
-  }
-  revision.value++
-  endTurn()
+  // Everything else — the fold, the arrivals, the card — is `absorb`'s, for every client alike.
 }
 
 /**
@@ -1792,25 +1807,25 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     </section>
 
     <!--
-      The desks are made before the game can start, and said so plainly if they cannot be.
+      The log is fetched before the game can be shown, and said so plainly if it cannot be.
 
-      An unreachable table used to be impossible: the bag was local, so a game either ran or the page
-      was broken. Now it is an ordinary thing that can happen — the server is not started, or it is
+      An unreachable table used to be impossible: the game was local, so it either ran or the page was
+      broken. Now it is an ordinary thing that can happen — the server is not started, or it is
       running rules this page is not — and neither reads as anything at all without being said.
     -->
     <div
-      v-if="dealing || deskTrouble"
+      v-if="loadingLog || trouble"
       class="table-state"
       role="status"
     >
-      <p v-if="deskTrouble">
-        {{ deskTrouble }}
+      <p v-if="trouble">
+        {{ trouble }}
       </p>
       <p v-else>
-        Dealing…
+        Opening the game…
       </p>
       <RouterLink
-        v-if="deskTrouble"
+        v-if="trouble"
         to="/"
         class="table-back"
       >
