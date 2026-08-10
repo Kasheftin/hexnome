@@ -267,14 +267,6 @@ const strictEnclosureBonus = settings.value
   : DEFAULT_STRICT_ENCLOSURE_BONUS
 
 /**
- * What the desks are dealt from. Stored with the game; the id is not it.
- *
- * A game saved before seeds existed comes back with its id here, which is what it was dealt from —
- * see `composables/useSavedGames.ts`.
- */
-const seed = computed(() => settings.value?.seed || gameId.value)
-
-/**
  * Everything the rules need to build a game, in one place.
  *
  * The settings are normalised on the way in — the drawer shape, the placement rule, the strict bonus
@@ -282,9 +274,14 @@ const seed = computed(() => settings.value?.seed || gameId.value)
  * stored. `cells` is a scene decision and comes from here for that reason.
  */
 const gameOptions: GameOptions = {
+  /*
+   * The public seed, and the only one this end has: the opening plates and the petal stream come
+   * from it. What the *desks* deal from is the server's own and never arrives here — see
+   * `packages/rules/src/game.ts`.
+   */
+  gameId: gameId.value,
   settings: {
-    ...(settings.value ?? defaultGameSettings(0, seed.value)),
-    seed: seed.value,
+    ...(settings.value ?? defaultGameSettings(0)),
     /*
      * Who is in each chair comes from the **seats**, not from the settings.
      *

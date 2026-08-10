@@ -26,7 +26,7 @@ before any API call resolves.
 ```
 docs/               design docs
 frontend/           Vue 3 SPA
-backend/            Nest.js API             ← the desk service, and nothing else yet
+backend/            Nest.js API             ← the games and the desks
 packages/rules/     the game's rules        ← shared by both
 external assets/    reference art, screen1.png
 ```
@@ -236,21 +236,21 @@ every tile the game would ever deal was in memory and readable from the console 
 and impossible for anything else. It now lives behind three routes that know nothing about the game:
 
 ```
-POST /desk              { seed, copies, exclude? }  -> { id, remaining }
-POST /desk/:id/draw     { n }                       -> { id, remaining, codes }
-POST /desk/:id/discard  { codes }                   -> { id, remaining }
+POST /desk              { gameId, kind }  -> { id, remaining }
+POST /desk/:id/draw     { n }             -> { id, remaining, codes }
+POST /desk/:id/discard  { codes }         -> { id, remaining }
 ```
 
-A **code** is `11`-`66`: colour then value, `(color + 1) * 10 + value`. That is the whole vocabulary.
-A game uses two desks, one for tiles and one for plates, and the service cannot tell them apart — the
-client sends `` `${seed}:tiles` `` for one and `` `${seed}:plates` `` for the other, which is what
-keeps their orders independent.
+A **code** is `11`-`66`: colour then value, `(color + 1) * 10 + value`. That is the whole vocabulary
+once a desk exists — a row has no idea whether it holds a game's tiles or its plates. `kind` is only
+how the *builder* is told which of a game's two bags to make, and the two are built from
+`` `${game.seed}:tiles` `` and `` `${game.seed}:plates` ``, which is what keeps their orders
+independent.
 
-**The seed is not the game id.** It is minted with the game and stored beside its settings; the id is
-in the URL and gets pasted around. Right now the client mints it and sends it, so the system is *not
-secure*: anyone holding a seed can build a second desk and read the whole order. Fixing that means
-minting it on the server, and keeping the two values apart now makes that a deletion rather than a
-migration.
+**A desk is asked for by game, not by recipe.** The request once carried `{ seed, copies, exclude }`,
+every field a fact about the game that the client happened to be holding. The server holds the game
+now and works all three out for itself — and a client that cannot state what a bag is built from
+cannot predict it.
 
 **The mechanism is in `packages/rules/src/desk.ts`**, as pure functions over a value:
 
@@ -264,6 +264,14 @@ State rather than a closure, because it round-trips through a JSON column betwee
 next. `DeskService` is the thin shell that loads a row, calls one of these and writes it back; the
 arithmetic is testable without a database, and `conservation.spec.ts` drives the same code the server
 runs.
+
+**Two seeds, and they are not interchangeable.** The **order** comes from `game.seed`, minted on the
+server and never sent anywhere. The plates the bag must hold back come from `game.id`, which is
+*public* — because the client works the same opening plates out for itself when it lays the boards
+out, and it can only do that from something it knows. They must agree exactly, or the bag deals a
+plate that is already on somebody's board. That is also the only seed the rules package has ever
+seen: `GameOptions.gameId` feeds the opening plates and the petal stream, both of which are on the
+table for everyone to look at anyway.
 
 **Copies and exclusions.** `copies` multiplies the 36 distinct kinds — the settings offer 2-4 tiles
 and 1-3 plates. Each copy is built in the fixed colour-major order and the finished list is shuffled
@@ -314,6 +322,63 @@ The colour count lives in `game/deck.ts`, while the palette lives in `scene/tile
 deck deals indices `0…5` without consulting the palette. `tileMaterials.ts` carries a type-level
 assertion tying the two together, because `createTileMaterial` falls back to the first colour on an
 out-of-range index — drift would silently render the wrong colour rather than fail.
+
+### Games, seats and the head socket
+
+A game is a row, and the id in `/game?id=…` is its primary key.
+
+```
+POST /games            { settings, name? }    -> { seat, token, game }
+GET  /games/:id        Authorization: Seat …  -> GameView
+POST /games/:id/join   { name? }              -> { seat, token, game }
+WS   /watch            <- { watch: gameId }   -> { gameId, seq }
+```
+
+**Claiming a seat is a conditional write.** `UPDATE … WHERE gameId = ? AND seat = ? AND token IS
+NULL` either takes the chair or affects no rows, so two people opening one link cannot both get in;
+the loser tries the next chair. Reading for a free seat and then writing it is a race however
+carefully it is written, and the failure is two players sharing a drawer. Same discipline as the
+desk's version check.
+
+**Every game is a table**, singleplayer included: a solo game is one whose only seat is claimed by
+its creator, so it starts in the same breath and takes the same path. Attempt 1's worst bug was a
+guard that existed on one route and not the other (docs/backend-attempt1.md).
+
+**A token is a capability, not an account.** It says "the holder may act as seat 2 in that game" and
+nothing else. It leaves the server exactly once, in the response to the join that mints it, and is
+kept per game in localStorage — one person may hold a different seat in each of several games.
+Reading a game needs no token: the id is already the right to look at a table, and `you` is simply
+null without one.
+
+**The socket carries a number, not the game.** `{ gameId, seq }`, where `seq` is bumped on every
+write. Pushing the game itself would be a second path out of the server carrying data, and that path
+would need its own idea of what a client may see — the first bug in it leaks the seed. There is one
+such path already, `GET /games/:id`, so the socket is only a nudge towards it.
+
+That is what makes it safe to be unreliable: it is an **optimisation, never a source of truth**. A
+client polls underneath at two seconds, drops to fifteen once the socket is live, and never stops —
+a socket that is open but silently broken is indistinguishable from a quiet game, and the failure
+mode of trusting it is a player sitting for ever in front of a table that filled up.
+
+### One store, and the route follows the status
+
+`frontend/src/stores/game.ts` reads the id from `router.currentRoute`, loads the game, and holds it.
+It is the only path by which a game reaches the client.
+
+`/join` and `/game` are **one game at two moments**, and which of them a client belongs on is the
+server's answer rather than the link's: a client on `/game` for a table still filling is `replace`d
+onto `/join`, and back again when it starts. That is what makes one share link enough — a host sends
+`/game?id=…` and whoever opens it arrives wherever the game actually is. Replaced rather than pushed,
+so the back button does not walk into the screen the server just ruled out.
+
+`App.vue` is the gate: nothing about a game mounts until the game has loaded. `GameView` builds its
+whole state from the settings at setup, so a view rendered before them is a view built from
+guesses — and written per view the check would be three copies of one `v-if`, the third of which
+somebody forgets.
+
+**There is no `useSavedGames` any more.** Settings lived in localStorage when a game was a thing the
+browser minted for itself. What is left there is the player's name, which belongs to the person, and
+the seat tokens, which cannot live anywhere else.
 
 ### The game journal
 

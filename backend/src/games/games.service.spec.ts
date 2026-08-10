@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { ConflictException, NotFoundException } from '@nestjs/common'
 import { defaultGameSettings, SOLO, type GameSettings } from '../rules/gameSettings'
 import { PrismaService } from '../prisma.service'
+import { createGameBody } from './dto'
 import { GamesService } from './games.service'
 import { HeadsGateway } from './heads.gateway'
 
@@ -30,7 +31,7 @@ const games = new GamesService(prisma, heads)
 const made: string[] = []
 
 function settingsFor(players: number): GameSettings {
-  return { ...defaultGameSettings(0, ''), kind: players > SOLO ? 'multiplayer' : 'singleplayer', players }
+  return { ...defaultGameSettings(0), kind: players > SOLO ? 'multiplayer' : 'singleplayer', players }
 }
 
 async function newGame(players = 3, name = 'Ember') {
@@ -68,18 +69,22 @@ describe('opening a table', () => {
   })
 
   /**
-   * One game, one seed, and it is the server's.
+   * One game, one secret seed, and the client cannot smuggle in a second.
    *
-   * `GameSettings.seed` is the client's old answer to the same question. Left in place it would be a
-   * second seed for the same game, and a reader would have to know which of them counts.
+   * A seed used to be a setting, back when the client dealt the game. `parseGameSettings` drops it
+   * now, so a blob from an older build — or a hand-edited one — cannot leave a stale copy in the row
+   * for the next reader to have to choose between.
    */
-  it('empties the seed the settings arrived with', async () => {
-    const { game } = await games.create({ settings: { ...settingsFor(2), seed: 'from-the-client' }, name: '' })
+  it('keeps no seed in the settings, whatever the client sent', async () => {
+    // Through the body parser, because that is where an untrusted blob becomes settings — the
+    // service takes a `GameSettings` and is entitled to believe it.
+    const body = createGameBody({ settings: { ...settingsFor(2), seed: 'from-the-client' }, name: '' })
+    const { game } = await games.create(body)
     made.push(game.id)
 
-    expect(game.settings.seed).toBe('')
+    expect(game.settings).not.toHaveProperty('seed')
     const row = await prisma.game.findUnique({ where: { id: game.id } })
-    expect((row?.settings as { seed: string }).seed).toBe('')
+    expect(row?.settings).not.toHaveProperty('seed')
     expect(row?.seed).not.toBe('from-the-client')
   })
 

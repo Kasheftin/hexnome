@@ -73,15 +73,11 @@ export class GamesService {
         // Minted here, and the reason this endpoint exists. Never leaves the server.
         seed: randomUUID(),
         /*
-         * **Emptied on the way in**, so a game has exactly one seed and it is the column above.
-         *
-         * `GameSettings.seed` is the client's old answer to "what is this dealt from", back when the
-         * client dealt it. Storing whatever arrived there would leave two seeds disagreeing, and the
-         * next reader would have to know which one wins. A blank one falls back to the game id
-         * wherever the rules still want a public seed — the opening plates and the petal stream, both
-         * of which are on the table for everyone to see anyway.
+         * As parsed, and `parseGameSettings` no longer admits a seed at all. A game has two — this
+         * column, which is secret, and the id, which is public and is what the opening plates come
+         * from. A third in the settings is the copy that would go stale.
          */
-        settings: { ...settings, seed: '' } as unknown as object,
+        settings: settings as unknown as object,
         seats: {
           create: Array.from({ length: players }, (_, seat) => ({
             seat,

@@ -50,7 +50,7 @@ async function newGame(
        * honoured, and a test asking for one would be testing the default under another name.
        */
       settings: {
-        ...defaultGameSettings(0, ''),
+        ...defaultGameSettings(0),
         players,
         tileCopies,
         plateCopies,

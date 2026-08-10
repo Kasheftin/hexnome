@@ -10,8 +10,9 @@
  * Kinds that are not playable yet are shown and disabled rather than hidden — a menu listing only what
  * works today says less about the game than one that admits what is coming.
  *
- * Starting a game mints an id, stores its settings against it, and navigates to `/game?id=…` —
- * which is what lets a refresh come back as the same game (composables/useSavedGames.ts).
+ * Starting a game opens it on the server, which mints its id and its seed, and navigates to
+ * whichever screen the game is actually on — `/join` for a table still filling, `/game` for one that
+ * is already running (stores/game.ts).
  */
 import { mdiCog, mdiDiceMultiple } from '@mdi/js'
 import { computed, nextTick, ref, type Ref } from 'vue'
@@ -483,13 +484,6 @@ async function startGame(): Promise<void> {
     // Seat 0 is whoever made the game. The rest name themselves as they join.
     playerNames: [name.value],
     mode: mode.value,
-    /*
-     * Left empty on purpose. What a game is dealt from is the server's, minted with the game and
-     * never sent back — a client holding it could rebuild the whole deal. The field survives for the
-     * rules that still want a *public* seed, the opening plates and the petal stream, and an empty
-     * one falls back to the game id, which is shared anyway.
-     */
-    seed: '',
     platesPerRound: platesPerRound.value,
     tileCopies: tileCopies.value,
     plateCopies: plateCopies.value,

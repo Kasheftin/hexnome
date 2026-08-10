@@ -60,6 +60,19 @@ export const BOARD_CENTRE: Axial = { q: 0, r: 0 }
 
 export interface GameOptions {
   readonly settings: GameSettings
+  /**
+   * The game's id — and the only seed the rules get.
+   *
+   * Two things here are dealt from a seed and both are **public**: which plate each player opens on,
+   * which is on the board for everyone to see, and the petal stream, which is decoration. The id is
+   * the honest thing to derive them from, because it is what both ends already share.
+   *
+   * The seed the *desks* are built from is a different value and a secret. It lives on the server,
+   * never reaches a client, and nothing in this package has ever seen it — which is what stops a
+   * player predicting the deal. Keeping the two apart is the whole arrangement, so they are not one
+   * field with a comment.
+   */
+  readonly gameId: string
   /** The playfield, which is a scene decision rather than a rule — see BOARD_HALF_COLS. */
   readonly cells: readonly Axial[]
   readonly sourceTilesPerLot: number
@@ -218,9 +231,9 @@ function specOf(code: number): TileSpec {
  * and the seed, so a replay rebuilds it before applying anything.
  */
 export function createGame(options: GameOptions): GameState {
-  const { settings, cells, sourceTilesPerLot } = options
+  const { settings, cells, sourceTilesPerLot, gameId } = options
   const players = Math.max(1, Math.min(settings.players, MAX_PLAYERS))
-  const petals = createRandom(`${settings.seed}:petals`)
+  const petals = createRandom(`${gameId}:petals`)
   const nextPetal = (): number => Math.floor(petals() * PETAL_COUNT)
 
   const source = createTableau({
@@ -232,7 +245,7 @@ export function createGame(options: GameOptions): GameState {
     idPrefix: 'src:',
   })
 
-  const opening = openingPlateCodes(settings.seed, players)
+  const opening = openingPlateCodes(gameId, players)
 
   const seats = Array.from({ length: players }, (_, seat): SeatState => {
     const tableau = createTableau({

@@ -36,7 +36,6 @@ const valid = {
   mode: 'classic',
   players: 3,
   playerNames: ['Ember', 'Flux'],
-  seed: '9c1f0b2a-7d3e-4a55-8b61-0f2e3d4c5b6a',
   platesPerRound: 5,
   tileCopies: 4,
   plateCopies: 2,
@@ -434,20 +433,17 @@ describe('who is at the table', () => {
 })
 
 describe('the seed a game is dealt from', () => {
-  it('is kept exactly as it was stored', () => {
-    expect(parseGameSettings(valid)?.seed).toBe(valid.seed)
-  })
-
-  /*
-   * Empty rather than null for a game saved before seeds existed. Those games are still games, and
-   * the reader knows the id they were dealt from — see frontend/src/composables/useSavedGames.ts.
+  /**
+   * It is not a setting, and reading one out of a stored blob must not resurrect it.
+   *
+   * A game has two seeds and neither belongs here: the desks are built from the server's, which no
+   * client ever sees, and the opening plates from the game's id, which both ends already share. A
+   * third copy in the settings is the one that would go stale.
    */
-  it('comes back empty when there was not one, rather than failing the game', () => {
-    const { seed, ...withoutSeed } = valid
-    void seed
-    expect(parseGameSettings(withoutSeed)).not.toBeNull()
-    expect(parseGameSettings(withoutSeed)?.seed).toBe('')
-    expect(parseGameSettings({ ...valid, seed: 42 })?.seed).toBe('')
+  it('is not one of them, however hard a stored blob insists', () => {
+    const parsed = parseGameSettings({ ...valid, seed: 'from-an-older-build' })
+    expect(parsed).not.toBeNull()
+    expect(parsed).not.toHaveProperty('seed')
   })
 })
 

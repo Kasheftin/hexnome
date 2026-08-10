@@ -20,7 +20,7 @@ const TILES_PER_LOT = 4
 
 function options(overrides: Partial<GameSettings> = {}): GameOptions {
   const settings: GameSettings = {
-    ...defaultGameSettings(0, SEED),
+    ...defaultGameSettings(0),
     kind: 'multiplayer',
     players: 3,
     playerNames: ['Ember', 'Flux', 'Gimbal'],
@@ -33,6 +33,8 @@ function options(overrides: Partial<GameSettings> = {}): GameOptions {
   }
   return {
     settings,
+    // The public seed: the opening plates and the petal stream, and nothing a player could not see.
+    gameId: SEED,
     cells: hexRectangle(8, 8),
     sourceTilesPerLot: TILES_PER_LOT,
     agenda: createAgenda(SEED, settings.mode),

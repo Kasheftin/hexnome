@@ -239,17 +239,6 @@ export interface GameSettings {
   readonly kind: GameKind
   readonly mode: SingleplayerMode
   /**
-   * What the game's desks are dealt from. Minted with the game and never shown.
-   *
-   * Separate from the game id, which is in the URL and gets pasted around. The desks are built from
-   * this on the server, and the day it stops being minted here is the day the client stops being able
-   * to predict the deal — keeping the two apart now makes that a deletion rather than a migration.
-   *
-   * Empty for a game saved before this existed; the reader substitutes the game id, which is what
-   * those games were dealt from.
-   */
-  readonly seed: string
-  /**
    * How many people are at the table. {@link SOLO} for a singleplayer game.
    *
    * Stored rather than derived from `kind`, because it is the number the deal and the turn order are
@@ -453,11 +442,10 @@ export const PLACEMENT_RULE_HINTS: Readonly<Record<PlacementRule, string>> = {
   strict: 'every neighbour must match',
 }
 
-export function defaultGameSettings(createdAt: number, seed = ''): GameSettings {
+export function defaultGameSettings(createdAt: number): GameSettings {
   return {
     kind: 'singleplayer',
     mode: DEFAULT_SINGLEPLAYER_MODE,
-    seed,
     players: SOLO,
     playerNames: [],
     platesPerRound: DEFAULT_PLATES_PER_ROUND,
@@ -518,9 +506,6 @@ export function parseGameSettings(value: unknown): GameSettings | null {
   return {
     kind: raw.kind,
     mode: raw.mode,
-    // A dial-style fallback rather than a rejection: a game saved before seeds existed is still a
-    // game, and the caller knows the id it was dealt from. See {@link GameSettings.seed}.
-    seed: typeof raw.seed === 'string' ? raw.seed : '',
     players,
     playerNames: parsePlayerNames(raw.playerNames, players),
     platesPerRound: isPlatesPerRound(raw.platesPerRound)

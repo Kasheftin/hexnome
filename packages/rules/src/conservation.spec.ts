@@ -51,7 +51,7 @@ interface Table {
  */
 function table({ players = 3, tileCopies = 3, plateCopies = 1 }: Table = {}) {
   const settings: GameSettings = {
-    ...defaultGameSettings(0, SEED),
+    ...defaultGameSettings(0),
     kind: 'multiplayer',
     players,
     tileCopies,
@@ -59,6 +59,7 @@ function table({ players = 3, tileCopies = 3, plateCopies = 1 }: Table = {}) {
   }
   const options: GameOptions = {
     settings,
+    gameId: SEED,
     cells: hexRectangle(8, 8),
     sourceTilesPerLot: TILES_PER_LOT,
     agenda: createAgenda(SEED, settings.mode),
