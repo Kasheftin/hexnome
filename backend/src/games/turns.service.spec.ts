@@ -64,12 +64,22 @@ function pass(seat: number): PlayerCommand {
  * kinds hold no 1 about half the time, and the test then drafts nothing and fails for a reason that
  * has nothing to do with what it is about. Sweeping the value of a tile that is *there* is a complete
  * draft by construction, whatever was dealt.
+ *
+ * **One id per kind**, though. A sweep is over kinds, not over items — the bag holds three copies of
+ * each tile, so four dealt at random carry a matching pair about one time in nine, and selecting both
+ * is the one thing `completedStrategies` refuses outright. That is a flake with a period of days: it
+ * turns up in whichever test drew the pair, never in a rerun of that test alone.
  */
 async function sweepTheSource(gameId: string): Promise<string[]> {
   const showing = draftItems(await turns.stateOf(gameId))
   const value = showing[0]?.value
   if (value === undefined) throw new Error('nothing in the source to draft')
-  return showing.filter(item => item.value === value).map(item => item.id)
+
+  const oneEach = new Map<string, string>()
+  for (const item of showing) {
+    if (item.value === value) oneEach.set(`${item.color}:${item.value}`, item.id)
+  }
+  return [...oneEach.values()]
 }
 
 afterAll(async () => {
