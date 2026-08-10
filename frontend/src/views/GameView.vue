@@ -393,6 +393,16 @@ function absorb(rows: readonly CommandRow[]): void {
    * game, so it is remembered here and not in the log. See `readSheets`.
    */
   if (closed && !sheetRead(gameId.value, roundsFinished.value)) {
+    /*
+     * Everyone comes home first.
+     *
+     * A round can close while you are peeking at somebody else's board — you pass, wander over to see
+     * what they are building, and their last move ends the round. The sheet would then open on *their*
+     * score, which reads as your own until you notice the name. A round ending is the table's moment
+     * rather than any one player's, so it starts where the player does. The tabs are still there for
+     * the comparison.
+     */
+    pinnedSeat.value = null
     showResults.value = true
     return
   }
@@ -491,10 +501,12 @@ function myArrangement(): PlayerCommand {
 /**
  * The scene rearranged something. Redraw, and — if it was yours to rearrange — write it down.
  *
- * Two gates. **A seat**, because a spectator has no drawer and no token to send with. And an **idle
- * phase**: while a placement is provisional the tile is on the board here and still in the drawer in
- * the log, so an arrangement listing what is left would not be an arrangement of the drawer the
- * server holds, and would be refused for a reason that is not the player's fault.
+ * Three gates. **A seat**, because a spectator has no drawer and no token to send with. **Your own
+ * board**, which the scene now refuses to let you drag at all — kept here because this one is about
+ * what gets *sent*, and a seat may only ever arrange its own drawer. And an **idle phase**: while a
+ * placement is provisional the tile is on the board here and still in the drawer in the log, so an
+ * arrangement listing what is left would not be an arrangement of the drawer the server holds, and
+ * would be refused for a reason that is not the player's fault.
  */
 function onRearranged(): void {
   revision.value++
@@ -1758,6 +1770,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :source="source()"
         :drawer="drawerShape"
         :game-id="gameId"
+        :yours="viewedSeat === mySeat"
         :may-place="phase.kind === 'putting' || canStartPut"
         :unaffordable="unaffordable"
         :may-move-placed="phase.kind === 'putting'"

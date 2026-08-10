@@ -129,6 +129,18 @@ const props = defineProps<{
    */
   mayPlace: boolean
   /**
+   * Whether this tableau is the viewer's own.
+   *
+   * False while peeking at another player, and then **nothing here may be dragged at all**. Their
+   * drawer is not yours to sort: the rearrangement would be applied to the model, never sent — a
+   * seat may only arrange its own — and then quietly undone by the next fold or reload. Refusing the
+   * drag is the honest version of what already happens.
+   *
+   * Separate from `mayPlace` and `mayMovePlaced`, which are about the *phase* of your own turn. This
+   * is about whose table you are standing at.
+   */
+  yours: boolean
+  /**
    * Whether something **already on the board** may be picked up.
    *
    * Deliberately narrower than `mayPlace`. Moving a placed piece is a move on a board that has already
@@ -991,12 +1003,14 @@ function viewOf(hit: Draggable): View | undefined {
 }
 
 /**
- * May this be dragged at all, given the phase?
+ * May this be dragged at all, given whose board it is and what phase the turn is in?
  *
- * Rearranging the drawer is always allowed — it is not a move and not a turn. Everything else waits
- * for the player to have chosen to place.
+ * Rearranging your **own** drawer is always allowed — it is not a move and not a turn. Everything
+ * else waits for the player to have chosen to place, and somebody else's board is not touchable in
+ * any phase.
  */
 function canDrag(hit: Draggable): boolean {
+  if (!props.yours) return false
   // A stem is in the drawer by definition — there is nowhere else it can be.
   if (hit.kind === 'stem') return true
   const inDrawer = hit.kind === 'tile'
