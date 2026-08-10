@@ -121,6 +121,7 @@ import {
   defaultGameSettings,
 } from '@hexnome/rules/gameSettings'
 import { useGameStore } from '@/stores/game'
+import { rememberSheetRead, sheetRead } from '@/composables/readSheets'
 
 const route = useRoute()
 const router = useRouter()
@@ -361,15 +362,35 @@ function absorb(rows: readonly CommandRow[]): void {
    * behind it reach the screen together rather than a frame apart.
    */
   const awarded: string[] = []
+  /*
+   * Whether the log *ends* on a closed round, judged row by row rather than across the batch.
+   *
+   * Comparing the round before the batch with the round after answers a different question — "did a
+   * round close anywhere in here" — and a whole log always spans one. That is what put the round-1
+   * sheet back on screen after every refresh of round 2, for the rest of the round.
+   *
+   * A round closing raises it; anything a player did afterwards means the table has moved on without
+   * it. The deal behind a close does not count: the server writes the new round's opening lot in the
+   * same breath as the pass that ended the old one, so it arrives before anybody could have read
+   * anything.
+   */
+  let closed = false
   for (const row of rows) {
+    const wasRound = state.round
     const played = commit(row.command, { tell: false })
     if (played) awarded.push(...played.awarded)
+    if (state.round !== wasRound || state.finished) closed = true
+    else if (row.command.kind !== 'deal') closed = false
   }
   if (awarded.length > 0) arriving.value = awarded
   revision.value++
 
-  if (state.finished || state.round !== before.round) {
-    // A round closed. Everyone sees the sheet, not only whoever played the last pass.
+  /*
+   * A round closed. Everyone sees the sheet, not only whoever played the last pass — but only once
+   * each: putting it away is a person finishing reading rather than a thing that happened to the
+   * game, so it is remembered here and not in the log. See `readSheets`.
+   */
+  if (closed && !sheetRead(gameId.value, state.round)) {
     showResults.value = true
     return
   }
@@ -935,12 +956,15 @@ function startNextRound(): void {
   if (!showResults.value) return
 
   if (state.finished) {
-    // The panel stays up and becomes the end of the game — see RoundResults' `over`.
+    // The panel stays up and becomes the end of the game — see RoundResults' `over`. Deliberately
+    // not remembered: there is no next round to get on with, so a refresh should land back here.
     gameOver.value = true
     return
   }
 
   showResults.value = false
+  // Remembered before anything else, so a refresh a heartbeat later does not put the sheet back.
+  rememberSheetRead(gameId.value, state.round)
   /*
    * Let go of whatever seat the results panel was showing, so a new round opens on your own board
    * rather than on the one whose score you were reading last.
