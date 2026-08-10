@@ -41,6 +41,14 @@ const failed = ref(false)
 
 let watching: IntersectionObserver | null = null
 
+/**
+ * How far below the top of the reading area a heading counts as passed.
+ *
+ * Without it a heading resting exactly on the edge flickers between two answers as the browser
+ * rounds its position.
+ */
+const SPY_MARGIN = 12
+
 /** Fetched once and kept: the rules do not change while the tab is open. */
 async function load(): Promise<void> {
   if (html.value || failed.value) return
@@ -62,9 +70,13 @@ async function load(): Promise<void> {
 /**
  * Follow the reader down the page.
  *
- * The topmost heading that has crossed into view wins, which is what makes the rail agree with what
- * is under the reader's eye rather than with whatever last fired. Rebuilt whenever the document is
- * (re)rendered, because the headings are new elements each time.
+ * **The observer is a trigger, not the answer.** Asking it which heading is intersecting sounds
+ * right and is not: between two far-apart headings none of them is, so the rail keeps whatever it
+ * last saw and sticks — three sections went by under "The shared source" before this was measured.
+ * So a crossing merely prompts a rescan, and the answer is the last heading at or above the top of
+ * the reading area, which is the one whose section the reader is inside.
+ *
+ * Rebuilt whenever the document is rendered, because the headings are new elements each time.
  */
 function watchHeadings(): void {
   watching?.disconnect()
@@ -72,15 +84,17 @@ function watchHeadings(): void {
   if (!root) return
 
   const headings = [...root.querySelectorAll<HTMLElement>('h2[id]')]
-  watching = new IntersectionObserver((entries) => {
-    const showing = entries.filter(entry => entry.isIntersecting)
-    if (showing.length === 0) return
-    const top = showing.reduce((first, entry) =>
-      entry.boundingClientRect.top < first.boundingClientRect.top ? entry : first)
-    here.value = top.target.id
-  }, { root, rootMargin: '0px 0px -70% 0px' })
+  if (headings.length === 0) return
 
+  const settle = (): void => {
+    const top = root.getBoundingClientRect().top + SPY_MARGIN
+    const passed = headings.filter(heading => heading.getBoundingClientRect().top <= top)
+    here.value = (passed.at(-1) ?? headings[0])?.id ?? ''
+  }
+
+  watching = new IntersectionObserver(settle, { root })
   for (const heading of headings) watching.observe(heading)
+  settle()
 }
 
 function goTo(slug: string): void {

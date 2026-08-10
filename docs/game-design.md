@@ -4,8 +4,19 @@
 the browser. The **rules are inspired by Azul: Queen's Garden**; the **layout and visual style are
 inspired by Opus Magnum** — a clean hex playfield with a dark, ornate, polished frame.
 
-This document is the rules reference. For architecture and rendering see [tech-spec.md](tech-spec.md);
-for assets see [art-spec.md](art-spec.md); for build order see [tasklist.md](tasklist.md).
+> **This is not the rules reference any more.** It records how the game was *designed* — the reasoning
+> behind each rule, the alternatives that were rejected, and the questions still open. It is a
+> historical document, and it has drifted: five of the seven settings dials were added without it, the
+> round anchor points among them.
+>
+> **How the game currently plays is `frontend/src/content/rules.md`**, which the app shows under *Game
+> rules* on the home screen. That document is checked against the code by `rules.spec.ts` — change a
+> default without changing the prose and the suite fails — which is the thing this one never had.
+>
+> Nothing here is deleted. The *why* is worth keeping, and a player should never have to read it.
+
+For architecture and rendering see [tech-spec.md](tech-spec.md); for assets see
+[art-spec.md](art-spec.md); for build order see [tasklist.md](tasklist.md).
 
 ## Concept
 
