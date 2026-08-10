@@ -23,7 +23,7 @@
  * `platesPerRound` is a round-supply figure, not the drawer's bay count, so binding it to
  * PLATE_SLOTS would be conflating two different numbers.
  */
-import { mdiArrowDownLeftBold, mdiArrowDownRightBold } from '@mdi/js'
+import { mdiArrowDownLeftBold, mdiArrowDownRightBold, mdiChevronRight } from '@mdi/js'
 import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
@@ -2102,7 +2102,20 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
             :aria-pressed="row.viewed"
             @click="viewSeat(row.seat)"
           >
-            <span class="seat-mark">{{ row.active ? '▸' : '' }}</span>
+            <!--
+              Whose turn it is. The span is always there, holding its width, so the names below it do
+              not shuffle sideways as the turn moves round the table.
+            -->
+            <span class="seat-mark">
+              <svg
+                v-if="row.active"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path :d="mdiChevronRight" />
+              </svg>
+            </span>
             <PresenceMark
               :online="row.online"
               :name="row.name"
@@ -2512,8 +2525,21 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 }
 
 .seat-mark {
-  width: 8px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
   color: #8fe6c0;
+}
+
+.seat-mark svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  /* Wider than its box: a chevron is mostly air, and 10px of glyph reads as 6px of mark. */
+  margin: 0 -2px;
+  fill: currentcolor;
 }
 
 .seat-name {

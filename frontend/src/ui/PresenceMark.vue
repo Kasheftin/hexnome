@@ -3,8 +3,8 @@
  * Whether the server has heard from a seat lately, as a mark beside their name.
  *
  * **Two shapes, not two colours of one shape.** A green dot and a red dot are the same mark to a
- * colour-blind player, to a greyscale screenshot and to anyone glancing past. A filled circle and a
- * warning triangle are told apart by outline alone, and the colour is then only reinforcement.
+ * colour-blind player, to a greyscale screenshot and to anyone glancing past. `mdiCircle` and
+ * `mdiAlert` are told apart by outline alone, and the colour is then only reinforcement.
  *
  * The word goes with it, out of sight. A coloured shape says nothing at all to a screen reader, and
  * this is the one thing on the seat list that is not already written out.
@@ -16,6 +16,8 @@
  * tighter one. So a player who is there always shows present, and one who has just closed the tab
  * goes on showing present for a while yet. Erring that way is deliberate: *away* should mean gone.
  */
+import { mdiAlert, mdiCircle } from '@mdi/js'
+
 defineProps<{
   online: boolean
   /** Whose presence it is, for the word only a screen reader hears. */
@@ -29,21 +31,11 @@ defineProps<{
     :class="{ away: !online }"
   >
     <svg
-      viewBox="0 0 12 12"
+      viewBox="0 0 24 24"
       aria-hidden="true"
       focusable="false"
     >
-      <circle
-        v-if="online"
-        cx="6"
-        cy="6"
-        r="3.2"
-      />
-      <!-- A triangle with its bar and dot cut out, so the glyph reads at 12px without a second fill. -->
-      <path
-        v-else
-        d="M6 1 11.2 10.4H0.8zM5.3 4.6h1.4l-.2 3.1H5.5zM6 8.3a.7.7 0 1 1 0 1.4.7.7 0 0 1 0-1.4z"
-      />
+      <path :d="online ? mdiCircle : mdiAlert" />
     </svg>
     <span class="sr-only">{{ online ? `${name} is here` : `${name} has not been heard from` }}</span>
   </span>
@@ -65,9 +57,15 @@ defineProps<{
 
 .mark svg {
   display: block;
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   fill: currentcolor;
+}
+
+/* A filled disc is a heavier mark than an outlined triangle, so it is drawn a size down to match. */
+.mark:not(.away) svg {
+  width: 8px;
+  height: 8px;
 }
 
 .sr-only {
