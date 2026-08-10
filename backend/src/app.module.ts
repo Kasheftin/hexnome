@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { DeskModule } from './desk/desk.module'
+import { GamesModule } from './games/games.module'
 import { HealthController } from './health.controller'
 import { PrismaService } from './prisma.service'
 
@@ -16,7 +17,7 @@ import { PrismaService } from './prisma.service'
 const ENV_FILE = join(__dirname, '..', '.env')
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: ENV_FILE }), DeskModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: ENV_FILE }), DeskModule, GamesModule],
   controllers: [HealthController],
   providers: [PrismaService],
 })

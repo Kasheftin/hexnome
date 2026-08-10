@@ -49,3 +49,78 @@ model Desk {
 
   createdAt DateTime @default(now())
 }
+
+/// A table: what was chosen, who is at it, and how far along it is.
+///
+/// It shares a database with `Desk` and knows nothing about it — a desk is found by its own id and a
+/// game holds no reference to one. What ties them together is the **seed**, below, and the tying is
+/// done by the service rather than by a foreign key.
+model Game {
+  /// How the game is found. This is the id in `/game?id=…`, and the whole of a share link.
+  id String @id @db.VarChar(36)
+
+  /// What the game is dealt from — the desks, the agenda, the scatter.
+  ///
+  /// **Minted here and never sent to a client.** Anyone holding it can build a second desk from the
+  /// same order and read the whole deal, which is exactly what the move off the client was for. It is
+  /// deliberately not the id: an id is a share link and a seed is a secret, and one value cannot be
+  /// both.
+  seed String @db.VarChar(64)
+
+  /// `GameSettings` as chosen at setup, re-validated by `parseGameSettings` on the way out.
+  ///
+  /// A JSON column is editable in the database, so it is read back through the same gate the client
+  /// uses on localStorage, for the same reason.
+  settings Json
+
+  /// waiting | running | finished.
+  ///
+  /// Every game begins as `waiting`, singleplayer included: a solo game is one whose only seat is
+  /// claimed by its creator, so it starts in the same breath and takes the same path as the rest.
+  /// A second code route for solo is a second route to keep in step.
+  status String @default("waiting") @db.VarChar(16)
+
+  /// Bumped on every write, and broadcast to whoever is watching.
+  ///
+  /// The whole of what a watcher is told: a number that says "something moved, go and look". It
+  /// carries no game data, so it can be sent to anyone holding the id, and a client that misses one
+  /// is only as slow as its polling.
+  seq Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seats Seat[]
+
+  @@index([status, updatedAt])
+}
+
+/// A place at a table, and the secret that proves it is yours.
+model Seat {
+  gameId String @db.VarChar(36)
+
+  /// **Zero-based, matching the tableau.** The screen says "Player 1"; the row says 0.
+  ///
+  /// Also the turn order: seats are claimed in order and the game walks them.
+  seat Int
+
+  /// What the player called themselves. Null until claimed; empty means they did not say.
+  name String? @db.VarChar(40)
+
+  /// The secret that says a request is from this seat.
+  ///
+  /// Null while the seat is free, which is also the claim: an `UPDATE … WHERE token IS NULL` either
+  /// takes the seat or affects no rows, so two people opening one link cannot both get in. The write
+  /// adjudicates, not a read — the same discipline as the desk's version check.
+  ///
+  /// **Leaves the server exactly once**, in the response to the join that mints it. Never in a game
+  /// or a seat list.
+  token String? @db.VarChar(36)
+
+  joined DateTime?
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@id([gameId, seat])
+  @@unique([gameId, token])
+}
