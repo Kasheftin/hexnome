@@ -7,11 +7,8 @@
  * same place. The kinds now stand on the first screen, which is also what makes the shape of the
  * game legible on arrival.
  *
- * The path taken stays on screen beside the panel. Drilling down is genuinely a sequence here — you
- * cannot pick a mode before picking singleplayer — so the trail carries real information rather than
- * decorating the page.
- *
- * Kinds that are not playable yet are shown and disabled rather than hidden, for the same reason.
+ * Kinds that are not playable yet are shown and disabled rather than hidden — a menu listing only what
+ * works today says less about the game than one that admits what is coming.
  *
  * Starting a game mints an id, stores its settings against it, and navigates to `/game?id=…` —
  * which is what lets a refresh come back as the same game (composables/useSavedGames.ts).
@@ -405,18 +402,6 @@ function closeSettings(): void {
   void nextTick(() => gear.value?.focus())
 }
 
-/** The choices made so far, newest last. Empty on the first screen. */
-const trail = computed(() => {
-  const out: { label: string, value: string }[] = []
-  if (kind.value) {
-    out.push({
-      label: 'Game',
-      value: GAME_KINDS.find(k => k.id === kind.value)?.label ?? '',
-    })
-  }
-  return out
-})
-
 function chooseKind(id: GameKind): void {
   kind.value = id
   step.value = 'setup'
@@ -482,20 +467,6 @@ const selectedMode = computed(() => modeInfo(mode.value))
       <p class="tagline">
         Build · Adapt · Evolve
       </p>
-
-      <!-- The path taken, recorded down a brass spine. -->
-      <ol
-        v-if="trail.length"
-        class="trail"
-      >
-        <li
-          v-for="entry in trail"
-          :key="entry.label"
-        >
-          <span class="trail-label">{{ entry.label }}</span>
-          <span class="trail-value">{{ entry.value }}</span>
-        </li>
-      </ol>
     </div>
 
     <section
@@ -773,7 +744,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
   }
 }
 
-/* ── title lockup and the trail of choices ─────────────────────────────────── */
+/* ── title lockup ──────────────────────────────────────────────────────────── */
 
 h1 {
   margin: 0;
@@ -790,38 +761,6 @@ h1 {
   font-size: 11px;
   letter-spacing: 0.34em;
   text-transform: uppercase;
-}
-
-.trail {
-  margin: 34px 0 0;
-  padding: 0 0 0 18px;
-  /* The spine: choices hang off it in the order they were made. */
-  border-left: 1px solid #3a3222;
-  list-style: none;
-}
-
-.trail li {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-  padding: 5px 0;
-}
-
-.trail li + li {
-  border-top: 1px solid #22252b;
-}
-
-.trail-label {
-  min-width: 62px;
-  color: #6b7382;
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.trail-value {
-  color: #cfd4de;
-  font-size: 12px;
 }
 
 /* ── the current step ──────────────────────────────────────────────────────── */
