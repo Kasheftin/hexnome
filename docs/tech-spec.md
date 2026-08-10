@@ -307,12 +307,13 @@ for two known seeds. A failure there is a question about intent, not a prompt to
 
 What the seed buys, in order of when it matters:
 
-1. A refresh deals the game you were playing, not a new one. The board does not persist, so a reload
-   creates two fresh desks from the same seed — which deal exactly what they dealt before. Desk ids
-   are deliberately *not* stored: resuming a half-drawn bag against an empty board is a different
-   game.
-2. A bug report is reproducible from the seed alone.
-3. Later, the seed never leaves the server and the client cannot predict anything at all.
+1. A bug report is reproducible from the seed alone.
+2. The seed never leaves the server, so a client cannot predict anything at all.
+
+The desks are the game's, and their ids live on its row. That is a change from when a reload built
+two fresh desks from the same seed: the board is now folded from a log the server holds, so a refresh
+resumes the game rather than restarting it, and the bag has to resume with it. Half-drawn is the
+correct state to come back to.
 
 One claim not being made: a uuid carries 122 bits of entropy against `108!` possible orders, so this
 samples a small subset rather than shuffling uniformly. Irrelevant to play, but it is not a uniform
@@ -360,6 +361,81 @@ client polls underneath at two seconds, drops to fifteen once the socket is live
 a socket that is open but silently broken is indistinguishable from a quiet game, and the failure
 mode of trusting it is a player sitting for ever in front of a table that filled up.
 
+### The command log, and who may add to it
+
+A game's board, drawers, source and score are folded from a table of commands. Nothing about a game
+in progress is stored anywhere else, so nothing can drift from it.
+
+```
+GET  /games/:id/commands?since=N              -> CommandSlice
+POST /games/:id/commands                      -> SubmitResult
+       { cmdId, prevSeq, command }
+```
+
+**The chain is the concurrency design, in one line.** Every command names the one it was built on,
+and `@@unique([gameId, prevSeq])` makes the database refuse two children of one parent — so there is
+no sequence to allocate, no row to lock and no transaction, because the insert adjudicates. A dozen
+turns claiming one parent leave exactly one winner. The two halves need each other: sparse
+autoincrement alone lets a reader advance past a command that has not committed, and the chain is
+what stops two writes to one game being in flight at all.
+
+**One `command` column, where attempt 1 needed two.** Its log recorded *mutations*, so a client that
+had applied its own turn optimistically needed the boundary between what it already held and what the
+server added. Ours records **intents**: one row is one `Command`, and every client folds it through
+the same `applyCommand` and lands on the same board.
+
+**Order of checks in `submit`, all of it load-bearing:**
+
+1. Seat from the token — 403. Nothing in the body may name a seat.
+2. **Idempotency before staleness.** A retry of a turn that *did* land carries a `prevSeq` the head
+   has moved past, so testing staleness first answers every successful retry with a conflict — the
+   one case `cmdId` exists to prevent.
+3. `parseCommand` — 422. `applyCommand` casts rather than checks, so an unread `to` would otherwise
+   reach `moveTile`.
+4. Fold the log, `applyCommand` — 422 with the rules' own message.
+5. Restock while the source wants a lot, drawing from the game's own desks.
+6. Write the turn and its deals in **one transaction**, so a reader cannot see one without the other.
+   The unique violation is caught rather than pre-empted, and resolved by looking `cmdId` up: two
+   callers sending one turn at once violate both indexes, and MySQL reports whichever it checked
+   first.
+
+**Reading takes the rows first and derives the head from them.** Read separately, a command landing
+between the two queries is returned but not counted — and a client advancing its cursor to the head
+fetches and applies it twice. That was a real bug in attempt 1.
+
+**The deal is the server's and cannot be asked for.** `parseCommand` refuses the word outright. This
+is not only about cheating: with one shared desk, two clients each deciding the source needed filling
+drew two lots. The opening lot is written when the game starts, so a started game is playable on
+arrival. A game gets its two desks when its last chair is taken and holds their ids; neither ever
+reaches a client.
+
+Folding costs nothing worth avoiding — a four-round game is a few hundred commands — and the state is
+re-folded on every submit deliberately, because a cached one is a second copy of the truth.
+
+### The client waits, and folds what comes back
+
+`frontend/src/composables/useGameSync.ts` holds a cursor and three calls: `load`, `catchUp`,
+`submit`. **Nothing is optimistic.** A turn is submitted and *then* applied from the rows that come
+back, and rows from a catch-up take the same path — so a turn of your own and somebody else's differ
+in nothing but which request fetched them. One code path, no rollback, no state that is nearly true.
+
+It costs nothing visible: the turn already waited half a second for pieces to fly, and a round trip
+disappears inside an animation that was there anyway.
+
+Two races, both found the hard way in attempt 1:
+
+- **A socket notification can beat its own HTTP response.** The server announces a command when it is
+  stored, which can reach the browser before the reply to the request that made it. So `catchUp`
+  stands aside entirely while a submit is in flight.
+- **The cursor moves while a fetch is in the air.** So what comes back is filtered against the cursor
+  *as it stands on arrival*, not as it was when the question went out.
+
+`GameView.absorb` is where a batch becomes a board. It folds every row silently, marks any stems an
+enclosure minted as arrivals *before* the revision moves — the scene builds a view the moment it does
+— and raises the results panel when a round closed. That last one matters: the panel used to be
+raised by whoever played the closing pass, so everyone else got a new round over the old round's
+board.
+
 ### One store, and the route follows the status
 
 `frontend/src/stores/game.ts` reads the id from `router.currentRoute`, loads the game, and holds it.
@@ -379,6 +455,9 @@ somebody forgets.
 **There is no `useSavedGames` any more.** Settings lived in localStorage when a game was a thing the
 browser minted for itself. What is left there is the player's name, which belongs to the person, and
 the seat tokens, which cannot live anywhere else.
+
+**A refresh rebuilds the game** rather than restarting it — the board is a fold over a log the server
+holds, so the same page comes back on the same turn with the same source and the same drawer.
 
 ### The game journal
 
@@ -1463,11 +1542,11 @@ make the source undraftable the moment it existed.
 
 ## Routing and auth
 
-Routes: `/` (menu) and `/game?id=…`, with `/lobby` and `/lobby/:id` later.
+Routes: `/` (menu), `/join?id=…` and `/game?id=…`.
 
-**A game is identified by a client-minted id**, and its settings are stored against that id in
-localStorage — which is what lets `/game?id=…` survive a refresh. Only the *settings* persist so far:
-a reload restores which game it is (singleplayer, classic, four plates a round) and restarts the board.
+**A game is identified by a server-minted id.** It was a client-minted one, with its settings kept in
+localStorage; both are gone. The whole game is a row and a log now, so `/game?id=…` survives a refresh
+by rebuilding rather than by remembering — see "The command log" above.
 
 Two details that turned out to matter:
 
