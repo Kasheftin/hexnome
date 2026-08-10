@@ -926,8 +926,14 @@ describe('enclosing a plate lights its anchor', () => {
 })
 
 describe('a placement whose reward has nowhere to go', () => {
-  /** Five petals filled, and a drawer stuffed so only `freeSlots` remain. */
-  function nearlyEnclosed(stemsPerInternalAnchor: number, freeSlots: number) {
+  /**
+   * Five petals filled, and a drawer stuffed so only `freeSlots` remain.
+   *
+   * The held tile's **value is its price**: a value-1 tile is free, and every point above that is one
+   * more item the turn spends out of the drawer. So it decides both what the reward has to fit into
+   * and, through `paymentCost`, how much room the turn makes for it.
+   */
+  function nearlyEnclosed(stemsPerInternalAnchor: number, freeSlots: number, value = 1) {
     const t = createTableau({
       cells: hexRectangle(10, 10), drawerSlots: 16, plateSlots: 2, stemsPerInternalAnchor,
     })
@@ -937,7 +943,7 @@ describe('a placement whose reward has nowhere to go', () => {
     }
     // The tile about to be placed. Colour 4 so it agrees with the tile on petal 4, which petal 5
     // touches — otherwise the neighbour rule refuses it first and the reward rule is never reached.
-    const held = t.addTile({ color: 4, value: 6 }, inDrawer(0))!
+    const held = t.addTile({ color: 4, value }, inDrawer(0))!
     for (const slot of t.freeDrawerSlots().slice(0, 16 - 1 - freeSlots)) t.addStem(slot)
     return { t, plate, held }
   }
@@ -953,6 +959,53 @@ describe('a placement whose reward has nowhere to go', () => {
     // Two free slots plus the one the tile leaves behind is exactly the three needed.
     const { t, plate, held } = nearlyEnclosed(3, 2)
     expect(t.canPlaceTile(onPetal(plate.id, 5), held.id)).toBe(true)
+  })
+
+  /**
+   * The payment empties slots too, and the reward is minted after it.
+   *
+   * The reported case, exactly: two slots free, a value-2 tile, four stems due. One free slot short
+   * if you count the drawer as it stands — but the tile's own slot and the one its single payer
+   * spends make four, and four stems fit in four slots.
+   */
+  it('counts what the payment will spend, not only the tile´s own slot', () => {
+    const paid = nearlyEnclosed(4, 2, 2)
+    expect(paid.t.canPlaceTile(onPetal(paid.plate.id, 5), paid.held.id)).toBe(true)
+
+    // The same drawer and the same reward, but a value-1 tile pays for itself with nothing.
+    const free = nearlyEnclosed(4, 2, 1)
+    expect(free.t.canPlaceTile(onPetal(free.plate.id, 5), free.held.id)).toBe(false)
+  })
+
+  /**
+   * A payment can only be spent out of what is there.
+   *
+   * A drawer holding nothing but the tile itself has no payers in it, so however dear the tile is,
+   * the turn frees exactly one slot. Without this the price would read as room that does not exist.
+   */
+  it('does not count a payment the drawer cannot make', () => {
+    const t = createTableau({
+      cells: hexRectangle(10, 10), drawerSlots: 1, plateSlots: 2, stemsPerInternalAnchor: 3,
+    })
+    const plate = t.addPlate(onBoard(0, 0))!
+    for (let petal = 0; petal < 5; petal++) {
+      t.addTile({ color: petal, value: petal + 1 }, onPetal(plate.id, petal))
+    }
+    const held = t.addTile({ color: 4, value: 6 }, inDrawer(0))!
+
+    expect(t.canPlaceTile(onPetal(plate.id, 5), held.id)).toBe(false)
+  })
+
+  /**
+   * What `applyPut` passes once the payment is chosen and the best case is no longer a guess.
+   *
+   * Four stems due and two slots free. A payment of one drawer item makes room; one spent out of a
+   * bay, which frees a bay rather than a slot, does not.
+   */
+  it('takes the payment it is told about over the best case', () => {
+    const { t, plate, held } = nearlyEnclosed(4, 2, 2)
+    expect(t.canPlaceTile(onPetal(plate.id, 5), held.id, 1)).toBe(true)
+    expect(t.canPlaceTile(onPetal(plate.id, 5), held.id, 0)).toBe(false)
   })
 
   it('does not restrict a placement that encloses nothing', () => {
@@ -1009,18 +1062,22 @@ describe('a strict enclosure is worth more', () => {
     expect(t.plateEnclosureIsStrict(plate.id)).toBe(false)
   })
 
+  /*
+   * The held tile is a value-6 — the only value the ring leaves free — so its placement spends five
+   * items out of the drawer, and those five slots are room for the reward as surely as the tile's
+   * own. Four slots free, plus its own, plus the five it pays: ten, which is exactly eight and two.
+   */
   it('needs room for the bonus as well as the base', () => {
-    // Three base plus one bonus is four; three slots plus the vacated one is four, so it fits...
-    const fits = almost(true, { stems: 3, bonus: 1, freeSlots: 3 })
+    const fits = almost(true, { stems: 8, bonus: 2, freeSlots: 4 })
     expect(fits.t.canPlaceTile(onPetal(fits.plate.id, 5), fits.held.id)).toBe(true)
     // ...and one slot fewer does not.
-    const tight = almost(true, { stems: 3, bonus: 1, freeSlots: 2 })
+    const tight = almost(true, { stems: 8, bonus: 2, freeSlots: 3 })
     expect(tight.t.canPlaceTile(onPetal(tight.plate.id, 5), tight.held.id)).toBe(false)
   })
 
   it('does not reserve room for a bonus the ring will not earn', () => {
-    // Same three slots, but the broken ring pays only the base three — so it fits.
-    const broken = almost(false, { stems: 3, bonus: 1, freeSlots: 2 })
+    // The same nine slots, but the broken ring pays only the base eight — so it fits.
+    const broken = almost(false, { stems: 8, bonus: 2, freeSlots: 3 })
     expect(broken.t.canPlaceTile(onPetal(broken.plate.id, 5), broken.held.id)).toBe(true)
   })
 })

@@ -122,11 +122,12 @@ describe('a reward with nowhere to go', () => {
   })
 
   it('refuses it when they do not, and says how short the drawer is', () => {
-    // One slot, holding the tile itself: it frees that one slot, and three stems need three.
+    // One slot, holding the tile itself: it frees that one slot, and three stems need three. Nothing
+    // else is in the drawer, so the payment has nothing to spend out of it and frees nothing more.
     const { t, plate, tile } = aboutToEnclose(1)
     const refusal = t.whyNotPlaceTile(onPetal(plate.id, 5), tile.id)
 
-    expect(refusal).toMatchObject({ kind: 'rewardWontFit', stems: 3, freeSlots: 0, vacating: 1 })
+    expect(refusal).toMatchObject({ kind: 'rewardWontFit', stems: 3, freeSlots: 0, emptying: 1 })
   })
 
   /* The rule the placement rules would have allowed: nothing here is about neighbours or groups. */

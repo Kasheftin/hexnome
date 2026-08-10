@@ -30,6 +30,7 @@ import {
   type PlacementRule,
 } from './placement'
 import { PETAL_COUNT, isPetal, normalizePetal, petalCell, plateCells } from './plate'
+import { paymentCost } from './payment'
 
 export type PlateLocation =
   | { readonly kind: 'board', readonly hole: Axial }
@@ -117,8 +118,12 @@ export type TileRefusal =
     readonly kind: 'rewardWontFit'
     readonly stems: number
     readonly freeSlots: number
-    /** The slot this move empties, which counts as room. */
-    readonly vacating: number
+    /**
+     * Drawer slots this **turn** empties, which count as room because the reward is minted last.
+     *
+     * The tile's own slot, plus whatever pays for it. See {@link Tableau.whyNotPlaceTile}.
+     */
+    readonly emptying: number
   }
   /** Nothing around it agrees, under `regular`; or something disagrees, under `strict`. */
   | {
@@ -281,9 +286,11 @@ export interface Tableau {
    * having nothing to touch. Elsewhere it just means the bay or lot is empty.
    *
    * `movingId` excludes a plate from blocking itself, so "put it back where it is" is always legal.
+   *
+   * `emptying` is the reward allowance described on {@link whyNotPlaceTile}.
    */
-  canPlacePlate(location: PlateLocation, movingId?: string): boolean
-  canPlaceTile(location: TileLocation, movingId?: string): boolean
+  canPlacePlate(location: PlateLocation, movingId?: string, emptying?: number): boolean
+  canPlaceTile(location: TileLocation, movingId?: string, emptying?: number): boolean
   /**
    * Why not, when `canPlaceTile` says no — and null when it says yes.
    *
@@ -294,8 +301,19 @@ export interface Tableau {
    *
    * `canPlaceTile` is *defined* as this returning null, so the two cannot drift apart — an
    * explanation that describes a rule the game is not playing by would be worse than none.
+   *
+   * ## `emptying`, and why the drawer has more room than it looks
+   *
+   * A placement and its payment are **one turn**, and the reward is minted at the end of it — after
+   * the tile has left the drawer and after the payment has been spent out of it. So the room for the
+   * reward is not the free slots now; it is the free slots the turn will leave behind.
+   *
+   * Which items pay is not decided until after the drop, so a caller that does not know yet passes
+   * nothing and gets the **best case**: every slot the payment could possibly free. That is the right
+   * answer for a drag, which is asking whether the placement is possible at all rather than whether
+   * one particular payment covers it. `applyPut` asks again with the payment in hand — see there.
    */
-  whyNotPlaceTile(location: TileLocation, movingId?: string): TileRefusal | null
+  whyNotPlaceTile(location: TileLocation, movingId?: string, emptying?: number): TileRefusal | null
   /**
    * May the player drag this tile? False for a plate's own tile, and for anything in the source.
    *
@@ -901,9 +919,9 @@ export function createTableau({
     return total
   }
 
-  /** Is there room in the drawer for what this move pays? `vacating` counts the slot it empties. */
-  function rewardHasRoom(reward: number, vacating: number): boolean {
-    return reward <= 0 || freeDrawerSlotList().length + vacating >= reward
+  /** Is there room for what this move pays? `emptying` counts the slots the turn frees. */
+  function rewardHasRoom(reward: number, emptying: number): boolean {
+    return reward <= 0 || freeDrawerSlotList().length + emptying >= reward
   }
 
   /**
@@ -914,13 +932,43 @@ export function createTableau({
    * which may close a neighbouring anchor at the same time. Both are counted, because `rewardOfMove`
    * compares the whole board before against the whole board after rather than looking at one anchor.
    *
-   * Nothing is vacated: a plate leaves a *bay*, not a tile slot, so the stems gain no room from it.
+   * The plate itself frees nothing — it leaves a *bay*, not a tile slot. Its payment does, and that is
+   * what `emptying` carries.
    */
-  function plateRewardFits(hole: Axial, movingId: string): boolean {
+  function plateRewardFits(hole: Axial, movingId: string, emptying?: number): boolean {
     const plate = platesById.get(movingId)
     if (!plate) return true
     const reward = rewardOfMove({ plate: { plateId: movingId, hole, rotation: plate.rotation } })
-    return rewardHasRoom(reward, 0)
+    return rewardHasRoom(reward, emptying ?? bestCasePayment(tokenOf(movingId), 0))
+  }
+
+  /** A plate's own built-in tile, which is what its placement is priced by. */
+  function tokenOf(plateId: string): Tile | undefined {
+    for (const tile of tilesById.values()) {
+      if (tile.fixed && tile.location.kind === 'onPlate' && tile.location.plateId === plateId) {
+        return tile
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * The most drawer room a payment could free, for a caller that has not chosen one yet.
+   *
+   * Two ceilings, and the payment cannot beat either. It spends exactly `paymentCost` items; and only
+   * the ones living in the *drawer* — a tile or a stem — free a slot when they go, while a plate
+   * spent out of a bay frees a bay. So every other occupied drawer slot is a payer that might free
+   * itself, and there are never more than that.
+   *
+   * Optimistic on purpose, within those bounds. Refusing a drop that some payment would have made
+   * legal takes the move away from the player for good; allowing one their payment turns out not to
+   * cover costs them a refusal when they press Apply, where `applyPut` asks again knowing exactly
+   * what was spent.
+   */
+  function bestCasePayment(spec: TileSpec | undefined, ownSlot: number): number {
+    if (!spec) return 0
+    const others = drawerSlots - freeDrawerSlotList().length - ownSlot
+    return Math.max(0, Math.min(paymentCost(spec), others))
   }
 
   /** The board cell a plate's petal would occupy, given where and how the plate sits. */
@@ -975,12 +1023,12 @@ export function createTableau({
     return true
   }
 
-  function canPlacePlate(location: PlateLocation, movingId?: string): boolean {
+  function canPlacePlate(location: PlateLocation, movingId?: string, emptying?: number): boolean {
     if (location.kind === 'board') {
       if (!plateFits(location.hole, movingId) || !plateConnects(location.hole, movingId)) return false
       // Dealt plates have no id to look tiles up by; only a *move* is a player's placement.
       if (movingId === undefined) return true
-      if (!plateRewardFits(location.hole, movingId)) return false
+      if (!plateRewardFits(location.hole, movingId, emptying)) return false
       const plate = platesById.get(movingId)
       return plate === undefined || plateTilesAgree(location.hole, movingId, plate.rotation)
     }
@@ -990,7 +1038,11 @@ export function createTableau({
     return occupant === undefined || occupant === movingId
   }
 
-  function whyNotPlaceTile(location: TileLocation, movingId?: string): TileRefusal | null {
+  function whyNotPlaceTile(
+    location: TileLocation,
+    movingId?: string,
+    emptying?: number,
+  ): TileRefusal | null {
     const nowhere: TileRefusal = { kind: 'noSuchPlace', where: location }
     if (location.kind === 'drawer') {
       if (!inRange(location.slot, drawerSlots)) return nowhere
@@ -1021,16 +1073,27 @@ export function createTableau({
 
     const cell = cellOfPetal(plate.location.hole, plate.rotation, location.petal)
     const stems = rewardOfMove({ tile: { movingId, cell, spec: tile } })
-    const vacating = tile.location.kind === 'drawer' ? 1 : 0
-    if (!rewardHasRoom(stems, vacating)) {
-      return { kind: 'rewardWontFit', stems, freeSlots: freeDrawerSlotList().length, vacating }
+    /*
+     * The tile's own slot, plus whatever pays for it — both are empty by the time the reward is
+     * minted. Counting only the first was what refused a value-2 tile paying four stems into a drawer
+     * with two slots free: the two, the tile's own, and the one its payment spends make exactly four.
+     */
+    const fromDrawer = tile.location.kind === 'drawer' ? 1 : 0
+    const emptied = fromDrawer + (emptying ?? (fromDrawer ? bestCasePayment(tile, 1) : 0))
+    if (!rewardHasRoom(stems, emptied)) {
+      return {
+        kind: 'rewardWontFit',
+        stems,
+        freeSlots: freeDrawerSlotList().length,
+        emptying: emptied,
+      }
     }
 
     return tileWelcome(cell, tile, boardAfter({ tileId: movingId }))
   }
 
-  function canPlaceTile(location: TileLocation, movingId?: string): boolean {
-    return whyNotPlaceTile(location, movingId) === null
+  function canPlaceTile(location: TileLocation, movingId?: string, emptying?: number): boolean {
+    return whyNotPlaceTile(location, movingId, emptying) === null
   }
 
   return {
@@ -1091,14 +1154,7 @@ export function createTableau({
       return true
     },
 
-    plateToken(plateId) {
-      for (const tile of tilesById.values()) {
-        if (tile.fixed && tile.location.kind === 'onPlate' && tile.location.plateId === plateId) {
-          return tile
-        }
-      }
-      return undefined
-    },
+    plateToken: tokenOf,
 
     coverageAt: cell => coverage.get(axialKey(cell)),
 

@@ -40,8 +40,10 @@ export function describeTileRefusal(refusal: TileRefusal): string {
      */
     case 'rewardWontFit':
       return `it would pay ${refusal.stems} stem${refusal.stems === 1 ? '' : 's'} and the drawer has `
-        + `room for ${refusal.freeSlots + refusal.vacating}`
-        + (refusal.vacating ? ` (${refusal.freeSlots} free, plus the slot this move empties)` : '')
+        + `room for ${refusal.freeSlots + refusal.emptying}`
+        + (refusal.emptying
+          ? ` (${refusal.freeSlots} free, plus ${refusal.emptying} this turn empties)`
+          : '')
 
     case 'neighboursDisagree':
       return refusal.rule === 'strict'

@@ -909,6 +909,86 @@ describe('putting something on the board', () => {
     }
   })
 
+  /**
+   * The reward is minted **after** the payment, so the payment's slots are room for it.
+   *
+   * Reported from a real game: two slots free, a value-2 tile to place, and an enclosure worth four
+   * stems. Refused, because the drawer was counted as it stood at the start of the turn — two free
+   * and the tile's own slot is three, one short. But the tile's single payer leaves the drawer in the
+   * same turn, and four go into four.
+   */
+  function aboutToBePaidFour(stemsPerInternalAnchor: number, value: number) {
+    const state = createGame(options({
+      players: 1, initialStems: 1, tileSlots: 4, plateSlots: 2, stemsPerInternalAnchor,
+      // The ring is all one colour and so encloses strictly; the bonus would make the reward five,
+      // and this scenario is about the four.
+      strictEnclosureBonus: 0,
+    }))
+    const seat = state.seats[0]!
+    const plate = seat.tableau.plates()[0]!
+    const token = seat.tableau.tilesOnBoard()[0]!
+    const tokenPetal = token.location.kind === 'onPlate' ? token.location.petal : 0
+
+    // Five of the six petals filled, all one colour and every value distinct, so the ring agrees and
+    // no group holds a duplicate. The token is a 1 and the placement is `value`, so the ring avoids
+    // both.
+    const free = [0, 1, 2, 3, 4, 5].filter(petal => petal !== tokenPetal)
+    const spare = [2, 3, 4, 5, 6].filter(v => v !== value)
+    free.slice(0, 4).forEach((petal, at) => {
+      const added = seat.tableau.addTile(
+        { color: token.color, value: spare[at] as number },
+        { kind: 'onPlate', plateId: plate.id, petal },
+      )
+      expect(added).toBeDefined()
+    })
+
+    const held = seat.tableau.addTile({ color: token.color, value }, { kind: 'drawer', slot: 1 })
+    expect(held).toBeDefined()
+    // One stem to pay with, one tile to place, two slots free: the drawer the report described.
+    expect(seat.tableau.freeDrawerSlots()).toHaveLength(2)
+
+    const to = { kind: 'onPlate' as const, plateId: plate.id, petal: free[4] as number }
+    return { state, seat, held: held!, to, stem: seat.tableau.stems()[0]!.id }
+  }
+
+  it('lets a placement through when its payment makes the room', () => {
+    const { state, seat, held, to, stem } = aboutToBePaidFour(4, 2)
+
+    const result = applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: [stem],
+    })
+
+    expect(result).toMatchObject({ ok: true })
+    // Four stems due and four minted: none was dropped for want of a slot.
+    expect(result.ok && result.awarded).toHaveLength(4)
+    expect(seat.tableau.freeDrawerSlots()).toHaveLength(0)
+  })
+
+  /**
+   * The other half, and why the drop's answer cannot be the last word.
+   *
+   * At the drop nobody knows what will pay, so the rules answer with the best a payment could do. A
+   * plate spent out of its bay frees a *bay*, and the stems still need drawer slots — so the same
+   * placement, paid for differently, no longer fits. Refused rather than half-paid: the award mints
+   * what it can and drops the rest.
+   */
+  it('refuses the same placement when the payment frees nothing', () => {
+    const { state, seat, held, to } = aboutToBePaidFour(4, 2)
+    const bay = seat.tableau.plates().find(p => p.location.kind === 'plateSlot')
+      ?? seat.tableau.addPlate({ kind: 'plateSlot', slot: 0 })!
+    seat.tableau.addTile({ color: held.color, value: held.value }, {
+      kind: 'onPlate', plateId: bay.id, petal: 0,
+    }, { fixed: true })
+    const before = snapshot(state)
+
+    const result = applyCommand(state, {
+      kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: [bay.id],
+    })
+
+    expect(result).toMatchObject({ ok: false })
+    expect(snapshot(state)).toEqual(before)
+  })
+
   it('is refused from a seat whose turn it is not', () => {
     const { state, held, to } = holding()
     // The turn moved on after the draft, so seat 0 is not the one playing.

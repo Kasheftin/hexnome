@@ -618,6 +618,29 @@ function applyPut(
     if (!purse.some(payer => payer.id === id)) { unturn(); return refuse(`${id} cannot be spent`) }
   }
 
+  /*
+   * The reward, weighed against the drawer this turn will actually leave behind.
+   *
+   * The placement rules were asked once already, at the drop, when nobody knew what would pay for
+   * this — so they answered with the best a payment could do. Now the payment is chosen, and it may
+   * do less: a plate spent out of its bay frees a bay, and stems are minted into drawer slots.
+   *
+   * Asked *before* anything moves. `awardEnclosedAnchors` mints what it can and drops the rest on the
+   * floor, so a reward that does not fit has to be refused rather than half-paid — and a refusal must
+   * leave the board untouched.
+   */
+  const emptying = paying.filter(id => {
+    return purse.find(payer => payer.id === id)?.kind !== 'plate'
+  }).length
+  const cramped = item.kind === 'tile'
+    ? board.whyNotPlaceTile(to as TileLocation, item.id, emptying)?.kind === 'rewardWontFit'
+    // A plate has no `whyNot`, so the reason is read from the difference: refused with this payment
+    // but allowed with the best one is the reward and nothing else. Anything refused either way is
+    // some other rule, and falls through to the move below to say so in its own words.
+    : board.canPlacePlate(to as PlateLocation, item.id)
+      && !board.canPlacePlate(to as PlateLocation, item.id, emptying)
+  if (cramped) { unturn(); return refuse('the reward would not fit in the drawer') }
+
   const placed = item.kind === 'tile'
     ? board.moveTile(item.id, to as TileLocation)
     : board.movePlate(item.id, to as PlateLocation)

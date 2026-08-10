@@ -27,15 +27,22 @@ describe('naming a tile', () => {
 
 describe('the sentence', () => {
   it('spells out a reward that will not fit, with the arithmetic', () => {
-    const refusal: TileRefusal = { kind: 'rewardWontFit', stems: 3, freeSlots: 0, vacating: 1 }
+    const refusal: TileRefusal = { kind: 'rewardWontFit', stems: 3, freeSlots: 0, emptying: 1 }
     const said = describeTileRefusal(refusal)
     expect(said).toContain('3 stems')
     expect(said).toContain('room for 1')
-    expect(said).toContain('the slot this move empties')
+    expect(said).toContain('1 this turn empties')
   })
 
-  it('drops the parenthetical when nothing is being vacated', () => {
-    const said = describeTileRefusal({ kind: 'rewardWontFit', stems: 2, freeSlots: 1, vacating: 0 })
+  /* The tile's own slot and its payment both count, so the sentence has to be able to say "2". */
+  it('counts every slot the turn frees, not only the tile´s own', () => {
+    const said = describeTileRefusal({ kind: 'rewardWontFit', stems: 5, freeSlots: 1, emptying: 2 })
+    expect(said).toContain('room for 3')
+    expect(said).toContain('1 free, plus 2 this turn empties')
+  })
+
+  it('drops the parenthetical when the turn frees nothing', () => {
+    const said = describeTileRefusal({ kind: 'rewardWontFit', stems: 2, freeSlots: 1, emptying: 0 })
     expect(said).toContain('2 stems')
     expect(said).not.toContain('empties')
   })
