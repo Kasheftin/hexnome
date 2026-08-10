@@ -30,7 +30,7 @@ import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@hexnome/rules/agenda'
 import { createDesk as createLocalDesk } from '@hexnome/rules/desk'
-import { finalTally, NOTHING_LEFT } from '@hexnome/rules/groups'
+import { finalTally, NOTHING_LEFT, type FinalTally } from '@hexnome/rules/groups'
 import {
   canConfirmDraft,
   completedStrategies,
@@ -190,8 +190,12 @@ onMounted(async () => {
 
   void checkRules()
 
-  // Announced from wherever the log left the game, which for a fresh one is round 1, turn 1.
-  announceRound()
+  /*
+   * Announced from wherever the log left the game, which for a fresh one is round 1, turn 1 — but
+   * not over a score sheet. A page rebuilt at a closed round has a panel up, and a card sliding over
+   * it announces a round nobody is about to play.
+   */
+  if (!showResults.value) announceRound()
 })
 
 /**
@@ -392,19 +396,35 @@ function absorb(rows: readonly CommandRow[]): void {
    * each: putting it away is a person finishing reading rather than a thing that happened to the
    * game, so it is remembered here and not in the log. See `readSheets`.
    */
-  if (closed && !sheetRead(gameId.value, roundsFinished.value)) {
+  if (closed) {
+    if (!sheetRead(gameId.value, roundsFinished.value)) {
+      /*
+       * Everyone comes home first.
+       *
+       * A round can close while you are peeking at somebody else's board — you pass, wander over to
+       * see what they are building, and their last move ends the round. The sheet would then open on
+       * *their* score, which reads as your own until you notice the name. A round ending is the
+       * table's moment rather than any one player's, so it starts where the player does. The tabs are
+       * still there for the comparison.
+       */
+      pinnedSeat.value = null
+      showResults.value = true
+      return
+    }
+
     /*
-     * Everyone comes home first.
+     * A finished game always has the panel up; the marker decides only which face of it.
      *
-     * A round can close while you are peeking at somebody else's board — you pass, wander over to see
-     * what they are building, and their last move ends the round. The sheet would then open on *their*
-     * score, which reads as your own until you notice the name. A round ending is the table's moment
-     * rather than any one player's, so it starts where the player does. The tabs are still there for
-     * the comparison.
+     * Every other round has somewhere to go once its sheet is read — the next one. The last has not,
+     * so a read marker here means the player has already pressed through to the final scoring, and
+     * this is a page rebuilding itself at the place they left. Without it a reload would land on a
+     * board with nothing playable and no score in sight.
      */
-    pinnedSeat.value = null
-    showResults.value = true
-    return
+    if (state.finished) {
+      showResults.value = true
+      gameOver.value = true
+      return
+    }
   }
 
   /*
@@ -593,8 +613,23 @@ const activeIndex = computed(() => {
  */
 const mySeat = computed(() => store.mySeat ?? 0)
 
+/**
+ * Whether you hold a seat here at all.
+ *
+ * A spectator does not. Anyone with the link may open a game and watch it — that is what makes a
+ * share link work — but a seat is claimed once and proved with a token, and the server hands one out
+ * only while the table is still filling (`games.service.join`). So a visitor arriving at a game in
+ * progress, or a player who cleared the storage their token lived in, has no seat and can do nothing.
+ *
+ * `mySeat` falls back to 0 so they have a board to look at rather than a blank screen. That fallback
+ * is a **viewport** and nothing more; every question about what may be *done* asks this instead.
+ * Conflating the two is what let a page with no token show seat 0's board marked "you", say "your
+ * turn", and offer live buttons for a turn the server would refuse.
+ */
+const seated = computed(() => store.mySeat !== null)
+
 /** Whether the turn is yours to take — the question every control on the bar really asks. */
-const myTurn = computed(() => activeIndex.value === mySeat.value)
+const myTurn = computed(() => seated.value && activeIndex.value === mySeat.value)
 
 /** The last round has closed and been scored. Nothing is playable after this. */
 const gameIsOver = computed(() => {
@@ -638,15 +673,31 @@ const watching = computed(() => !settling.value && viewedSeat.value !== mySeat.v
 /** Every seat, for the score panel: who is playing, who has passed, what they have banked. */
 const seatRows = computed(() => {
   void revision.value
-  return state.seats.map(seat => ({
-    seat: seat.seat,
-    name: seat.name,
-    passed: seat.passed,
-    total: seat.banked.reduce((sum, points) => sum + points, 0),
-    active: seat.seat === state.activeSeat,
-    viewed: seat.seat === viewedSeat.value,
-    mine: seat.seat === mySeat.value,
-  }))
+  /*
+   * The closing reckoning joins the chips only once this player has asked to see it.
+   *
+   * It could be shown the moment the last round closes — it is a pure function of a board nobody can
+   * touch any more. But the panel counts those twelve categories out one at a time, and a chip two
+   * inches away already reading the answer would be giving away the end of the thing it is watching.
+   * `gameOver` is per browser, so each player's chips wait for their own reveal.
+   */
+  const closing = gameOver.value
+  return state.seats.map(seat => {
+    const rounds = seat.banked.reduce((sum, points) => sum + points, 0)
+    const final = closing ? finalFor(seat.seat).total : null
+    return {
+      seat: seat.seat,
+      name: seat.name,
+      passed: seat.passed,
+      /** The rounds alone. Null `final` means that is the whole story so far. */
+      rounds,
+      final,
+      total: rounds + (final ?? 0),
+      active: seat.seat === state.activeSeat,
+      viewed: seat.seat === viewedSeat.value,
+      mine: seated.value && seat.seat === mySeat.value,
+    }
+  })
 })
 
 /** Look at a seat, or go back to following the turn. */
@@ -922,6 +973,16 @@ const activeName = computed(() => {
 const turnLabel = computed(() =>
   myTurn.value ? 'Your turn' : `Waiting for ${activeName.value}`)
 
+/**
+ * Which board a watcher is looking at, or null when they are a player.
+ *
+ * Named separately from the turn, and shown beside it, because the two come apart: watching the
+ * player who is *not* playing is the ordinary case, and one sentence trying to say both would have to
+ * pick a lie. Left half the board, right half the turn.
+ */
+const watchingLabel = computed(() =>
+  seated.value ? null : `Watching ${state.seats[viewedSeat.value]?.name ?? 'the table'}'s board`)
+
 function chooseAction(action: TurnAction): void {
   if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
   else if (action === 'put') phase.value = { kind: 'putting' }
@@ -1052,24 +1113,42 @@ const banked = computed<readonly number[]>(() => {
 const totalScore = computed(() => banked.value.reduce((sum, points) => sum + points, 0))
 
 /**
+ * The score line above the seat list, for the board on screen.
+ *
+ * The same working the chips show, and here for the same reason — plus one of its own: a solo game
+ * has no chips at all (the list needs two seats), so without this the only place a finished game's
+ * real total appears is inside the panel that is about to be closed.
+ *
+ * The word changes with the number. Until the closing reckoning it is what has been *banked*, which
+ * is exactly true; after it, that is no longer the score.
+ */
+const viewedScore = computed(() => {
+  const rounds = totalScore.value
+  const final = gameOver.value ? finalFor(viewedSeat.value).total : null
+  return { rounds, final, total: rounds + (final ?? 0) }
+})
+
+/** What the closing reckoning is scored under. One copy, read by every seat's tally. */
+const scoringRules = computed(() => ({
+  minGroupSize: settings.value?.minGroupSize ?? DEFAULT_MIN_GROUP_SIZE,
+  groupBonuses: settings.value?.groupBonuses ?? DEFAULT_GROUP_BONUSES,
+  fineUnplaced: settings.value?.fineUnplaced ?? DEFAULT_FINE_UNPLACED,
+  rewardStems: settings.value?.rewardStems ?? DEFAULT_REWARD_STEMS,
+}))
+
+/** A seat's closing reckoning, off the board it finished with. */
+function finalFor(seat: number): FinalTally {
+  const last = roundsFinished.value > 0 ? roundRecord(roundsFinished.value, seat) : null
+  return finalTally(last?.board.tiles ?? [], scoringRules.value, last?.leftovers ?? NOTHING_LEFT)
+}
+
+/**
  * The finished board's connected groups.
  *
  * Read off the last round's board, so the sheet and the picture beside it cannot disagree about what
  * was there. Only consulted once the game is over.
  */
-const finalGroups = computed(() => {
-  const last = roundRecords.value.at(-1)
-  return finalTally(
-    last?.board.tiles ?? [],
-    {
-      minGroupSize: settings.value?.minGroupSize ?? DEFAULT_MIN_GROUP_SIZE,
-      groupBonuses: settings.value?.groupBonuses ?? DEFAULT_GROUP_BONUSES,
-      fineUnplaced: settings.value?.fineUnplaced ?? DEFAULT_FINE_UNPLACED,
-      rewardStems: settings.value?.rewardStems ?? DEFAULT_REWARD_STEMS,
-    },
-    last?.leftovers ?? NOTHING_LEFT,
-  )
-})
+const finalGroups = computed(() => finalFor(viewedSeat.value))
 
 /**
  * Was the round this panel is showing the last one?
@@ -1095,8 +1174,14 @@ function startNextRound(): void {
   if (!showResults.value) return
 
   if (state.finished) {
-    // The panel stays up and becomes the end of the game — see RoundResults' `over`. Deliberately
-    // not remembered: there is no next round to get on with, so a refresh should land back here.
+    /*
+     * The panel stays up and becomes the end of the game — see RoundResults' `over`.
+     *
+     * Remembered like any other sheet, because that is what this press is: finishing with the last
+     * round's. What it moves on to is the final scoring rather than a next round, and a reload lands
+     * there rather than counting the last round out a second time and asking again.
+     */
+    rememberSheetRead(gameId.value, roundsFinished.value)
     gameOver.value = true
     return
   }
@@ -1770,7 +1855,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :source="source()"
         :drawer="drawerShape"
         :game-id="gameId"
-        :yours="viewedSeat === mySeat"
+        :yours="seated && viewedSeat === mySeat"
         :may-place="phase.kind === 'putting' || canStartPut"
         :unaffordable="unaffordable"
         :may-move-placed="phase.kind === 'putting'"
@@ -1850,6 +1935,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     <Transition name="bar">
       <ActionBar
         v-if="announcing === null && !showResults && !gameOver && !settling"
+        :watching-label="watchingLabel"
         :phase="phase"
         :options="options"
         :selection="selection"
@@ -1976,8 +2062,14 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         </li>
       </ol>
       <p class="so-far">
-        <span>banked</span>
-        <strong>{{ totalScore }}</strong>
+        <span>{{ viewedScore.final === null ? 'banked' : 'score' }}</span>
+        <strong>
+          <span
+            v-if="viewedScore.final !== null"
+            class="seat-part"
+          >{{ viewedScore.rounds }} + {{ viewedScore.final }} =</span>
+          {{ viewedScore.total }}
+        </strong>
       </p>
 
       <!--
@@ -2012,7 +2104,17 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
               class="seat-you"
             >you</span>
             <span class="seat-note">{{ row.passed ? 'passed' : '' }}</span>
-            <span class="seat-score">{{ row.total }}</span>
+            <!--
+              Once the closing reckoning is in, the chip shows its working: the rounds, what the
+              finished board added, and the sum. Two small numbers and one in the weight the single
+              total had, so the thing being read at a glance is still the thing that matters.
+            -->
+            <span class="seat-score">
+              <template v-if="row.final !== null">
+                <span class="seat-part">{{ row.rounds }} + {{ row.final }} =</span>
+              </template>
+              <strong>{{ row.total }}</strong>
+            </span>
           </button>
         </li>
       </ul>
@@ -2430,6 +2532,16 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .seat-score {
   color: #cfd4de;
   font-variant-numeric: tabular-nums;
+}
+
+/* The working, not the answer: dimmed to the weight of the labels around it. */
+.seat-part {
+  margin-right: 3px;
+  color: #6b7382;
+}
+
+.seat-score strong {
+  font-weight: inherit;
 }
 
 .seats button:focus-visible {

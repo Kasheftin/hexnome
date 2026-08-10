@@ -6,13 +6,19 @@
  * keyboard activation and crisp type for free (docs/tech-spec.md, "UI chrome"). Positioned from the
  * same `createDrawerLayout` that places the drawer's 3D bays, so the two cannot drift apart.
  *
- * It has three faces, one per turn phase:
+ * It has four faces. Three are the turn's phases:
  *
  * - **idle** — the three actions. Disabled ones stay visible rather than hidden, so the shape of a
  *   turn is legible even when most of it is unavailable.
  * - **taking** — what is selected so far, a confirm that only lights when the draft is a legal
  *   sweep, and a cancel.
  * - **putting** — where the item may go, and a cancel.
+ *
+ * The fourth is **watching**, for somebody with no seat at this table. It has no actions at all —
+ * not disabled ones. A greyed Take still reads as *your* Take that has gone wrong somehow, which is
+ * exactly how a page with no token came to look like a player; a bar with nothing to press is
+ * unmistakable. What it shows instead is where the watcher is: the board on the left, the turn on the
+ * right, because those two come apart and one sentence trying to say both has to pick a lie.
  *
  * The turn label is where "It's player 2's turn" will go in multiplayer. In singleplayer it is always
  * the local player's turn, so it reads as a status line rather than a wait.
@@ -44,6 +50,13 @@ const props = defineProps<{
   anchorX: number
   anchorY: number
   turnLabel: string
+  /**
+   * Which board is being watched, for a viewer with no seat — and null for a player.
+   *
+   * Non-null is what puts the bar in its fourth face. It carries the text rather than a boolean so
+   * that naming the board stays with the view that knows the seats.
+   */
+  watchingLabel: string | null
 }>()
 
 defineEmits<{
@@ -111,11 +124,19 @@ const draftSummary = computed(() => {
     :style="{ left: `${anchorX}px`, top: `${anchorY}px` }"
   >
     <p class="turn">
+      {{ watchingLabel ?? turnLabel }}
+    </p>
+
+    <!-- Watching: no actions, and the turn moves over into their place. -->
+    <p
+      v-if="watchingLabel"
+      class="turn"
+    >
       {{ turnLabel }}
     </p>
 
     <!-- Choosing -->
-    <template v-if="phase.kind === 'idle'">
+    <template v-else-if="phase.kind === 'idle'">
       <div class="actions">
         <button
           type="button"
@@ -247,6 +268,12 @@ const draftSummary = computed(() => {
   align-items: center;
   padding: 8px 12px;
   transform: translate(-50%, calc(-100% - 10px));
+}
+
+/* The divider belongs *between* things, so the last one does not draw one against thin air. */
+.turn:last-child {
+  padding-right: 0;
+  border-right: none;
 }
 
 .turn {

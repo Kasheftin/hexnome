@@ -18,6 +18,10 @@
  * the last is where it matters: a finished game does not advance its round, so round 4's sheet and
  * round 3's would be filed under the same number and the game would end without ever showing a
  * score. Counting what has been banked names each sheet once.
+ *
+ * The last round's sheet is filed like any other. Reading it is what the Calculate final score button
+ * means — the round is done with, and what follows is the closing reckoning rather than a next round.
+ * A game whose last sheet is read rebuilds on the final scoring, which is where its player left it.
  */
 const KEY = 'hexnome:read-sheets'
 

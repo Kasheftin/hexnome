@@ -96,7 +96,15 @@ watch(chosenSeat, () => spendReveal())
  * tiring to use.
  */
 type Section = number | 'final'
-const open = shallowRef<Section>(props.rounds.at(-1)?.round ?? 1)
+/*
+ * Where the panel opens, which is not always the newest round.
+ *
+ * `over` arriving true at mount means this page is *rebuilding* a game that has already ended and
+ * whose player has already asked for the final score — a reload, not a game reaching its end. It
+ * opens where they left it. Reading a prop into a local is normally how the two drift apart; here it
+ * is deliberate, because after mount this is the player's to move and no longer the caller's.
+ */
+const open = shallowRef<Section>(props.over ? 'final' : (props.rounds.at(-1)?.round ?? 1))
 
 /**
  * Whether the count has had its one showing.
@@ -168,11 +176,22 @@ function advance(): void {
  * reckoning would bury it. So the game ends on a button, and the twelve rows then begin from a
  * standing start rather than halfway down a panel already full of the last round.
  */
-const showingFinal = shallowRef(false)
+const showingFinal = shallowRef(props.over)
 const finalDone = shallowRef(false)
 
+/**
+ * What a round actually banked: its targets, plus anchors, less the first-pass fine.
+ *
+ * The same arithmetic `ScoringReveal` prints at the foot of each round, and the same figure the
+ * scoring panel lists down its side. Summing `tally.total` alone read the targets only, so a game
+ * with anchors in it closed on a total lower than the rounds it was made of — visibly so, since the
+ * panel shows both.
+ */
+const bankedIn = (record: RoundRecord): number =>
+  record.tally.total + record.anchors - record.fine
+
 const roundsTotal = computed(() =>
-  props.rounds.reduce((sum, record) => sum + record.tally.total, 0))
+  props.rounds.reduce((sum, record) => sum + bankedIn(record), 0))
 const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 
 </script>
@@ -238,7 +257,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
             aria-hidden="true"
           >{{ open === record.round ? '▾' : '▸' }}</span>
           <span class="fold-name">Round {{ record.round }}</span>
-          <strong class="fold-score">{{ record.tally.total }}</strong>
+          <strong class="fold-score">{{ bankedIn(record) }}</strong>
         </button>
         <div
           v-if="open === record.round"
