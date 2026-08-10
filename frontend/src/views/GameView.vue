@@ -94,6 +94,7 @@ import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
 import RoundResults from '@/ui/RoundResults.vue'
 import HintTip from '@/ui/HintTip.vue'
+import NoticePanel from '@/ui/NoticePanel.vue'
 import PresenceMark from '@/ui/PresenceMark.vue'
 import TileChip from '@/ui/TileChip.vue'
 import TurnAnnounce from '@/ui/TurnAnnounce.vue'
@@ -599,6 +600,20 @@ async function settleArrangement(): Promise<void> {
   }
   while (arrangeInFlight) await arrangeInFlight
 }
+
+/**
+ * A move the rules turned down, in words, waiting to be read.
+ *
+ * Separate from `trouble`, which is the table being unreachable — a dead end with a way back to the
+ * menu. This is the game working exactly as it should and the move not being allowed, so it is
+ * dismissed rather than escaped from.
+ *
+ * The board says no by turning a cell red, which is enough for the three reasons you can see and no
+ * use at all for the two you cannot: a duplicate created through a tile several cells away, and a
+ * reward with nowhere to go, which makes a full drawer refuse a placement that looks perfectly legal.
+ * Those two used to be console-only, which meant they read as the game being broken.
+ */
+const refused = shallowRef<string | null>(null)
 
 /** Whose turn it is, read through `revision` so it follows the state rather than shadowing it. */
 const activeIndex = computed(() => {
@@ -1880,6 +1895,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         @hover-plate-slot="onHoverPlateSlot"
         @changed="revision++"
         @rearranged="onRearranged"
+        @refused="refused = $event"
       />
 
       <!--
@@ -1949,6 +1965,11 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         </button>
       </HintTip>
     </div>
+
+    <NoticePanel
+      :notice="refused"
+      @dismiss="refused = null"
+    />
 
     <Transition name="bar">
       <ActionBar

@@ -246,6 +246,13 @@ const emit = defineEmits<{
   selectPayment: [id: string]
   changed: []
   /**
+   * A drop the rules said no to, in words, for the turn to put on screen.
+   *
+   * Only a **rule** refusal — releasing a tile over empty space is changing your mind mid-drag, not
+   * breaking a rule, and stays on the console where it cannot interrupt anybody.
+   */
+  refused: [reason: string]
+  /**
    * The drawer was **rearranged and nothing left it** — a sort, not a move in the game.
    *
    * Separate from `changed`, which also fires for a placement and for turning a plate in its bay.
@@ -1076,15 +1083,20 @@ function dropHeld(current: Draggable): boolean {
 }
 
 /**
- * Say why a drop was refused, on the console.
+ * Say why a drop was refused — out loud to the player, and in full on the console.
  *
  * The board has one way of saying no — the cell turns red — and five reasons for it. Two of them are
  * genuinely hard to guess at from the screen: a group duplicated through a tile several cells away,
  * and a stem reward with nowhere to go, which makes a *full drawer* refuse a placement that looks
- * perfectly legal. Without this the only way to tell them apart is to read the model.
+ * perfectly legal. Red says none of that, so the sentence goes to the player and the objects behind
+ * it go to the console for whoever is debugging.
  *
- * Only on a refused drop, so it is silent in ordinary play. `whyNotPlaceTile` is the same call
- * `canPlaceTile` is defined in terms of, so this cannot report a rule the game is not applying.
+ * **A drop over nothing is not a refusal.** No rule was broken; the player let go somewhere that was
+ * never a target, which is what changing your mind looks like. It stays on the console, because a
+ * dialog for it would fire every time somebody picked a tile up and put it down again.
+ *
+ * `whyNotPlaceTile` is the same call `canPlaceTile` is defined in terms of, so this cannot report a
+ * rule the game is not playing by.
  */
 function reportRefusedDrop(current: Draggable): void {
   if (current.kind !== 'tile') return
@@ -1099,10 +1111,9 @@ function reportRefusedDrop(current: Draggable): void {
   const refusal = props.tableau.whyNotPlaceTile(targetTile, current.id)
   if (!refusal) return
 
-  console.warn(
-    `[hexnome] ${tileName(tile)} refused: ${describeTileRefusal(refusal)}.`,
-    { tile, target: targetTile, cell: targetTileCell, refusal },
-  )
+  const said = `${tileName(tile)} cannot go there: ${describeTileRefusal(refusal)}.`
+  console.warn(`[hexnome] ${said}`, { tile, target: targetTile, cell: targetTileCell, refusal })
+  emit('refused', said)
 }
 
 function onWindowPointerUp(): void {
