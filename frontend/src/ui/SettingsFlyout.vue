@@ -80,7 +80,13 @@ watch(() => props.open, async (open) => {
           <slot />
         </div>
 
+        <!--
+          The footer stays put while the body scrolls, so anything here is reachable from any point
+          in a long list of dials. `aside` is for what the caller wants beside Done — see HomeView's
+          reset, which has to be findable rather than buried under thirteen sections.
+        -->
         <footer class="actions">
+          <slot name="aside" />
           <button
             type="button"
             class="done"
@@ -184,9 +190,17 @@ h2 {
 
 /* Pinned below the body, with a rule so the boundary reads even when nothing is scrolled. */
 .actions {
+  display: flex;
   flex: none;
+  gap: 10px;
+  align-items: center;
   padding: 14px 22px 20px;
   border-top: 1px solid #2a2c33;
+}
+
+/* Done takes the room that is left, so an empty `aside` leaves the footer exactly as it was. */
+.actions .done {
+  flex: 1 1 auto;
 }
 
 .done {

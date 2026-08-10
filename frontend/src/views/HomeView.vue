@@ -67,12 +67,14 @@ import {
 } from '@hexnome/rules/gameSettings'
 import {
   DEFAULT_PLACEMENT_RULE,
+  isPlacementRule,
   PLACEMENT_RULES,
   type PlacementRule,
 } from '@hexnome/rules/placement'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { ApiError, createGame } from '@/api/games'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
+import { forgetSetup, rememberSetup, savedSetup, type SavedSetup } from '@/composables/savedSetup'
 import { rememberSeat } from '@/composables/useSeat'
 
 type Step = 'title' | 'setup'
@@ -418,6 +420,80 @@ const SECTIONS: readonly DialSection[] = [
   },
 ]
 
+/**
+ * Every dial there is, hidden ones included.
+ *
+ * Not `visibleDials`: which dials are on screen depends on the others — the strict bonus disappears
+ * under the strict rule, a bonus above the minimum group size goes out of reach — and a setup has to
+ * carry those too. The code already takes care that a dial keeps its value while hidden, for exactly
+ * the same reason.
+ */
+const ALL_DIALS: readonly Dial[] = SECTIONS.flatMap(section => section.dials)
+
+/**
+ * Where every dial started, captured before anything is restored over it.
+ *
+ * The refs were initialised from the `DEFAULT_*` constants a hundred lines above, so this is those
+ * values without naming them a second time — a list that could fall out of step with the one that
+ * matters.
+ */
+const DIAL_DEFAULTS = new Map(ALL_DIALS.map(dial => [dial.key, dial.model.value]))
+
+/** What this screen is currently set to, in the form the next game will read it back from. */
+function currentSetup(): SavedSetup {
+  return {
+    dials: Object.fromEntries(ALL_DIALS.map(dial => [dial.key, dial.model.value])),
+    mode: mode.value,
+    placementRule: placementRule.value,
+    players: playerCount.value,
+  }
+}
+
+/**
+ * Open on the last game's setup rather than on the defaults.
+ *
+ * Every value is checked against the list of choices the dial that owns it still offers, so nothing
+ * here needs to know what a dial means or be kept in step when one changes. A stored value a dial no
+ * longer accepts is simply not applied, and that dial keeps its default.
+ */
+function restoreSetup(): void {
+  const saved = savedSetup()
+  if (!saved) return
+
+  for (const dial of ALL_DIALS) {
+    const value = saved.dials[dial.key]
+    if (value !== undefined && dial.choices.includes(value)) dial.model.value = value
+  }
+  if (SINGLEPLAYER_MODES.some(entry => entry.id === saved.mode)) {
+    mode.value = saved.mode as SingleplayerMode
+  }
+  if (isPlacementRule(saved.placementRule)) placementRule.value = saved.placementRule
+  if (saved.players !== undefined && PLAYER_COUNT_CHOICES.includes(saved.players)) {
+    playerCount.value = saved.players
+  }
+}
+
+/** Whether anything has been turned away from where it started. Drives the way back. */
+const changedFromDefaults = computed(() =>
+  ALL_DIALS.some(dial => dial.model.value !== DIAL_DEFAULTS.get(dial.key))
+  || mode.value !== DEFAULT_SINGLEPLAYER_MODE
+  || placementRule.value !== DEFAULT_PLACEMENT_RULE
+  || playerCount.value !== DEFAULT_PLAYER_COUNT)
+
+/** Put everything back, and stop remembering — otherwise the next visit undoes this one. */
+function resetToDefaults(): void {
+  for (const dial of ALL_DIALS) {
+    const value = DIAL_DEFAULTS.get(dial.key)
+    if (value !== undefined) dial.model.value = value
+  }
+  mode.value = DEFAULT_SINGLEPLAYER_MODE
+  placementRule.value = DEFAULT_PLACEMENT_RULE
+  playerCount.value = DEFAULT_PLAYER_COUNT
+  forgetSetup()
+}
+
+restoreSetup()
+
 /** Bands with anything left to show, their hidden dials already dropped. */
 const visibleSections = computed(() => SECTIONS
   .map(section => ({ ...section, dials: section.dials.filter(dial => dial.applies?.() ?? true) }))
@@ -510,6 +586,12 @@ async function startGame(): Promise<void> {
 
   try {
     const claim = await createGame(settings, name.value)
+    /*
+     * Remembered here, after the table exists — "the setup my last game ran with", not "the last
+     * thing I fiddled with". A create that failed leaves the screen exactly as it was, so there is
+     * nothing to recover and nothing worth writing down.
+     */
+    rememberSetup(currentSetup())
     // Before navigating: the store's first fetch must carry the token, or the creator arrives at
     // their own table as a spectator.
     rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
@@ -795,11 +877,63 @@ const selectedMode = computed(() => modeInfo(mode.value))
           {{ section.note }}
         </p>
       </template>
+
+      <!--
+        The way back, and only when there is somewhere to go back to.
+
+        A game remembers what it was started with, so this screen usually is not showing the defaults
+        — and a tile bag reading 216 with no way to find out what it started as is worse than not
+        remembering at all. Its presence is the signal that something has been changed; its absence
+        says these are the defaults, which is why it goes in the footer rather than under thirteen
+        sections of dials where a signal nobody scrolls to is no signal.
+      -->
+      <template #aside>
+        <button
+          v-if="changedFromDefaults"
+          type="button"
+          class="reset"
+          @click="resetToDefaults"
+        >
+          Reset to defaults
+        </button>
+      </template>
     </SettingsFlyout>
   </main>
 </template>
 
 <style scoped>
+/* Quieter than anything that starts a game: undoing is allowed, not encouraged. */
+.reset {
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  background: transparent;
+  color: #79808f;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms;
+}
+
+.reset:hover {
+  border-color: #7d6a41;
+  color: #e8c878;
+}
+
+.reset:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reset {
+    transition: none;
+  }
+}
+
 .menu {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
