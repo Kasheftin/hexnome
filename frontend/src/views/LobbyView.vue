@@ -12,7 +12,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { GAME_KINDS, MAX_NAME_LENGTH, modeInfo } from '@hexnome/rules/gameSettings'
+import { MAX_NAME_LENGTH } from '@hexnome/rules/gameSettings'
 import { playerName, suggestNames } from '@/composables/playerName'
 import { useSavedGames } from '@/composables/useSavedGames'
 
@@ -26,14 +26,6 @@ const gameId = computed(() => {
 })
 
 const settings = computed(() => savedGames.get(gameId.value))
-
-const kindLabel = computed(() =>
-  GAME_KINDS.find(entry => entry.id === settings.value?.kind)?.label ?? '')
-
-const modeLabel = computed(() => {
-  const s = settings.value
-  return s ? modeInfo(s.mode)?.label ?? s.mode : ''
-})
 
 /** One box per seat, in seating order. Seat 0 is whoever made the game. */
 const names = ref<string[]>([])
@@ -93,20 +85,9 @@ function start(): void {
   >
     <div class="lockup">
       <h1>hexnome</h1>
-      <ol class="trail">
-        <li>
-          <span class="trail-label">Game</span>
-          <span class="trail-value">{{ kindLabel }}</span>
-        </li>
-        <li>
-          <span class="trail-label">Mode</span>
-          <span class="trail-value">{{ modeLabel }}</span>
-        </li>
-        <li>
-          <span class="trail-label">Players</span>
-          <span class="trail-value">{{ settings.players }}</span>
-        </li>
-      </ol>
+      <p class="tagline">
+        Build · Adapt · Evolve
+      </p>
     </div>
 
     <section
@@ -160,9 +141,9 @@ function start(): void {
 
 <style scoped>
 /*
- * The menu's two-column lockup, deliberately: this is the same act continued, not a new place. Its
- * rules are copied rather than shared because the menu's are scoped to it — worth extracting once a
- * third screen wants them, and not before.
+ * The menu's two-column lockup, deliberately, down to the tagline: this is the same act continued,
+ * not a new place. Its rules are copied rather than shared because the menu's are scoped to it —
+ * worth extracting once a third screen wants them, and not before.
  */
 .lobby {
   display: grid;
@@ -193,35 +174,12 @@ h1 {
   text-transform: uppercase;
 }
 
-.trail {
-  margin: 34px 0 0;
-  padding: 0 0 0 18px;
-  border-left: 1px solid #3a3222;
-  list-style: none;
-}
-
-.trail li {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-  padding: 5px 0;
-}
-
-.trail li + li {
-  border-top: 1px solid #22252b;
-}
-
-.trail-label {
-  min-width: 62px;
+.tagline {
+  margin: 6px 0 0;
   color: #6b7382;
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: 11px;
+  letter-spacing: 0.34em;
   text-transform: uppercase;
-}
-
-.trail-value {
-  color: #cfd4de;
-  font-size: 12px;
 }
 
 .panel {
