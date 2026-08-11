@@ -36,7 +36,7 @@ On your turn you do exactly one of three things:
 Passing is not skipping a turn. A player who passes is **out until the round ends**, and the round
 ends when everybody has passed. So passing is a decision about the round, not about the moment.
 
-<!-- image: /rules/turn-bar.png — the action bar showing Take, Put and Pass -->
+<!-- image: /rules/turn-bar.gif — the action bar showing Take, Put and Pass -->
 
 ## The shared source
 
@@ -69,13 +69,13 @@ You cannot take one nice tile and leave the rest.
 A revealed plate counts as the tile it carries, so a red-1 plate and a red-1 tile are the same kind:
 take one or the other, never both.
 
-The take is legal as soon as one sweep is **complete**. With `blue-1  blue-3  red-3  yellow-3`:
+The take is legal as soon as one sweep is **complete**. With `indigo-6  indigo-2  magenta-2  blue-2`:
 
-- Select **yellow-3** — the only yellow, so the colour sweep is already finished. You may take it now,
-  even though two more 3s are sitting there.
-- Select **yellow-3** and **red-3** — they share only the value, so the criterion pins to value. Not
-  legal yet: `blue-3` is a 3 and is not selected.
-- Add **blue-3** — every 3 taken. Legal.
+- Select **magenta-2** — the only magenta, so the colour sweep is already finished. You may take it now,
+  even though two more 2s are sitting there.
+- Select **magenta-2** and **blue-2** — they share only the value, so the criterion pins to value. Not
+  legal yet: `indigo-2` is a 2 and is not selected.
+- Add **indigo-2** — every 2 taken. Legal.
 
 <!-- image: /rules/draft-sweep.gif — selecting one tile, then a second, and the criterion pinning -->
 
@@ -102,7 +102,7 @@ A **group** is a run of touching tiles that all share a colour, or all share a v
 contain the same tile twice — the same colour *and* the same value.
 
 This is a hard rule, not a scoring one: a placement that would create such a group is refused. And it
-is not always the tile you are holding that duplicates. Dropping a blue-2 between two blue-1s
+is not always the tile you are holding that duplicates. Dropping a magenta-2 between two indigo-2s
 duplicates neither of the things you dropped; it joins two groups that were legal apart.
 
 <!-- image: /rules/duplicate-refusal.png — the panel explaining a refused placement -->
@@ -175,7 +175,7 @@ pass at all.
 
 The source column is swept, and the next round deals a fresh one.
 
-<!-- image: /rules/round-results.png — the round scoresheet, counting out -->
+<!-- image: /rules/round-results.gif — the round scoresheet, counting out -->
 
 ## The end of the game
 
@@ -194,7 +194,7 @@ unplaced*), and every stem still held pays **1** (*stem bonus*).
 
 Your final score is every round's total, plus the closing reckoning.
 
-<!-- image: /rules/final-score.png — the closing sheet with the twelve categories -->
+<!-- image: /rules/final-score.gif — the closing sheet with the twelve categories -->
 
 ## Playing with other people
 
