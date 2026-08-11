@@ -470,21 +470,55 @@ async function submitTurn(
   beforeFold?: () => void,
 ): Promise<boolean> {
   await settleArrangement()
-  const outcome = await sync.submit(command)
-  if (outcome.failure) {
+
+  /*
+   * **A turn that lost the race goes again by itself.**
+   *
+   * The chain allows one command per parent, so two players acting in the same instant means one of
+   * them names a head that has already moved and is refused. That is not the player's mistake and
+   * used to be their problem: the turn simply did not happen, nothing was said — a stale answer is
+   * deliberately not shouted about — and they pressed the button a second time.
+   *
+   * Catching up and asking again is safe because a refused turn *did not land*: the server compares
+   * `prevSeq` with the head and answers 409 before it parses, folds or writes anything. So this is a
+   * first attempt with a fresh parent, not a repeat of a command that might already have taken. If
+   * the intervening turns made it illegal — somebody drafted the tiles this was reaching for — the
+   * server says so with 422 and its own words, which is the message the player should get.
+   */
+  for (let attempt = 1; ; attempt++) {
+    const outcome = await sync.submit(command)
+
+    if (!outcome.failure) {
+      beforeFold?.()
+      absorb(outcome.commands)
+      return true
+    }
+
     /*
-     * A stale turn is not an error to shout about: somebody moved first, and the catch-up that
-     * follows brings this page level. A refusal is worth saying — the two ends disagreed about a
-     * game they are both folding, which is a bug rather than a move.
+     * A refusal is worth saying — the two ends disagreed about a game they are both folding, which is
+     * a bug rather than a move. Staleness is not, until it will not stop.
      */
-    if (outcome.failure !== 'stale') trouble.value = outcome.message ?? 'That turn was not taken.'
+    if (outcome.failure !== 'stale') {
+      trouble.value = outcome.message ?? 'That turn was not taken.'
+      absorb(await sync.catchUp())
+      return false
+    }
+
     absorb(await sync.catchUp())
-    return false
+    if (attempt >= TURN_ATTEMPTS) {
+      trouble.value = 'The table kept moving while that turn was going in. Try again.'
+      return false
+    }
   }
-  beforeFold?.()
-  absorb(outcome.commands)
-  return true
 }
+
+/**
+ * How many times a turn will catch up and try again before giving up on it.
+ *
+ * Losing twice running means something other than an ordinary race — a tab submitting in a loop, or
+ * a table busy enough that this needs a different answer than retrying.
+ */
+const TURN_ATTEMPTS = 3
 
 /**
  * Sorting your own drawer, which is not a turn.

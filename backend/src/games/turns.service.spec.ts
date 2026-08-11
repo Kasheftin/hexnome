@@ -274,20 +274,26 @@ describe('arranging a drawer', () => {
   })
 
   /**
-   * Quiet on the wire.
+   * Announced like everything else, and this test is the reason.
    *
-   * `Game.seq` is what the socket broadcasts and what tells a watching tab to go and look. An arrange
-   * deliberately leaves it alone, so a player fidgeting with their drawer does not wake the table.
+   * It used to assert the opposite — that an arrange left `Game.seq` alone, so a player fidgeting
+   * with their drawer would not wake the table. But `Game.seq` is how a client learns to advance its
+   * cursor, and the chain refuses a turn whose `prevSeq` is not the head. A silent write therefore
+   * left every other client stale without telling them, and the next player to act was refused, for
+   * as long as it took the backstop poll to notice — fifteen seconds with a live socket.
+   *
+   * Whatever moves the head has to say so.
    */
-  it('does not announce itself, where a turn does', async () => {
+  it('announces itself, exactly as a turn does', async () => {
     const { id, tokens } = await table(2)
-    const quiet = await seqOf(id)
+    const before = await seqOf(id)
 
     await turns.submit(id, randomUUID(), await head(id), await asItStands(id, 1), tokens[1]!)
-    expect(await seqOf(id)).toBe(quiet)
+    const afterArrange = await seqOf(id)
+    expect(afterArrange).toBeGreaterThan(before)
 
     await turns.submit(id, randomUUID(), await head(id), pass(0), tokens[0]!)
-    expect(await seqOf(id)).toBeGreaterThan(quiet)
+    expect(await seqOf(id)).toBeGreaterThan(afterArrange)
   })
 
   /** The seat comes from the token, as it does for every other command. */

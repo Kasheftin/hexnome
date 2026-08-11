@@ -146,16 +146,24 @@ export class TurnsService {
       await this.prisma.game.updateMany({ where: { id: gameId, status: 'running' }, data: { status: 'finished' } })
     }
     /*
-     * **Tidying a drawer is not announced.**
+     * **Everything is announced, tidying included.**
      *
-     * The row is written and read like any other — a client that asks for it gets it. What it skips
-     * is the nudge: a player sorting their tiles during somebody else's turn would otherwise wake
-     * every tab at the table on every drag, to deliver something only a player peeking at their board
-     * would even see. The cost is that a peek is up to a poll behind (`watchHead`: 15s once the
-     * socket is live), or arrives immediately behind the next real command, which is soon enough for
-     * a drawer.
+     * An arrange used to be silent, on the reasoning that a player sorting their drawer should not
+     * wake every tab at the table to deliver something only a peeking opponent would see. That was
+     * wrong, and it cost a turn several times a game.
+     *
+     * A command that is not announced still moves the head, and the chain requires a turn to name
+     * the current head as its parent. So a silent arrange left every other client holding a cursor
+     * it did not know was stale, and the next player to act got a 409 — up to fifteen seconds later,
+     * because with a live socket that is how long the backstop poll takes to notice. Reproduced
+     * exactly: one player rearranges, the other passes a second later and the pass is refused; wait
+     * seventeen seconds first and the same pass lands.
+     *
+     * The nudge is what keeps everyone's cursor current, which is not decoration on a chain that
+     * refuses stale writes. Coalescing on the client (`GameView.ARRANGE_SETTLE_MS`) is what keeps
+     * this to one message per rearrangement rather than one per dropped tile.
      */
-    if (command.kind !== 'arrange') await this.announce(gameId)
+    await this.announce(gameId)
     return written
   }
 
