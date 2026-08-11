@@ -7,7 +7,7 @@ Every round scores for different things, and the board you have built scores aga
 This describes the game as it ships. Almost every number below is a dial on the setup screen; where
 one is, the default is given and the dial is named.
 
-<!-- image: /rules/finished-tableau.png — a tableau of four plates part-filled, mid-game -->
+![Four plates laid out mid-game, their petals part-filled with coloured tiles](/rules/finished-tableau.png)
 
 ## What you are building
 
@@ -25,6 +25,25 @@ having nothing to touch.
 **Tiles have two attributes and nothing else**: a **colour** (one of six) and a **value** (1 to 6,
 shown as a symbol). Almost every rule in the game is about matching one of those two.
 
+## The symbols
+
+A tile shows its value as a symbol rather than a number, and the six are drawn from what a genome is
+made of — the game is called hexnome for a reason. Until you know them, this is the table to come
+back to.
+
+| | Value | Symbol | Why that one |
+|---|------:|--------|-------------|
+| ![](/textures/symbols/1.png) | 1 | DNA helix | One strand |
+| ![](/textures/symbols/2.png) | 2 | Chromosome pair | Inherited in pairs |
+| ![](/textures/symbols/3.png) | 3 | Codon | Exactly three nucleotides |
+| ![](/textures/symbols/4.png) | 4 | DNA bases | A, C, G and T |
+| ![](/textures/symbols/5.png) | 5 | Pentose sugar | A five-carbon ring |
+| ![](/textures/symbols/6.png) | 6 | Benzene ring | A six-member carbon ring |
+
+Each is shown here on the same background on purpose. Colour and value are **independent** — any
+symbol turns up in any of the six colours, and a table that gave each value its own colour would
+suggest a pairing the game does not have.
+
 ## A turn
 
 On your turn you do exactly one of three things:
@@ -36,7 +55,7 @@ On your turn you do exactly one of three things:
 Passing is not skipping a turn. A player who passes is **out until the round ends**, and the round
 ends when everybody has passed. So passing is a decision about the round, not about the moment.
 
-<!-- image: /rules/turn-bar.gif — the action bar showing Take, Put and Pass -->
+![The action bar offering Take, Put and Pass](/rules/turn-bar.gif)
 
 ## The shared source
 
@@ -77,7 +96,7 @@ The take is legal as soon as one sweep is **complete**. With `indigo-6  indigo-2
   legal yet: `indigo-2` is a 2 and is not selected.
 - Add **indigo-2** — every 2 taken. Legal.
 
-<!-- image: /rules/draft-sweep.gif — selecting one tile, then a second, and the criterion pinning -->
+![Selecting one tile, then a second, and the rest of the source going dark as the criterion pins](/rules/draft-sweep.gif)
 
 What you take goes into your **drawer**, which holds **12 tiles** (*tile slots*) and **2 plates**
 (*plate bays*). You cannot draft more than will fit.
@@ -105,7 +124,7 @@ This is a hard rule, not a scoring one: a placement that would create such a gro
 is not always the tile you are holding that duplicates. Dropping a magenta-2 between two indigo-2s
 duplicates neither of the things you dropped; it joins two groups that were legal apart.
 
-<!-- image: /rules/duplicate-refusal.png — the panel explaining a refused placement -->
+![A refused placement, with the panel explaining which rule it broke](/rules/duplicate-refusal.png)
 
 ## Paying for it
 
@@ -146,7 +165,7 @@ ring is strict by then and there would be nothing to reward.
 
 An anchor pays **once**, the first time it closes.
 
-<!-- image: /rules/enclosure.gif — the sixth petal landing and stems arriving in the drawer -->
+![The sixth petal landing, closing the ring, and stems arriving in the drawer](/rules/enclosure.gif)
 
 You can only be paid what you have room for: a placement whose reward will not fit in your drawer is
 refused. The room counted is the drawer as the turn will *leave* it — the slot the tile itself vacates
@@ -175,7 +194,7 @@ pass at all.
 
 The source column is swept, and the next round deals a fresh one.
 
-<!-- image: /rules/round-results.gif — the round scoresheet, counting out -->
+![The round scoresheet counting itself out, target by target](/rules/round-results.gif)
 
 ## The end of the game
 
@@ -194,7 +213,7 @@ unplaced*), and every stem still held pays **1** (*stem bonus*).
 
 Your final score is every round's total, plus the closing reckoning.
 
-<!-- image: /rules/final-score.gif — the closing sheet with the twelve categories -->
+![The closing sheet totalling the twelve group categories](/rules/final-score.gif)
 
 ## Playing with other people
 

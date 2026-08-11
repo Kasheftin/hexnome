@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_FIRST_PASS_FINE,
@@ -129,11 +131,34 @@ describe('the rulebook as a document', () => {
   })
 
   /**
-   * Images are HTML comments until the pictures exist, so that a release does not ship a page of
-   * broken-image icons. This fails once a slot becomes a real `![]()`, which is the moment to check
-   * the file is actually in `public/rules/`.
+   * Every picture the rulebook asks for is really on disk.
+   *
+   * This used to assert the opposite — that there were no image references at all — because the
+   * slots were HTML comments until the pictures existed. Now they exist, and the question worth
+   * asking is the one that will go wrong later: a renamed or deleted file leaves a reference behind,
+   * and a broken image in a rulebook is invisible to every test that only reads the text.
+   *
+   * The paths are absolute and resolved against `public/`, which is what Vite serves them from — a
+   * relative path would not work at all, since the markdown is imported as a raw string and Vite
+   * never sees inside it to rewrite anything.
    */
-  it('has no image reference without a file behind it', () => {
-    expect(rules.match(/!\[[^\]]*\]\([^)]*\)/g)).toBeNull()
+  it('asks only for pictures that exist', () => {
+    const referenced = [...rules.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map(match => match[1] ?? '')
+    expect(referenced.length).toBeGreaterThan(6)
+
+    for (const path of referenced) {
+      expect(`${path}: absolute`).toBe(`${path.startsWith('/') ? path : `/${path}`}: absolute`)
+      const onDisk = resolve(import.meta.dirname, '../../public', path.replace(/^\//, ''))
+      expect(`${path}: ${existsSync(onDisk)}`).toBe(`${path}: true`)
+    }
+  })
+
+  /** Alt text, because a rulebook read aloud should still describe its pictures. */
+  it('describes every picture', () => {
+    for (const [, alt, path] of rules.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)) {
+      // The symbol table's cells are labelled by the row around them, so those are deliberately bare.
+      if (path?.includes('/textures/symbols/')) continue
+      expect(`${path}: ${(alt ?? '').length > 12}`).toBe(`${path}: true`)
+    }
   })
 })

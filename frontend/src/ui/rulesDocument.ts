@@ -74,6 +74,15 @@ export function sectionsOf(markdown: string): RulesSection[] {
  * rules ever came from a server, from a URL or from anything a person could edit, that stops being
  * true and this needs `DOMPurify` before it renders a character.
  */
+/** Quotes and angle brackets, so a title or an alt cannot close the attribute it sits in. */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 export function renderRules(markdown: string): string {
   const seen = new Set<string>()
 
@@ -98,6 +107,20 @@ export function renderRules(markdown: string): string {
         for (let n = 2; seen.has(slug); n++) slug = `${base}-${n}`
         seen.add(slug)
         return `<h2 id="${slug}">${inner}</h2>\n`
+      },
+
+      /*
+       * Deferred until it is scrolled to.
+       *
+       * The rulebook carries around 13MB of screenshots and animations, and without this every one
+       * of them is fetched the moment the panel opens — measured, on a document most players will
+       * read the first screen of. `loading="lazy"` works inside a scrolling container as well as in
+       * the page, so what arrives is the picture you are looking at.
+       */
+      image({ href, title, text }) {
+        const alt = text ? ` alt="${escapeAttr(text)}"` : ' alt=""'
+        const caption = title ? ` title="${escapeAttr(title)}"` : ''
+        return `<img src="${escapeAttr(href)}"${alt}${caption} loading="lazy" decoding="async">`
       },
     },
   })

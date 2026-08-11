@@ -399,6 +399,30 @@ onBeforeUnmount(() => watching?.disconnect())
   border-radius: 3px;
 }
 
+/*
+ * A symbol in a table cell, shown the way the game shows it: on a tile.
+ *
+ * The art is dark brown on transparency — it is drawn to sit on a coloured tile face, and against
+ * this panel it would be very nearly invisible. So the cell supplies the face. One warm neutral for
+ * all six rather than the six tile colours, because colour and value are independent in this game and
+ * a coloured-per-row table would teach a pairing that does not exist.
+ */
+.prose :deep(td:first-child) {
+  width: 46px;
+  padding: 5px 10px 5px 0;
+}
+
+.prose :deep(td:first-child img) {
+  width: 36px;
+  height: 45px;
+  margin: 0;
+  padding: 3px;
+  border: 1px solid #7d6a41;
+  border-radius: 3px;
+  background: #c8a86d;
+  object-fit: contain;
+}
+
 .prose :deep(blockquote) {
   margin: 0 0 12px;
   padding: 2px 0 2px 14px;
