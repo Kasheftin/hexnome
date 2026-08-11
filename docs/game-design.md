@@ -4,16 +4,16 @@
 the browser. The **rules are inspired by Azul: Queen's Garden**; the **layout and visual style are
 inspired by Opus Magnum** — a clean hex playfield with a dark, ornate, polished frame.
 
-> **This is not the rules reference any more.** It records how the game was *designed* — the reasoning
-> behind each rule, the alternatives that were rejected, and the questions still open. It is a
-> historical document, and it has drifted: five of the seven settings dials were added without it, the
-> round anchor points among them.
+> **This is not the rules reference; it is the reasoning behind them.** What each rule is, a player
+> reads in `frontend/src/content/rules.md`, which the app shows under *Game rules*. What is here is
+> why it is that rule and not another — the alternatives that were rejected, and the questions still
+> open. A player should never have to read this; whoever changes a rule should.
 >
-> **How the game currently plays is `frontend/src/content/rules.md`**, which the app shows under *Game
-> rules* on the home screen. That document is checked against the code by `rules.spec.ts` — change a
-> default without changing the prose and the suite fails — which is the thing this one never had.
->
-> Nothing here is deleted. The *why* is worth keeping, and a player should never have to read it.
+> **Its numbers are checked against the code** by `frontend/src/content/designDoc.spec.ts`, beside the
+> spec that does the same for the rulebook: change a default without changing the prose and the suite
+> fails. It had no such check for most of its life and drifted — the drawer was documented at 16 slots
+> long after it became a dial defaulting to 12, and the round anchor points were added without it
+> hearing about them at all. Both are fixed above; the check is what stops the next one.
 
 For architecture and rendering see [tech-spec.md](tech-spec.md); for assets see
 [art-spec.md](art-spec.md); for build order see [tasklist.md](tasklist.md).
@@ -222,7 +222,7 @@ Both halves of the drawer are game settings.
 
 | | Choices | Default |
 |---|---|---|
-| **Tile slots** | 12, 14, 16, 18 | 16 |
+| **Tile slots** | 10, 12, 14, 16 | 12 |
 | **Plate bays** | 1, 2, 3 | 2 |
 
 Both are difficulty dials in disguise. Tile slots are the room to hold tiles you cannot place yet — and
@@ -304,7 +304,7 @@ against a criterion.
 
 ### Drawer capacity
 
-Drafted tiles go to the drawer's **16 tile slots**; drafted plates go to its **2 plate bays**. They are
+Drafted tiles go to the drawer's **12 tile slots**; drafted plates go to its **2 plate bays**. They are
 separate, and so are their limits:
 
 - Tile slots full → you cannot take tiles.
@@ -314,6 +314,16 @@ separate, and so are their limits:
 Because a sweep can drag a plate along with the tiles, a selection can be a perfectly legal sweep and
 still not fit — all the blues might include a plate when both bays are taken. That is not an illegal
 draft, it is an impossible one, and the action bar says **"out of space"** rather than silently refusing.
+
+### How many plates a round deals
+
+**Plates per round** — 3, 4, 5 or 6, default **4**. It is the round's whole budget of new material,
+and it is also the height of the source column: the column has exactly as many slots as the round has
+plates, so a round's worth can never be pushed off the bottom before anyone has had a chance at it.
+
+One number doing both jobs is deliberate. A column shorter than the budget would strand lots; a column
+longer than it would stand permanently half empty. Tying them together means the only question a
+player is being asked is how much material a round should offer.
 
 ### When the source restocks
 
@@ -547,9 +557,9 @@ they buy it:
 ## Drawer
 
 Your **personal** holding area for drafted items. Other players cannot touch your drawer or your
-board — see [Interaction philosophy](#interaction-philosophy). The mockup sizes it at
-**2 rows × 8 columns = 16 items**; whether that cap is a hard rule or only a layout constraint is
-open.
+board — see [Interaction philosophy](#interaction-philosophy). The mockup sized it at
+**2 rows × 8 columns = 16 items** and left open whether that was a rule or a layout constraint; it is
+a rule, and a dial — see [Drawer size](#drawer-size).
 
 **Rearranging it is not a move.** You may drag items between slots at any time — on your turn or not —
 and it costs nothing, spends no payment and ends no turn. Dropping onto an occupied slot **swaps** the
@@ -753,6 +763,27 @@ beside up to six anchors, and a plate can create an external anchor *and* fill i
 the same action. The legality check counts them all together, so a move whose combined payout would
 overflow the drawer is refused rather than half-honoured.
 
+### Anchor points, paid every round
+
+Stems are the reward for **closing** an anchor. These are the reward for **having** one, and the two
+are deliberately different questions.
+
+**Points per internal anchor** — 0, 1 or 2, default **1**. Every plate on the board has exactly one
+hole, so this is what another plate is worth, every round, for the rest of the game. A plate laid in
+round 1 of a four-round game pays four times; one laid in the last round pays once.
+
+**Points per external anchor** — 0, 1 or 2, default **0**. A bare cell the plates have wrapped. Off by
+default because it is a by-product of laying plates loosely rather than something worth chasing, and
+paying for it every round would make an accident the best strategy in the game.
+
+They exist because everything else on the board pays for *tiles*, which makes one plate worked to
+death the obvious line. An anchor arrives with a plate and is banked again at the end of every round,
+which is what makes building **wide** worth a turn — and what makes an early plate worth more than a
+late one, without any rule having to say so.
+
+Counted for every anchor that exists, enclosed or not. Enclosing one is a feat and pays stems; having
+one is a decision about the shape of the board, and pays points.
+
 ## Stages & end of game
 
 - The game may be split into **multiple stages** (like Azul) or be a **single-stage puzzle**.
@@ -797,7 +828,9 @@ none of these block current work. The rules module must leave room for them rath
    too. Lots fill **progressively**, one per turn once the top lot has been touched, up to the round's
    quota — see [When the source restocks](#when-the-source-restocks) — and the column is swept at the
    end of the round.
-5. **Drawer cap** — is 16 a rule or only the mockup's layout?
+5. ~~**Drawer cap** — is 16 a rule or only the mockup's layout?~~ **Resolved — a rule, and a dial.**
+   Tile slots are 10, 12, 14 or 16 and default to 12; bays are 1–3 and default to 2. See
+   [Drawer size](#drawer-size).
 6. **Stages** — how many. What *resets* is now settled: the **drawer carries over** with its
    unaffordable tiles, the board and the banked scores carry over, and the **shared source is swept to
    the discard piles**. Only the number of stages, and whether a stage is more than a round, is open.
