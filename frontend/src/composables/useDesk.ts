@@ -24,6 +24,7 @@
  * make one wait for the other.
  */
 
+import { apiUrl } from '@/api/base'
 import type { DeskKind } from '@hexnome/rules/wire'
 
 export interface Desk {
@@ -58,7 +59,7 @@ interface DeskAnswer {
 async function post(path: string, body: unknown): Promise<DeskAnswer> {
   let response: Response
   try {
-    response = await fetch(path, {
+    response = await fetch(apiUrl(path), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -127,7 +128,7 @@ export interface RulesHealth {
  */
 export async function rulesHealth(): Promise<RulesHealth | null> {
   try {
-    const response = await fetch('/health')
+    const response = await fetch(apiUrl('/health'))
     if (!response.ok) return null
     const said = await response.json() as { rules?: RulesHealth }
     return said.rules ?? null

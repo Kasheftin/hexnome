@@ -52,7 +52,7 @@ describe('loading', () => {
 
     expect((await sync.load()).map(r => r.seq)).toEqual([4, 7])
     expect(sync.at()).toBe(7)
-    expect(calls[0]?.path).toBe('/games/a-game/commands?since=0')
+    expect(calls[0]?.path).toBe('/api/games/a-game/commands?since=0')
   })
 })
 
@@ -68,7 +68,7 @@ describe('catching up', () => {
     calls.length = 0
 
     expect((await sync.catchUp()).map(r => r.seq)).toEqual([9])
-    expect(calls[0]?.path).toBe('/games/a-game/commands?since=7')
+    expect(calls[0]?.path).toBe('/api/games/a-game/commands?since=7')
     expect(sync.at()).toBe(9)
   })
 
@@ -114,7 +114,7 @@ describe('submitting', () => {
 
     await sync.submit({ kind: 'pass', seat: 0 })
 
-    expect(calls[0]?.path).toBe('/games/a-game/commands')
+    expect(calls[0]?.path).toBe('/api/games/a-game/commands')
     expect(calls[0]?.body).toMatchObject({ prevSeq: 4, command: { kind: 'pass', seat: 0 } })
     expect(calls[0]?.body).not.toHaveProperty('seat')
     expect(calls[0]?.body?.cmdId).toEqual(expect.any(String))

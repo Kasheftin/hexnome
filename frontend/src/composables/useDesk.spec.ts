@@ -69,7 +69,7 @@ describe('creating a desk', () => {
     await flush()
     await built
 
-    expect(calls[0]?.path).toBe('/desk')
+    expect(calls[0]?.path).toBe('/api/desk')
     expect(calls[0]?.body).toEqual({ gameId: 'a-game', kind: 'plates' })
   })
 })
@@ -88,12 +88,12 @@ describe('the queue', () => {
     await tick()
 
     // Only the draw has gone out: the discard is waiting behind it, unanswered.
-    expect(calls.map(c => c.path)).toEqual(['/desk', '/desk/desk-1/draw'])
+    expect(calls.map(c => c.path)).toEqual(['/api/desk', '/api/desk/desk-1/draw'])
 
     await flush()
     await Promise.all([drawing, discarding])
     expect(calls.map(c => c.path)).toEqual([
-      '/desk', '/desk/desk-1/draw', '/desk/desk-1/discard',
+      '/api/desk', '/api/desk/desk-1/draw', '/api/desk/desk-1/discard',
     ])
   })
 
@@ -123,7 +123,7 @@ describe('discarding', () => {
   it('sends nothing at all for an empty batch', async () => {
     const d = await desk()
     await d.discard([])
-    expect(calls.map(c => c.path)).toEqual(['/desk'])
+    expect(calls.map(c => c.path)).toEqual(['/api/desk'])
   })
 
   it('reports what the server said is left', async () => {

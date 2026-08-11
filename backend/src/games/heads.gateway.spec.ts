@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
+import { WATCH_PATH } from '../apiPrefix'
 import { HeadsGateway } from './heads.gateway'
 
 /**
@@ -19,7 +20,7 @@ const open: WebSocket[] = []
 
 /** A client that has said which game it is watching, and is ready to be sent to. */
 async function watcher(gameId: string): Promise<WebSocket> {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}/watch`)
+  const socket = new WebSocket(`ws://127.0.0.1:${port}${WATCH_PATH}`)
   open.push(socket)
   await new Promise<void>(resolve => socket.once('open', () => resolve()))
   /*
@@ -93,7 +94,7 @@ describe('telling watchers a game moved', () => {
   })
 
   it('does not reach a socket that has not said what it is watching', async () => {
-    const silent = new WebSocket(`ws://127.0.0.1:${port}/watch`)
+    const silent = new WebSocket(`ws://127.0.0.1:${port}${WATCH_PATH}`)
     open.push(silent)
     await new Promise<void>(resolve => silent.once('open', () => resolve()))
     heads.moved('game-a', 1)
@@ -138,7 +139,7 @@ describe('rooms', () => {
 
   /* The inbound vocabulary is one word. Anything else must not subscribe a socket to anything. */
   it('ignores anything that is not a subscription', async () => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/watch`)
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${WATCH_PATH}`)
     open.push(socket)
     await new Promise<void>(resolve => socket.once('open', () => resolve()))
 

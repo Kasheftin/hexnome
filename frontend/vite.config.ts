@@ -27,19 +27,22 @@ export default defineConfig({
   },
   server: {
     /*
-     * The desk service, proxied rather than reached across origins.
+     * The backend, proxied rather than reached across origins.
      *
      * Keeping the browser on one origin means the app's fetches are same-origin in development
-     * exactly as they are in production, so there is no CORS to configure, no credentials mode to
-     * get wrong, and no `VITE_API_BASE` to set before the thing will run at all.
+     * exactly as they are behind nginx, so there is no CORS to configure and no credentials mode to
+     * get wrong. `VITE_API_BASE` defaults to the same `/api` in both, so nothing has to be set before
+     * the thing will run.
+     *
+     * One rule rather than four, because the backend is mounted under the prefix
+     * (`setGlobalPrefix('api')` in backend/src/main.ts) and the path is passed through unchanged —
+     * so this covers the REST calls and the head socket together.
+     *
+     * `ws` is what makes the proxy pass an upgrade through rather than answering it with a 200 and
+     * leaving the client waiting for a handshake that never comes.
      */
     proxy: {
-      '/desk': 'http://localhost:3000',
-      '/games': 'http://localhost:3000',
-      '/health': 'http://localhost:3000',
-      // The head socket. `ws` is what makes the proxy pass an upgrade through rather than answering
-      // it with a 200 and leaving the client waiting for a handshake that never comes.
-      '/watch': { target: 'http://localhost:3000', ws: true },
+      '/api': { target: 'http://localhost:3000', ws: true },
     },
   },
   test: {

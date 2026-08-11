@@ -17,6 +17,7 @@
  * It slows down instead, which costs a request every fifteen seconds and removes the whole class of
  * problem.
  */
+import { apiSocketUrl } from '@/api/base'
 
 /** How often to ask when the socket is not carrying the load. */
 const POLL_EAGER_MS = 2000
@@ -53,9 +54,13 @@ function seqOf(raw: unknown): number | null {
   }
 }
 
+/**
+ * Through `apiSocketUrl`, like every other call, and for one reason worth naming: a socket that
+ * cannot connect does not look broken. The client falls back to the 2s poll and the game merely
+ * feels sluggish, so a wrong path here is the one mistake nothing on screen reports.
+ */
 function socketUrl(gameId: string): string {
-  const origin = globalThis.location.origin.replace(/^http/, 'ws')
-  return `${origin}/watch?game=${encodeURIComponent(gameId)}`
+  return apiSocketUrl(`/watch?game=${encodeURIComponent(gameId)}`)
 }
 
 /**

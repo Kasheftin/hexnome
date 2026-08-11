@@ -1,6 +1,7 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { Server } from 'node:http'
+import { WATCH_PATH } from '../apiPrefix'
 
 /**
  * Tells watchers that a game has moved, and nothing else.
@@ -40,7 +41,10 @@ export class HeadsGateway implements OnModuleDestroy {
    * certificate — a socket is an upgrade of a request that was already going to be allowed.
    */
   attach(http: Server): void {
-    this.server = new WebSocketServer({ server: http, path: '/watch' })
+    // `WATCH_PATH`, not a literal: `setGlobalPrefix` moves the controllers and leaves this behind —
+    // see apiPrefix.ts for why that particular mistake is invisible from the game.
+
+    this.server = new WebSocketServer({ server: http, path: WATCH_PATH })
 
     this.server.on('connection', (socket) => {
       let watching: string | null = null

@@ -9,6 +9,7 @@
  * (`stores/game.ts`); this is the transport under it.
  */
 import type { CommandSlice, GameView, SeatClaim, SubmitResult } from '@hexnome/rules/wire'
+import { apiUrl } from './base'
 
 /**
  * A request the server answered, and refused.
@@ -45,7 +46,7 @@ const UNREACHABLE = 0
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response
   try {
-    response = await fetch(path, init)
+    response = await fetch(apiUrl(path), init)
   } catch {
     throw new ApiError(UNREACHABLE, 'Cannot reach the table. Is the server running?')
   }
