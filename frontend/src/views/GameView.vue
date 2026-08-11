@@ -23,7 +23,13 @@
  * `platesPerRound` is a round-supply figure, not the drawer's bay count, so binding it to
  * PLATE_SLOTS would be conflating two different numbers.
  */
-import { mdiArrowDownLeftBold, mdiArrowDownRightBold, mdiChevronRight } from '@mdi/js'
+import {
+  mdiArrowDownLeftBold,
+  mdiArrowDownRightBold,
+  mdiChevronRight,
+  mdiCogOutline,
+  mdiHelpCircleOutline,
+} from '@mdi/js'
 import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
@@ -93,7 +99,9 @@ import TileEnvironment from '@/scene/TileEnvironment.vue'
 import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
 import RoundResults from '@/ui/RoundResults.vue'
+import GameSettingsPanel from '@/ui/GameSettingsPanel.vue'
 import HintTip from '@/ui/HintTip.vue'
+import RulesPanel from '@/ui/RulesPanel.vue'
 import NoticePanel from '@/ui/NoticePanel.vue'
 import PresenceMark from '@/ui/PresenceMark.vue'
 import TileChip from '@/ui/TileChip.vue'
@@ -648,6 +656,10 @@ async function settleArrangement(): Promise<void> {
  * Those two used to be console-only, which meant they read as the game being broken.
  */
 const refused = shallowRef<string | null>(null)
+
+/** The two reference panels the top strip opens. Neither touches the game. */
+const rulesOpen = shallowRef(false)
+const gameSettingsOpen = shallowRef(false)
 
 /** Whose turn it is, read through `revision` so it follows the state rather than shadowing it. */
 const activeIndex = computed(() => {
@@ -2005,6 +2017,17 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       @dismiss="refused = null"
     />
 
+    <RulesPanel
+      :open="rulesOpen"
+      @close="rulesOpen = false"
+    />
+
+    <GameSettingsPanel
+      :open="gameSettingsOpen"
+      :settings="settings ?? null"
+      @close="gameSettingsOpen = false"
+    />
+
     <Transition name="bar">
       <ActionBar
         v-if="announcing === null && !showResults && !gameOver && !settling"
@@ -2056,6 +2079,46 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       >
         ← menu
       </RouterLink>
+
+      <!--
+        Two things a player reaches for mid-game and cannot get to otherwise: how the game works, and
+        how *this* game was set up. Icons rather than words, because the strip above the board is the
+        one place with no room to spare, and both carry a tooltip.
+      -->
+      <div class="helpers">
+        <HintTip text="How the game is played">
+          <button
+            type="button"
+            class="helper"
+            aria-label="Game rules"
+            @click="rulesOpen = true"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path :d="mdiHelpCircleOutline" />
+            </svg>
+          </button>
+        </HintTip>
+        <HintTip text="What this game was set up with">
+          <button
+            type="button"
+            class="helper"
+            aria-label="This game's settings"
+            @click="gameSettingsOpen = true"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path :d="mdiCogOutline" />
+            </svg>
+          </button>
+        </HintTip>
+      </div>
       <p
         v-if="settings"
         class="game-id"
@@ -2586,6 +2649,49 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
 .seats button.viewed .seat-name {
   color: #e8c878;
+}
+
+/* Beside the menu link, in the strip's own quiet register — reference, not action. */
+.helpers {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.helper {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #79808f;
+  cursor: pointer;
+  transition: border-color 140ms, color 140ms;
+}
+
+.helper svg {
+  width: 16px;
+  height: 16px;
+  fill: currentcolor;
+}
+
+.helper:hover {
+  border-color: #33383f;
+  color: #e8c878;
+}
+
+.helper:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .helper {
+    transition: none;
+  }
 }
 
 .seat-mark {

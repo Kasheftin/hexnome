@@ -72,6 +72,7 @@ import {
   type PlacementRule,
 } from '@hexnome/rules/placement'
 import RulesPanel from '@/ui/RulesPanel.vue'
+import { bonusKey, textOf } from '@/ui/dialText'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { ApiError, createGame } from '@/api/games'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
@@ -180,8 +181,7 @@ interface Dial {
 const SUPPLY_DIALS: readonly Dial[] = [
   {
     key: 'platesPerRound',
-    legend: 'Plates per round',
-    short: 'plates/round',
+    ...textOf('platesPerRound'),
     choices: PLATES_PER_ROUND_CHOICES,
     model: platesPerRound,
   },
@@ -197,76 +197,59 @@ const SUPPLY_DIALS: readonly Dial[] = [
 const DECK_DIALS: readonly Dial[] = [
   {
     key: 'tileCopies',
-    legend: 'Tiles in the bag',
-    short: 'tile bag',
+    ...textOf('tileCopies'),
     choices: TILE_COPIES_CHOICES,
     labels: TILE_BAG_LABELS,
     model: tileCopies,
-    hint: 'Two, three or four copies of each of the 36 distinct tiles. More copies means duplicates '
-      + 'turn up together more often, so a colour is easier to sweep in one draft.',
   },
   {
     key: 'plateCopies',
-    legend: 'Plates in the bag',
-    short: 'plate bag',
+    ...textOf('plateCopies'),
     choices: PLATE_COPIES_CHOICES,
     labels: PLATE_BAG_LABELS,
     model: plateCopies,
-    hint: 'One, two or three per distinct tile. A four-round game draws sixteen, so beyond the first '
-      + 'copy the bag never runs dry and nothing you spend comes back around.',
   },
 ]
 
 const DRAWER_DIALS: readonly Dial[] = [
   {
     key: 'tileSlots',
-    legend: 'Tile slots in your drawer',
-    short: 'tile slots',
+    ...textOf('tileSlots'),
     choices: TILE_SLOT_CHOICES,
     model: tileSlots,
-    hint: 'Room to hold tiles you cannot place yet — and stems take these slots too, so a large '
-      + 'opening allowance eats into it.',
   },
   {
     key: 'plateSlots',
-    legend: 'Plate bays in your drawer',
-    short: 'plate bays',
+    ...textOf('plateSlots'),
     choices: PLATE_SLOT_CHOICES,
     model: plateSlots,
-    hint: 'How many plates you can hold before committing one to the board.',
   },
 ]
 
 const STEM_DIALS: readonly Dial[] = [
   {
     key: 'initialStems',
-    legend: 'Initial stems on game start',
-    short: 'starting stems',
+    ...textOf('initialStems'),
     choices: STEM_COUNT_CHOICES,
     model: initialStems,
   },
   {
     key: 'stemsPerInternalAnchor',
-    legend: 'Stems per enclosed internal anchor',
-    short: 'internal stems',
+    ...textOf('stemsPerInternalAnchor'),
     choices: STEMS_PER_ANCHOR_CHOICES,
     model: stemsPerInternalAnchor,
   },
   {
     key: 'stemsPerExternalAnchor',
-    legend: 'Stems per enclosed external anchor',
-    short: 'external stems',
+    ...textOf('stemsPerExternalAnchor'),
     choices: STEMS_PER_ANCHOR_CHOICES,
     model: stemsPerExternalAnchor,
   },
   {
     key: 'strictEnclosureBonus',
-    legend: 'Stem bonus for strict enclosure',
-    short: 'strict bonus',
+    ...textOf('strictEnclosureBonus'),
     choices: STRICT_BONUS_CHOICES,
     model: strictEnclosureBonus,
-    hint: 'Extra stems when every neighbouring pair around an enclosed anchor matches. Strict placement '
-      + 'guarantees that already, so the bonus only exists under the regular rule.',
     /*
      * Hidden rather than disabled under strict placement, because a disabled control invites the
      * question "why can I not have this?" when the honest answer is that strict placement already gives
@@ -287,13 +270,9 @@ const STEM_DIALS: readonly Dial[] = [
 const PASSING_DIALS: readonly Dial[] = [
   {
     key: 'firstPassFine',
-    legend: 'Fine for passing first',
-    short: 'first-pass fine',
+    ...textOf('firstPassFine'),
     choices: FIRST_PASS_FINE_CHOICES,
     model: firstPassFine,
-    hint: 'The first player out of a round gives up these points — and takes the first turn of the '
-      + 'next round, at a source nobody has touched. At 0 there is no reason not to leave the moment '
-      + 'the source turns awkward.',
     applies: () => kind.value === 'multiplayer',
   },
 ]
@@ -311,40 +290,30 @@ const PASSING_DIALS: readonly Dial[] = [
 const ANCHOR_POINT_DIALS: readonly Dial[] = [
   {
     key: 'pointsPerInternalAnchor',
-    legend: 'Points per internal anchor each round',
-    short: 'internal points',
+    ...textOf('pointsPerInternalAnchor'),
     choices: ANCHOR_POINT_CHOICES,
     model: pointsPerInternalAnchor,
-    hint: 'Every plate on your board has exactly one, so this is what another plate is worth — every '
-      + 'round, for the rest of the game. One placed in round 1 of a four-round game pays four.',
   },
   {
     key: 'pointsPerExternalAnchor',
-    legend: 'Points per external anchor each round',
-    short: 'external points',
+    ...textOf('pointsPerExternalAnchor'),
     choices: ANCHOR_POINT_CHOICES,
     model: pointsPerExternalAnchor,
-    hint: 'A bare cell your plates have wrapped on all six sides. Off by default: it is a by-product '
-      + 'of placing plates loosely rather than something worth chasing.',
   },
 ]
 
 const FINAL_DIALS: readonly Dial[] = [
   {
     key: 'minGroupSize',
-    legend: 'Smallest group that scores',
-    short: 'min group',
+    ...textOf('minGroupSize'),
     choices: MIN_GROUP_SIZE_CHOICES,
     model: minGroupSize,
-    hint: 'Connected tiles of one colour, or of one value. The single biggest lever on the endgame: '
-      + 'at 2 almost anything pays, at 4 only deliberate building does.',
   },
   ...Array.from({ length: MAX_GROUP_SIZE - 1 }, (_, index): Dial => {
     const size = index + 2
     return {
-      key: `bonus${size}`,
-      legend: `Bonus for a group of ${size}`,
-      short: `bonus ${size}`,
+      key: bonusKey(size),
+      ...textOf(bonusKey(size)),
       choices: GROUP_BONUS_CHOICES,
       model: bonusBySize[size] as Ref<number>,
       minor: true,
@@ -354,24 +323,17 @@ const FINAL_DIALS: readonly Dial[] = [
   }),
   {
     key: 'fineUnplaced',
-    legend: 'Fine for tiles left unplaced',
-    short: 'fine unplaced',
+    ...textOf('fineUnplaced'),
     choices: SWITCH_CHOICES,
     labels: SWITCH_LABELS,
     model: fineUnplaced,
-    hint: 'At the very end, everything still in your drawer is charged at its face value — a plate '
-      + 'through its own tile. Tiles carry between rounds freely; this settles once, for the whole '
-      + 'game, so a six you never placed is an expensive thing to have hoarded.',
   },
   {
     key: 'rewardStems',
-    legend: 'Bonus for stems left over',
-    short: 'stem bonus',
+    ...textOf('rewardStems'),
     choices: SWITCH_CHOICES,
     labels: SWITCH_LABELS,
     model: rewardStems,
-    hint: 'A point for each stem still held when the game ends — the mirror of the fine, so spending '
-      + 'a stem you did not need is a real choice.',
   },
 ]
 
@@ -396,6 +358,7 @@ const SECTIONS: readonly DialSection[] = [
   { key: 'supply', dials: SUPPLY_DIALS },
   {
     key: 'passing',
+    ...textOf('passing'),
     title: 'Passing',
     dials: PASSING_DIALS,
     note: 'Passing takes you out of the round, not out of the game. The first to go pays the fine and '
@@ -406,6 +369,7 @@ const SECTIONS: readonly DialSection[] = [
   { key: 'stems', title: 'Receiving stems', dials: STEM_DIALS },
   {
     key: 'anchorPoints',
+    ...textOf('anchorPoints'),
     title: 'Round anchor points',
     dials: ANCHOR_POINT_DIALS,
     note: 'Counted at the end of every round, over the whole board, enclosed or not — so a plate keeps '
@@ -413,6 +377,7 @@ const SECTIONS: readonly DialSection[] = [
   },
   {
     key: 'final',
+    ...textOf('final'),
     title: 'Final score',
     dials: FINAL_DIALS,
     note: 'A group scores the sum of its tiles\' values, and a bonus for its size on top. Six is as '
