@@ -271,7 +271,7 @@ h1 {
 .seat {
   display: flex;
   gap: 10px;
-  align-items: baseline;
+  align-items: center;
   padding: 9px 10px;
   border: 1px solid #2a2e35;
   border-radius: 3px;

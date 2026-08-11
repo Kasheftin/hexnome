@@ -1032,7 +1032,7 @@ legend {
 .option {
   display: flex;
   gap: 12px;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   width: 100%;
   padding: 12px 14px;
@@ -1209,7 +1209,7 @@ legend {
 .pill {
   display: inline-flex;
   gap: 6px;
-  align-items: baseline;
+  align-items: center;
   white-space: nowrap;
 }
 

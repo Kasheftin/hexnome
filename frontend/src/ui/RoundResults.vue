@@ -419,7 +419,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 .fold-head {
   display: flex;
   gap: 10px;
-  align-items: baseline;
+  align-items: center;
   width: 100%;
   padding: 9px 10px;
   border: 1px solid transparent;
@@ -590,7 +590,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
   display: flex;
   flex: 1 1 0;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   min-width: 0;
   padding: 7px 10px;

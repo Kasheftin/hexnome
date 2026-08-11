@@ -124,7 +124,7 @@ const emit = defineEmits<{ shown: [] }>()
 
 .headline {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 20px;
   margin: 0;
 }

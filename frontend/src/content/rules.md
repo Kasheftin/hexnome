@@ -121,7 +121,7 @@ A **group** is a run of touching tiles that all share a colour, or all share a v
 contain the same tile twice — the same colour *and* the same value.
 
 This is a hard rule, not a scoring one: a placement that would create such a group is refused. And it
-is not always the tile you are holding that duplicates. Dropping a magenta-2 between two indigo-2s
+is not always the tile you are holding that duplicates. Dropping a magenta-1 between two blue-1s
 duplicates neither of the things you dropped; it joins two groups that were legal apart.
 
 ![A refused placement, with the panel explaining which rule it broke](/rules/duplicate-refusal.png)

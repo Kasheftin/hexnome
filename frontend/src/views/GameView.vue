@@ -2336,7 +2336,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   left: 14px;
   display: flex;
   gap: 18px;
-  align-items: baseline;
+  align-items: center;
   padding: 9px 14px;
 }
 
@@ -2362,7 +2362,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .counters {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   margin: 0;
   padding-left: 14px;
   border-left: 1px solid #3a3222;
@@ -2580,7 +2580,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .viewing {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   margin: 0;
 }
 
