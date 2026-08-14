@@ -69,9 +69,11 @@ import {
   type GameOptions,
 } from '@hexnome/rules/game'
 import type { CommandRow, PlayerCommand } from '@hexnome/rules/wire'
+import { useMediaQuery } from '@/composables/mediaQuery'
 import { rulesHealth } from '@/composables/useDesk'
 import { useGameSync } from '@/composables/useGameSync'
 import { colorName, tileName } from '@/scene/explainRefusal'
+import { rotateButtonBoxes, type RotateButtonBox } from '@/scene/rotateButtons'
 import type { RoundRecord } from '@/ui/roundRecord'
 import {
   type PlateLocation,
@@ -732,6 +734,16 @@ const boardOf = (seat: number): Tableau => (state.seats[seat] ?? state.seats[0]!
  * False while a turn is settling, so a badge does not flash over your own board as its pieces land.
  */
 const watching = computed(() => !settling.value && viewedSeat.value !== mySeat.value)
+
+/**
+ * The board on screen is one you may touch: yours, and yours to begin with.
+ *
+ * Not the negation of `watching` — a spectator holds no seat at all and `mySeat` falls back to 0 for
+ * them, so "the seat I am looking at is mine" is true for a visitor and has to be asked together with
+ * whether there is a seat to be looking at. Named once because the scene is told it and the rotate
+ * buttons ask it, and two spellings of one question drift apart.
+ */
+const yours = computed(() => seated.value && viewedSeat.value === mySeat.value)
 
 /** Every seat, for the score panel: who is playing, who has passed, what they have banked. */
 const seatRows = computed(() => {
@@ -1841,30 +1853,85 @@ const overButtons = shallowRef(false)
 /** Last bay to be hovered, so the buttons keep a position while the pointer is on them. */
 const activePlateSlot = shallowRef<number | null>(null)
 
+/**
+ * Whether a finger is the only way in.
+ *
+ * Two queries, because either one alone answers a slightly wrong question. `(hover: none)` is the
+ * condition the bug is actually about — the buttons were revealed by hovering, so where no hover can
+ * happen they were unreachable — but it is also true in a headless browser, which has no input device
+ * of any kind. `(pointer: coarse)` says the *primary* pointer is a finger, which is true on a phone
+ * and false on a laptop with a touchscreen, whose mouse can still hover.
+ *
+ * Either is enough. The two failures are not comparable: a false positive shows the buttons on a
+ * machine that did not need them shown, and a false negative leaves a phone unable to rotate a plate
+ * at all. So this errs the cheap way.
+ */
+const touchPrimary = useMediaQuery('(hover: none), (pointer: coarse)')
+
 function onHoverPlateSlot(slot: number | null): void {
   hoveredPlateSlot.value = slot
   if (slot !== null) activePlateSlot.value = slot
 }
 
 /**
- * Moving onto a button leaves the canvas, which ends the 3D hover — so the buttons would
- * vanish the moment you reached for them. They stay while the pointer is on them.
+ * Which bays are showing rotate buttons.
+ *
+ * With a pointer, the one being hovered. Moving onto a button leaves the canvas, which ends the
+ * 3D hover — so the buttons would vanish the moment you reached for them, and they stay while
+ * the pointer is on them instead.
+ *
+ * Without one, all of them, because rotating is not optional: a plate lands in a bay at whatever
+ * rotation it was dealt, and the board almost always wants a different one. Nothing else on a
+ * touch screen can produce the hover these were hiding behind, so the game was unfinishable on a
+ * phone — the buttons are shown rather than made reachable some other way because a bay is only
+ * two of them, and they already sit clear of the petals you drag from.
  */
-const rotateControls = computed(() => {
+const rotateSlots = computed<number[]>(() => {
+  // Which bays are filled changes as plates are drafted and placed, and the scene reports that by
+  // moving the revision. Hovering used to be the only thing that could reopen this question.
+  void revision.value
+  // Somebody else's plates are not yours to turn. The hovered path never asked, so spectating and
+  // sweeping the pointer over a bay would offer buttons that rotated another player's plate locally
+  // and told nobody — harmless and baffling. Always-on buttons would have made it loud.
+  if (!yours.value) return []
+  if (touchPrimary.value) {
+    return board().plates()
+      .map(p => (p.location.kind === 'plateSlot' ? p.location.slot : null))
+      .filter((slot): slot is number => slot !== null)
+      .sort((a, b) => a - b)
+  }
   const slot = hoveredPlateSlot.value ?? (overButtons.value ? activePlateSlot.value : null)
-  if (slot === null) return null
-  const centre = drawerLayout.value.plateSlotCentre(slot)
+  return slot === null ? [] : [slot]
+})
+
+/**
+ * How big the two buttons are and where they sit, which is not a stylesheet's decision to make: the
+ * drawer scales to the window, so the offsets depend on a number only the layout knows.
+ */
+const rotateBoxes = computed(() => rotateButtonBoxes(drawerLayout.value, touchPrimary.value))
+
+/** A box as the inline style that draws it. `--glyph` sizes the svg, which has no attributes of its own. */
+function boxStyle(box: RotateButtonBox): Record<string, string> {
+  return {
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.size}px`,
+    height: `${box.size}px`,
+    '--glyph': `${box.glyph}px`,
+  }
+}
+
+const rotateControls = computed(() => rotateSlots.value.flatMap((slot) => {
   const plate = board().plates().find(
     p => p.location.kind === 'plateSlot' && p.location.slot === slot,
   )
-  if (!plate) return null
-  return { slot, plateId: plate.id, x: centre.x, y: centre.y }
-})
+  if (!plate) return []
+  const centre = drawerLayout.value.plateSlotCentre(slot)
+  return [{ slot, plateId: plate.id, x: centre.x, y: centre.y }]
+}))
 
-function rotate(steps: number): void {
-  const controls = rotateControls.value
-  if (!controls) return
-  if (board().rotatePlate(controls.plateId, steps)) revision.value++
+function rotate(plateId: string, steps: number): void {
+  if (board().rotatePlate(plateId, steps)) revision.value++
 }
 
 /**
@@ -1879,6 +1946,21 @@ const ROTATE_ICONS = {
   counterClockwise: mdiArrowDownLeftBold,
   clockwise: mdiArrowDownRightBold,
 } as const
+
+/**
+ * Their tooltips, switched off where nothing can hover.
+ *
+ * A tap on a touch screen focuses the button, and `HintTip` opens on focus as well as on hover — so
+ * every rotation would leave a bubble hanging until the next tap elsewhere, naming a key the device
+ * has not got. Empty text is `HintTip`'s own way of saying "no tooltip", and the buttons' aria-labels
+ * carry the same words for anyone reading them aloud.
+ */
+const rotateHints = computed(() => (touchPrimary.value
+  ? { counterClockwise: '', clockwise: '' }
+  : {
+      counterClockwise: 'Rotate counter-clockwise (Q while dragging)',
+      clockwise: 'Rotate clockwise (E while dragging)',
+    }))
 
 /** Key light from the upper left, matching the direction the tile art assumes. */
 const KEY_LIGHT_POSITION = new Vector3(-7, 12, 5)
@@ -1926,7 +2008,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :source="source()"
         :drawer="drawerShape"
         :game-id="gameId"
-        :yours="seated && viewedSeat === mySeat"
+        :yours="yours"
         :may-place="phase.kind === 'putting' || canStartPut"
         :unaffordable="unaffordable"
         :may-move-placed="phase.kind === 'putting'"
@@ -1962,25 +2044,28 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     </TresCanvas>
 
     <!--
-      Positioned over the plate bay that is hovered. The wrapper ignores pointer events so
-      it never steals a drag from the board; only the buttons themselves accept them.
+      Positioned over the plate bay these belong to: the hovered one where there is a pointer,
+      every filled one where there is not. The wrapper ignores pointer events so it never
+      steals a drag from the board; only the buttons themselves accept them.
     -->
     <div
-      v-if="rotateControls"
+      v-for="control in rotateControls"
+      :key="control.slot"
       class="rotate-controls"
-      :style="{ left: `${rotateControls.x}px`, top: `${rotateControls.y}px` }"
+      :style="{ left: `${control.x}px`, top: `${control.y}px` }"
       @pointerenter="overButtons = true"
       @pointerleave="overButtons = false"
     >
       <HintTip
-        text="Rotate counter-clockwise (Q while dragging)"
+        :text="rotateHints.counterClockwise"
         side="below"
       >
         <button
           type="button"
-          class="rotate-button left"
+          class="rotate-button"
+          :style="boxStyle(rotateBoxes.left)"
           aria-label="Rotate plate counter-clockwise"
-          @click="rotate(-1)"
+          @click="rotate(control.plateId, -1)"
         >
           <svg
             viewBox="0 0 24 24"
@@ -1992,14 +2077,15 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         </button>
       </HintTip>
       <HintTip
-        text="Rotate clockwise (E while dragging)"
+        :text="rotateHints.clockwise"
         side="below"
       >
         <button
           type="button"
-          class="rotate-button right"
+          class="rotate-button"
+          :style="boxStyle(rotateBoxes.right)"
           aria-label="Rotate plate clockwise"
-          @click="rotate(1)"
+          @click="rotate(control.plateId, 1)"
         >
           <svg
             viewBox="0 0 24 24"
@@ -2489,17 +2575,18 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 /*
  * Tucked into the bay's empty upper corners, just outboard of the two upper petals.
  *
- * Deliberately still touching the plate rather than floating clear above the drawer: the
- * buttons are shown by hovering the plate, so any gap between plate and button would let
- * the hover lapse while the pointer crossed it, and they would vanish as you reached.
+ * Deliberately still touching the plate rather than floating clear above the drawer: where the
+ * buttons are shown by hovering the plate, any gap between plate and button would let the hover
+ * lapse while the pointer crossed it, and they would vanish as you reached.
+ *
+ * Size and position come from `rotateButtons.ts` as an inline style, because both depend on the
+ * scale the drawer was laid out at and on whether anything can hover — neither of which is a
+ * number a stylesheet can reach. What is left here is everything that does not move.
  */
 .rotate-button {
   position: absolute;
-  top: -57px;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
   padding: 0;
   border: 1px solid #4a3f28;
   border-radius: 50%;
@@ -2511,18 +2598,10 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 }
 
 .rotate-button svg {
-  width: 15px;
-  height: 15px;
+  width: var(--glyph);
+  height: var(--glyph);
   /* The glyph inherits the button's colour, so hover restyles both at once. */
   fill: currentcolor;
-}
-
-.rotate-button.left {
-  left: -71px;
-}
-
-.rotate-button.right {
-  left: 45px;
 }
 
 .rotate-button:hover {

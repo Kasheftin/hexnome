@@ -86,7 +86,7 @@ Seats work the same way. Claiming one is an `UPDATE … WHERE token IS NULL`, so
 same link cannot both take the chair, and the token that comes back is the only proof of a seat — it
 leaves the server exactly once.
 
-There are **795 tests** across the three packages, most of them in the rules.
+Roughly 800 tests across the three packages, most of them in the rules.
 
 ## Running it
 
