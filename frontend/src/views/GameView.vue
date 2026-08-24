@@ -62,6 +62,7 @@ import {
   createGame,
   draftItems,
   paymentPurse,
+  canUndo,
   replayGame,
   scoreAnchors,
   type Command,
@@ -132,6 +133,7 @@ import {
   roundsOf,
   type GameSettings,
   defaultGameSettings,
+  SOLO,
 } from '@hexnome/rules/gameSettings'
 import { useGameStore } from '@/stores/game'
 import { rememberSheetRead, sheetRead } from '@/composables/readSheets'
@@ -326,7 +328,14 @@ const gameOptions: GameOptions = {
  * a copy of it, extended only by rows that have already been stored.
  */
 const log: Command[] = []
-const state = createGame(gameOptions)
+/*
+ * **Reassigned, not only mutated.** Every turn changes this in place, but an undo cannot: it cancels
+ * commands rather than reversing them, so the position it leaves is a fresh fold of what survives
+ * (`effectiveLog`). Nothing captures this binding — the board, the source and every seat are reached
+ * through `board()`, `boardOf()` and `source()`, which read it when they are called — so swapping the
+ * object is enough and there is nothing left holding the old one.
+ */
+let state = createGame(gameOptions)
 
 /** The log over the wire: what has happened, and the only way to add to it. */
 const sync = useGameSync(gameId.value)
@@ -396,8 +405,21 @@ function absorb(rows: readonly CommandRow[]): void {
   let closed = false
   for (const row of rows) {
     const wasRound = state.round
-    const played = commit(row.command, { tell: false })
-    if (played) awarded.push(...played.awarded)
+    if (row.command.kind === 'undo') {
+      /*
+       * The one row that cannot be applied.
+       *
+       * An undo says which commands stop counting, so the position after it is a fold of what is
+       * left rather than a change to what is here — there is no inverse to run. Cheap by the same
+       * measure the server uses: a few hundred calls against arrays of tens, and the ids come back
+       * identical because the same log mints them, so the scene's views survive it.
+       */
+      log.push(row.command)
+      state = replayGame(gameOptions, log)
+    } else {
+      const played = commit(row.command, { tell: false })
+      if (played) awarded.push(...played.awarded)
+    }
     if (state.round !== wasRound || state.finished) closed = true
     else if (!idles.has(row.command.kind)) closed = false
   }
@@ -1066,10 +1088,44 @@ const turnLabel = computed(() =>
 const watchingLabel = computed(() =>
   seated.value ? null : `Watching ${state.seats[viewedSeat.value]?.name ?? 'the table'}'s board`)
 
-function chooseAction(action: TurnAction): void {
+function chooseAction(action: TurnAction | 'undo'): void {
   if (action === 'take') phase.value = { kind: 'taking', selected: [], inferred: false }
   else if (action === 'put') phase.value = { kind: 'putting' }
+  else if (action === 'undo') takeTurnBack()
   else endRoundByPassing()
+}
+
+/**
+ * Does this game have undo at all — solo, and set up for it?
+ *
+ * Asked of the rules rather than of the settings directly, so the button and the server are reading
+ * one answer. A log with no turn in it still *offers* undo; it just has nothing to take back yet,
+ * which is {@link canTakeBack}'s question.
+ */
+const offersUndo = computed(() => gameOptions.settings.allowUndo && gameOptions.settings.players <= SOLO)
+
+/** Is there a turn to take back right now? The same call the server makes before accepting one. */
+const canTakeBack = computed(() => {
+  void revision.value
+  return canUndo(gameOptions, log)
+})
+
+/**
+ * Take the last turn back.
+ *
+ * Submitted like any other command and applied only from what comes back — an undo is not special on
+ * the way out, only on the way in, where `absorb` re-folds instead of applying. A refusal needs no
+ * handling of its own: nothing was changed here to put back.
+ */
+async function takeTurnBack(): Promise<void> {
+  if (settling.value || !canTakeBack.value) return
+  phase.value = IDLE
+  settling.value = true
+  try {
+    await submitTurn({ kind: 'undo', seat: mySeat.value })
+  } finally {
+    settling.value = false
+  }
 }
 
 /**
@@ -2131,6 +2187,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :anchor-x="drawerLayout.left + drawerLayout.width / 2"
         :anchor-y="drawerLayout.top"
         :turn-label="turnLabel"
+        :offers-undo="offersUndo"
+        :can-undo="canTakeBack"
         @choose="chooseAction"
         @confirm="confirmTake"
         @apply="applyPayment"

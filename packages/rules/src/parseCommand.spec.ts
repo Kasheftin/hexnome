@@ -205,3 +205,23 @@ describe('what it keeps', () => {
     expect(parsed?.kind === 'put' && parsed.to).not.toHaveProperty('extra')
   })
 })
+
+describe('an undo', () => {
+  it('reads as a seat and nothing else', () => {
+    expect(parseCommand({ kind: 'undo', seat: 0 })).toEqual({ kind: 'undo', seat: 0 })
+    expect(parseCommand({ kind: 'undo', seat: 2 })).toEqual({ kind: 'undo', seat: 2 })
+  })
+
+  it('still needs a real seat', () => {
+    expect(parseCommand({ kind: 'undo' })).toBeNull()
+    expect(parseCommand({ kind: 'undo', seat: -1 })).toBeNull()
+    expect(parseCommand({ kind: 'undo', seat: 'me' })).toBeNull()
+  })
+
+  it('ignores any attempt to nominate which turn to take back', () => {
+    // Which turn goes is the log's answer. A client that could name one could reach back for a turn
+    // from an earlier round, or somebody else's.
+    expect(parseCommand({ kind: 'undo', seat: 0, seq: 7, turn: 3 }))
+      .toEqual({ kind: 'undo', seat: 0 })
+  })
+})

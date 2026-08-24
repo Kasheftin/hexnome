@@ -25,6 +25,8 @@ import {
   deskRemaining,
   discardToDesk,
   drawFromDesk,
+  undiscardFromDesk,
+  undrawFromDesk,
   type DeskState,
 } from '../rules/desk'
 import { parseGameSettings } from '../rules/gameSettings'
@@ -106,6 +108,37 @@ export class DeskService {
      */
     if (codes.length > 0) await this.save(id, version, result.value)
     return { id, remaining: deskRemaining(result.value) }
+  }
+
+  /**
+   * Hand a turn's dealings back: the pile batch off the top, then the draw onto the front.
+   *
+   * **Both desks, both directions, one call** — because a half-reversed desk is worse than a refused
+   * undo. The two happen in the reverse of the order a turn played them: `submit` draws its restock
+   * and *then* discards what the turn spent, so taking it back lifts the batch off the pile first.
+   * They commute unless a reshuffle sits between them, and that is exactly the case that must not
+   * quietly half-succeed.
+   *
+   * Refuses rather than forcing. `undrawFromDesk` will not cross a reshuffle it cannot rule out, and
+   * `undiscardFromDesk` will not lift a batch that is no longer on top — see `../rules/desk`. Either
+   * refusal means the bag has moved beyond where this turn left it, and the honest answer is that the
+   * turn cannot be taken back.
+   */
+  async rewind(
+    id: string,
+    { drew, returned }: { drew: readonly number[], returned: readonly number[] },
+  ): Promise<DeskSummary> {
+    const { state, version } = await this.load(id)
+
+    const unpiled = undiscardFromDesk(state, returned)
+    if (!unpiled.ok) throw new ConflictException(unpiled.error)
+
+    const undrawn = undrawFromDesk(unpiled.value, drew)
+    if (!undrawn.ok) throw new ConflictException(undrawn.error)
+
+    // One write for both halves, so the version check adjudicates the whole rewind or none of it.
+    if (drew.length > 0 || returned.length > 0) await this.save(id, version, undrawn.value)
+    return { id, remaining: deskRemaining(undrawn.value) }
   }
 
   private async load(id: string): Promise<{ state: DeskState, version: number }> {

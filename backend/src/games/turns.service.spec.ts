@@ -419,3 +419,137 @@ describe('the end of a game', () => {
       .rejects.toBeInstanceOf(ConflictException)
   })
 })
+
+describe('taking a turn back', () => {
+  /** A solo table, since that is the only shape undo is offered at. */
+  async function soloTable(allowUndo = true): Promise<{ id: string, token: string }> {
+    const made0 = await games.create({
+      settings: { ...settingsFor(SOLO), allowUndo },
+      name: 'Ember',
+    })
+    made.push(made0.game.id)
+    return { id: made0.game.id, token: made0.token }
+  }
+
+  const undo = (seat = 0): PlayerCommand => ({ kind: 'undo', seat })
+
+  /** Both bags as they stand, straight out of the row — there is no read-only route through the service. */
+  async function bags(gameId: string): Promise<{ tiles: unknown, plates: unknown }> {
+    const row = await prisma.game.findUnique({ where: { id: gameId } })
+    const tiles = await prisma.desk.findUnique({ where: { id: row!.tileDeskId! } })
+    const plates = await prisma.desk.findUnique({ where: { id: row!.plateDeskId! } })
+    return { tiles: tiles!.config, plates: plates!.config }
+  }
+
+  it('puts the position back exactly as it was', async () => {
+    const { id, token } = await soloTable()
+    const before = await turns.stateOf(id)
+    const beforeDrawer = before.seats[0]!.tableau.tiles().length
+
+    await turns.submit(id, randomUUID(), await head(id), {
+      kind: 'draft', seat: 0, ids: await sweepTheSource(id),
+    }, token)
+    expect((await turns.stateOf(id)).seats[0]!.tableau.tiles().length).toBeGreaterThan(beforeDrawer)
+
+    await turns.submit(id, randomUUID(), await head(id), undo(), token)
+
+    const after = await turns.stateOf(id)
+    expect(after.seats[0]!.tableau.tiles().length).toBe(beforeDrawer)
+    expect(after.turn).toBe(before.turn)
+    expect(after.round).toBe(before.round)
+  })
+
+  /*
+   * The half a re-fold cannot do. Everything above is derived from the log and would come back on its
+   * own; the bags are mutable rows, and if undo failed to hand them back what the turn took, the
+   * tiles would simply be gone from the game with nothing anywhere to notice.
+   */
+  it('hands both bags back exactly what the turn took from them', async () => {
+    const { id, token } = await soloTable()
+    const before = await bags(id)
+
+    await turns.submit(id, randomUUID(), await head(id), {
+      kind: 'draft', seat: 0, ids: await sweepTheSource(id),
+    }, token)
+    expect(await bags(id)).not.toEqual(before)
+
+    await turns.submit(id, randomUUID(), await head(id), undo(), token)
+    expect(await bags(id)).toEqual(before)
+  })
+
+  /**
+   * The proof that the bag was *rewound* rather than merely emptied.
+   *
+   * A bag that had been drained and refilled from the wrong end would still conserve every tile and
+   * still look right in a census — and would then deal a different lot for the same move. Replaying
+   * the same turn and getting the same restock is what says the order survived.
+   */
+  it('deals the same lot when the same turn is played again', async () => {
+    const { id, token } = await soloTable()
+    const ids = await sweepTheSource(id)
+
+    /*
+     * The *last* deal each time, not every deal in the log. Undo appends rather than deletes, so the
+     * cancelled restock is still a row — which is the point of the design, and would make a count of
+     * every deal grow by one each time round.
+     */
+    const lastDeal = async (): Promise<string | undefined> => {
+      const deals = (await turns.since(id, 0)).commands.filter(row => row.command.kind === 'deal')
+      return deals.length > 0 ? JSON.stringify(deals.at(-1)!.command) : undefined
+    }
+
+    await turns.submit(id, randomUUID(), await head(id), { kind: 'draft', seat: 0, ids }, token)
+    const first = await lastDeal()
+
+    await turns.submit(id, randomUUID(), await head(id), undo(), token)
+    await turns.submit(id, randomUUID(), await head(id), { kind: 'draft', seat: 0, ids }, token)
+
+    expect(await lastDeal()).toEqual(first)
+  })
+
+  it('is appended rather than deleting anything, so a cursor still works', async () => {
+    const { id, token } = await soloTable()
+    await turns.submit(id, randomUUID(), await head(id), {
+      kind: 'draft', seat: 0, ids: await sweepTheSource(id),
+    }, token)
+    const beforeUndo = await turns.since(id, 0)
+
+    await turns.submit(id, randomUUID(), await head(id), undo(), token)
+    const afterUndo = await turns.since(id, 0)
+
+    // Every row that was there is still there, and the undo is one more on the end.
+    expect(afterUndo.commands.length).toBe(beforeUndo.commands.length + 1)
+    expect(afterUndo.commands.slice(0, beforeUndo.commands.length)).toEqual(beforeUndo.commands)
+    expect(afterUndo.commands.at(-1)?.command.kind).toBe('undo')
+  })
+
+  it('refuses when the game was set up without undo', async () => {
+    const { id, token } = await soloTable(false)
+    await turns.submit(id, randomUUID(), await head(id), {
+      kind: 'draft', seat: 0, ids: await sweepTheSource(id),
+    }, token)
+
+    await expect(turns.submit(id, randomUUID(), await head(id), undo(), token))
+      .rejects.toBeInstanceOf(UnprocessableEntityException)
+  })
+
+  it('refuses at a shared table, whatever the settings say', async () => {
+    const shared = await games.create({
+      settings: { ...settingsFor(2), allowUndo: true },
+      name: 'Ember',
+    })
+    made.push(shared.game.id)
+    await games.join(shared.game.id, 'Flux')
+    const id = shared.game.id
+
+    await turns.submit(id, randomUUID(), await head(id), pass(0), shared.token)
+    await expect(turns.submit(id, randomUUID(), await head(id), undo(), shared.token))
+      .rejects.toBeInstanceOf(UnprocessableEntityException)
+  })
+
+  it('refuses before anybody has taken a turn', async () => {
+    const { id, token } = await soloTable()
+    await expect(turns.submit(id, randomUUID(), await head(id), undo(), token))
+      .rejects.toBeInstanceOf(UnprocessableEntityException)
+  })
+})

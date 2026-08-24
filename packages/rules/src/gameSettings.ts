@@ -233,6 +233,19 @@ export const DEFAULT_FINE_UNPLACED = true
 
 /** A point for each stem still held at the end: the mirror of the fine, rewarding what was saved. */
 export const DEFAULT_REWARD_STEMS = true
+
+/**
+ * Undo, **off unless asked for**.
+ *
+ * The opposite default to the switches above, and deliberately so. Those are part of how the game is
+ * scored and a table that never touches them should still play the real game; undo changes what a
+ * turn *is* — a decision you can see the consequences of and take back — so it is a thing a player
+ * opts into rather than one they have to notice and turn off.
+ *
+ * It is also why it stays singleplayer. Over a shared source, one player rewinding a draft everyone
+ * else has already seen is not a mechanic, it is a broken table.
+ */
+export const DEFAULT_ALLOW_UNDO = false
 export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 
 export interface GameSettings {
@@ -285,6 +298,13 @@ export interface GameSettings {
   readonly fineUnplaced: boolean
   /** Pay a point for each stem still in the drawer when the game ends. */
   readonly rewardStems: boolean
+  /**
+   * Let the player take the last turn back. Singleplayer only — see {@link DEFAULT_ALLOW_UNDO}.
+   *
+   * Honoured by `canUndo` in game.ts, which is what both the button and the server ask, so a game
+   * with this off has no undo rather than an undo button that gets refused.
+   */
+  readonly allowUndo: boolean
   /** Epoch milliseconds. Supplied by the caller so this module never reads the clock. */
   readonly createdAt: number
 }
@@ -466,6 +486,7 @@ export function defaultGameSettings(createdAt: number): GameSettings {
     groupBonuses: DEFAULT_GROUP_BONUSES,
     fineUnplaced: DEFAULT_FINE_UNPLACED,
     rewardStems: DEFAULT_REWARD_STEMS,
+    allowUndo: DEFAULT_ALLOW_UNDO,
     createdAt,
   }
 }
@@ -534,6 +555,12 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     // before they existed should play the way a new game does rather than quietly lose them.
     fineUnplaced: raw.fineUnplaced !== false,
     rewardStems: raw.rewardStems !== false,
+    /*
+     * The other way round from the two above, and not a slip. They are on by default, so a blob
+     * written before they existed should keep playing the real game. Undo is off by default, so the
+     * same blob must not silently acquire it — only an explicit `true` turns it on.
+     */
+    allowUndo: raw.allowUndo === true,
     // Normalised on the way in, so nothing downstream has to remember the pairing.
     strictEnclosureBonus: effectiveStrictBonus({
       placementRule,

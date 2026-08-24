@@ -11,7 +11,9 @@ import { boardCells } from '../rules/board'
 import { tileCode, tileFromCode } from '../rules/desk'
 import {
   applyCommand,
+  canUndo,
   needsDeal,
+  planUndo,
   replayGame,
   type Command,
   type GameOptions,
@@ -126,7 +128,13 @@ export class TurnsService {
     if (command.seat !== seat) throw new ForbiddenException(`that command claims seat ${command.seat}`)
 
     const options = this.optionsFor(game.id, game.settings)
-    const state = replayGame(options, await this.log(gameId))
+    const log = await this.log(gameId)
+
+    // An undo cancels commands rather than changing a position, so it does not go through
+    // `applyCommand` at all. Its own path, ending in the same append and the same announcement.
+    if (command.kind === 'undo') return this.takeBack(game, options, log, prevSeq, cmdId, seat)
+
+    const state = replayGame(options, log)
 
     const played = applyCommand(state, command)
     if (!played.ok) throw new UnprocessableEntityException(played.error)
@@ -164,6 +172,67 @@ export class TurnsService {
      * this to one message per rearrangement rather than one per dropped tile.
      */
     await this.announce(gameId)
+    return written
+  }
+
+  /**
+   * Take the last turn back.
+   *
+   * **The desks are the whole of the work.** Everything else undo touches is derived: append the row
+   * and every client's next fold rebuilds the position without being told anything more, because
+   * `effectiveLog` resolves the undo away and the state is only ever the log's meaning. The two bags
+   * are the exception — mutable rows that no fold can reach — so this hands them back exactly what the
+   * cancelled commands took from them and gave them.
+   *
+   * ## The order, which is load-bearing
+   *
+   * The desks are rewound **before** the row is written, and that is deliberate. A rewind can be
+   * refused — the bag may have reshuffled past the point this turn left it — and a refusal has to
+   * leave the game exactly as it was. Writing first would mean a log that says the turn was taken back
+   * and bags that still hold it, which is the one state nothing downstream could repair.
+   *
+   * The cost is the opposite failure: bags rewound and then the append lost to a race. That is the
+   * lesser of the two — it costs a lot's worth of supply and no correctness, which is the same trade
+   * `open()` already makes and says so.
+   */
+  private async takeBack(
+    game: { id: string, tileDeskId: string | null, plateDeskId: string | null },
+    options: GameOptions,
+    log: Command[],
+    prevSeq: number,
+    cmdId: string,
+    seat: number,
+  ): Promise<SubmitResult> {
+    if (!canUndo(options, log)) {
+      throw new UnprocessableEntityException('there is no turn to take back')
+    }
+
+    const plan = planUndo(options, log)
+
+    /*
+     * Both bags, before anything is written. `rewind` refuses rather than forcing, so a bag that has
+     * moved past this turn leaves the game untouched and the player is told the turn is gone.
+     */
+    if (game.tileDeskId) {
+      await this.desks.rewind(game.tileDeskId, {
+        drew: plan.dealt.tiles.map(tileCode),
+        returned: plan.returned.tiles.map(tileCode),
+      })
+    }
+    if (game.plateDeskId) {
+      await this.desks.rewind(game.plateDeskId, {
+        drew: plan.dealt.plates.map(tileCode),
+        returned: plan.returned.plates.map(tileCode),
+      })
+    }
+
+    const written = await this.append(
+      game.id,
+      prevSeq,
+      [{ author: seat, cmdId, command: { kind: 'undo', seat } }],
+      cmdId,
+    )
+    if (!written.duplicate) await this.announce(game.id)
     return written
   }
 

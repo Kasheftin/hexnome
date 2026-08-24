@@ -109,6 +109,14 @@ export const DIAL_TEXT: Readonly<Record<string, DialText>> = {
       + 'through its own tile. Tiles carry between rounds freely; this settles once, for the whole '
       + 'game, so a six you never placed is an expensive thing to have hoarded.',
   },
+  allowUndo: {
+    legend: 'Allow taking a turn back',
+    short: 'undo',
+    hint: 'An Undo button beside Pass, which takes back your last turn — the draft, the placement or '
+      + 'the pass — and puts the tiles back exactly where they were. It reaches back as far as the '
+      + 'start of the round you are in, one turn at a time. Solo only: at a table it would mean '
+      + 'rewinding a source everybody else has already played against.',
+  },
   rewardStems: {
     legend: 'Bonus for stems left over',
     short: 'stem bonus',

@@ -492,6 +492,21 @@ not a privilege when there is nobody to lead.
 The **drawer starts empty**, so the first turn can only be a draft. That is a starting position
 rather than a rule to check — there is simply nothing to place yet.
 
+### Taking a turn back
+
+A solo game may be set up to **allow undo** (off by default). It puts an Undo button beside Pass, which
+takes back the last turn — draft, placement or pass — and restores the position exactly, deck included:
+replaying the same turn deals the same tiles. It reaches back to the **start of the round in progress**,
+one turn at a time, and greys out there; a round that has been scored stays scored.
+
+**Solo only, and the setting does not appear at a table.** The source is shared, so rewinding a draft
+would take back a lot the other players have already played against.
+
+It is off by default where the other switches are on. Those change how a finished board is scored, so a
+table that never touches them still plays the real game; undo changes what a *turn* is — a decision you
+can see the consequences of and take back — which is something to opt into rather than to notice and
+turn off.
+
 > One thing about this is unsettled and worth not losing: whether **pass** is always available or only
 > when you cannot act. See [Open questions](#open-questions).
 

@@ -412,6 +412,55 @@ reaches a client.
 Folding costs nothing worth avoiding — a four-round game is a few hundred commands — and the state is
 re-folded on every submit deliberately, because a cached one is a second copy of the truth.
 
+### Undo, which is a fact about the log
+
+Singleplayer only, off unless the setup asked for it (`allowUndo`), and it reaches back to the start of
+the round in progress, one turn at a time.
+
+**It is appended, never a deletion.** `{ kind: 'undo', seat }` is a row like any other. Deleting the
+rows it cancels was the obvious alternative and does not work here: clients read the log through an
+append-only cursor (`since(cursor)` returns `seq > cursor`), so one holding seq 40 would never learn
+that 38–40 had gone. Deletion would need an epoch on the game and a full reload every time. As a row it
+costs nothing — the chain, the `cmdId` retry path and the unique parent index all keep working, and the
+history survives for the score sheet's `throughRound` replay to walk.
+
+**`effectiveLog(log)` resolves it, and `applyCommand` never sees one.** Each undo cancels the last turn
+still standing and everything appended after it — the deals it caused, any tidying since. Walking
+forwards over a live list is what makes repeated undos fall out for free: the second finds the turn
+before the first, because the first is no longer there to be found. `replayGame` resolves internally, so
+every caller gets undo from one place and none has to remember to ask.
+
+**One gate, asked by both ends.** `canUndo(options, log)` decides whether the button lights and whether
+the server accepts, so an undo a player is offered is one that will be taken.
+
+#### The desks are the whole of the work
+
+Everything else undo touches is derived and comes back on its own. The two bags are mutable rows no fold
+can reach, so `TurnsService.takeBack` hands them exactly what the cancelled commands took and gave:
+`undrawFromDesk` puts the dealt codes back on the front, `undiscardFromDesk` lifts the turn's batch off
+the pile. In the reverse of the order the turn played them — the server draws its restock and *then*
+discards what the turn spent — and **before the row is written**, because a rewind can be refused and a
+refusal has to leave the game exactly as it was. A log saying the turn was taken back while the bags
+still hold it is the one state nothing downstream could repair.
+
+**The reshuffle, and how the desk knows without being told.** A reshuffle consumes the pile whole and
+permutes it, so an undo reaching across one cannot restore the order that was there. Nothing records the
+generation as it stood before a turn, and threading it through the log would be storing a fact to answer
+a question the state can answer itself. Two observations settle it, checked after the batch is lifted
+off the pile: `generation === 0` means no reshuffle has ever happened, and otherwise material still in
+the pile got there *before* this draw — so a non-empty pile proves no reshuffle since, and an empty one
+cannot rule one out and is refused. Conservative in one direction only. In a default game it cannot fire
+at all: 108 tiles against 64 dealt over four rounds, 36 plates against 16.
+
+#### The client re-folds rather than applying
+
+An undo row is the one thing `commit` cannot take, so `absorb` rebuilds: `state = replayGame(options,
+log)`. `state` is therefore a `let`. Nothing captures the binding — the board, the source and every seat
+are reached through `board()`, `boardOf()` and `source()`, which read it when called — so swapping the
+object is enough. The ids come back identical because the same log mints them, which is what lets the
+scene's views survive a wholesale rebuild. Verified rather than assumed: a draft and an undo return a
+**byte-identical frame**, and so do three turns followed by three undos.
+
 ### The client waits, and folds what comes back
 
 `frontend/src/composables/useGameSync.ts` holds a cursor and three calls: `load`, `catchUp`,

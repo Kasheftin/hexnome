@@ -61,6 +61,7 @@ export const ROW_ORDER: readonly string[] = [
   ...Array.from({ length: MAX_GROUP_SIZE - 1 }, (_, index) => bonusKey(index + 2)),
   'fineUnplaced',
   'rewardStems',
+  'allowUndo',
 ]
 
 /** How to read each dial out of a game. The keys are `ROW_ORDER`'s. */
@@ -69,6 +70,7 @@ function valueOf(key: string, s: GameSettings): string {
   if (key === 'plateCopies') return labelled(s.plateCopies, PLATE_COPIES_CHOICES, PLATE_BAG_LABELS)
   if (key === 'fineUnplaced') return s.fineUnplaced ? 'Yes' : 'No'
   if (key === 'rewardStems') return s.rewardStems ? 'Yes' : 'No'
+  if (key === 'allowUndo') return s.allowUndo ? 'Yes' : 'No'
 
   const bonus = /^bonus(\d+)$/.exec(key)
   if (bonus) return String(s.groupBonuses[Number(bonus[1])] ?? 0)

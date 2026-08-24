@@ -9,6 +9,8 @@ import {
   isTileCode,
   tileCode,
   tileFromCode,
+  undiscardFromDesk,
+  undrawFromDesk,
   type DeskState,
 } from './desk'
 import { createRandom, shuffleInPlace } from './random'
@@ -405,5 +407,151 @@ describe('conservation', () => {
     }
 
     expect(state.generation).toBeGreaterThan(0)
+  })
+})
+
+describe('handing the desk back', () => {
+  const options = { copies: 2 }
+
+  function fresh(): DeskState {
+    const built = createDesk('undo-seed', options)
+    if (!built.ok) throw new Error(built.error)
+    return built.value
+  }
+
+  it('puts a draw back exactly as it was', () => {
+    const before = fresh()
+    const drawn = drawFromDesk(before, 5)
+    if (!drawn.ok) throw new Error(drawn.error)
+
+    const back = undrawFromDesk(drawn.value.state, drawn.value.codes)
+    if (!back.ok) throw new Error(back.error)
+    expect(back.value).toEqual(before)
+  })
+
+  it('puts several draws back when they are handed over as one run', () => {
+    const before = fresh()
+    const first = drawFromDesk(before, 1)
+    if (!first.ok) throw new Error(first.error)
+    const second = drawFromDesk(first.value.state, 4)
+    if (!second.ok) throw new Error(second.error)
+
+    // Draw order, which is also the order they came off the front.
+    const codes = [...first.value.codes, ...second.value.codes]
+    const back = undrawFromDesk(second.value.state, codes)
+    if (!back.ok) throw new Error(back.error)
+    expect(back.value).toEqual(before)
+  })
+
+  it('refuses once the bag has reshuffled and the pile is empty again', () => {
+    const state = fresh()
+    // Empty the bag into hands, discard it all, then draw again to force the pile back in.
+    const all = drawFromDesk(state, state.desk.length)
+    if (!all.ok) throw new Error(all.error)
+    const piled = discardToDesk(all.value.state, all.value.codes)
+    if (!piled.ok) throw new Error(piled.error)
+    const after = drawFromDesk(piled.value, 3)
+    if (!after.ok) throw new Error(after.error)
+    expect(after.value.state.generation).toBeGreaterThan(state.generation)
+
+    const back = undrawFromDesk(after.value.state, after.value.codes)
+    expect(back.ok).toBe(false)
+  })
+
+  it('allows it after a reshuffle when the pile proves nothing was lost since', () => {
+    /*
+     * The middle case, and the one the guard exists to get right. The bag has reshuffled at some
+     * point, so `generation` is past zero — but there is material in the pile that got there *after*
+     * that reshuffle, which is only possible if no reshuffle has happened since. The order this undo
+     * would restore is therefore still intact.
+     */
+    const state = fresh()
+    const all = drawFromDesk(state, state.desk.length)
+    if (!all.ok) throw new Error(all.error)
+    const piled = discardToDesk(all.value.state, all.value.codes)
+    if (!piled.ok) throw new Error(piled.error)
+    const reshuffled = drawFromDesk(piled.value, 3)
+    if (!reshuffled.ok) throw new Error(reshuffled.error)
+    expect(reshuffled.value.state.generation).toBeGreaterThan(0)
+
+    // Something lands in the pile after the reshuffle, and now a draw can be taken back.
+    const later = discardToDesk(reshuffled.value.state, reshuffled.value.codes)
+    if (!later.ok) throw new Error(later.error)
+    const drawn = drawFromDesk(later.value, 2)
+    if (!drawn.ok) throw new Error(drawn.error)
+
+    const back = undrawFromDesk(drawn.value.state, drawn.value.codes)
+    if (!back.ok) throw new Error(back.error)
+    expect(back.value).toEqual(later.value)
+  })
+
+  it('will not accept codes the game does not contain', () => {
+    const state = fresh()
+    // Nothing has been drawn, so the bag already holds every copy there is.
+    expect(undrawFromDesk(state, [11]).ok).toBe(false)
+    expect(undrawFromDesk(state, [99]).ok).toBe(false)
+  })
+
+  it('takes a batch back off the pile', () => {
+    const before = fresh()
+    const drawn = drawFromDesk(before, 4)
+    if (!drawn.ok) throw new Error(drawn.error)
+    const piled = discardToDesk(drawn.value.state, drawn.value.codes)
+    if (!piled.ok) throw new Error(piled.error)
+
+    const back = undiscardFromDesk(piled.value, drawn.value.codes)
+    if (!back.ok) throw new Error(back.error)
+    expect(back.value).toEqual(drawn.value.state)
+  })
+
+  it('refuses when its batch is no longer on top', () => {
+    const before = fresh()
+    const drawn = drawFromDesk(before, 6)
+    if (!drawn.ok) throw new Error(drawn.error)
+    const mine = drawn.value.codes.slice(0, 3)
+    const later = drawn.value.codes.slice(3)
+
+    let state = drawn.value.state
+    const first = discardToDesk(state, mine)
+    if (!first.ok) throw new Error(first.error)
+    const second = discardToDesk(first.value, later)
+    if (!second.ok) throw new Error(second.error)
+    state = second.value
+
+    // Somebody else's batch is on top now, so this one cannot be lifted off.
+    expect(undiscardFromDesk(state, mine).ok).toBe(false)
+    // The one that is on top comes off fine.
+    expect(undiscardFromDesk(state, later).ok).toBe(true)
+  })
+
+  it('does nothing for an empty hand back', () => {
+    const state = fresh()
+    expect(undrawFromDesk(state, [])).toEqual({ ok: true, value: state })
+    expect(undiscardFromDesk(state, [])).toEqual({ ok: true, value: state })
+  })
+
+  /*
+   * The order a turn is undone in, which is the reverse of the order it was played in: the server
+   * draws its restock and *then* discards what the turn spent, so undo lifts the batch off the pile
+   * before putting the draw back.
+   */
+  it('reverses a whole turn when applied back to front', () => {
+    // Tiles the player was already holding, drawn in some earlier turn.
+    const hand = drawFromDesk(fresh(), 2)
+    if (!hand.ok) throw new Error(hand.error)
+    const spent = hand.value.codes
+    const atTurn = hand.value.state
+
+    // The turn: the server restocks the source, then puts what the turn spent on the pile.
+    const drawn = drawFromDesk(atTurn, 4)
+    if (!drawn.ok) throw new Error(drawn.error)
+    const played = discardToDesk(drawn.value.state, spent)
+    if (!played.ok) throw new Error(played.error)
+
+    const unpiled = undiscardFromDesk(played.value, spent)
+    if (!unpiled.ok) throw new Error(unpiled.error)
+    const undrawn = undrawFromDesk(unpiled.value, drawn.value.codes)
+    if (!undrawn.ok) throw new Error(undrawn.error)
+    expect(undrawn.value).toEqual(atTurn)
   })
 })

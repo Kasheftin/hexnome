@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { createAgenda } from './agenda'
 import {
   applyCommand,
+  canUndo,
   createGame,
   draftItems,
+  effectiveLog,
   needsDeal,
   paymentPurse,
+  planUndo,
   replayGame,
   type Command,
   type GameOptions,
@@ -1124,5 +1127,218 @@ describe('a refused command', () => {
       expect(applyCommand(state, command)).toMatchObject({ ok: false })
       expect(snapshot(state)).toEqual(before)
     }
+  })
+})
+
+describe('taking a turn back', () => {
+  /** A solo game with undo switched on — the only shape the gate allows. */
+  function solo(overrides: Partial<GameSettings> = {}): GameOptions {
+    return options({
+      kind: 'singleplayer',
+      players: SOLO,
+      playerNames: ['Ember'],
+      allowUndo: true,
+      ...overrides,
+    })
+  }
+
+  const UNDO: Command = { kind: 'undo', seat: 0 }
+
+  /** Deal a lot, then draft one thing from it. The shortest complete turn. */
+  function openingTurn(state: GameState): Command[] {
+    const deal = lot(1)
+    play(state, deal)
+    const draft: Command = { kind: 'draft', seat: 0, ids: [draftItems(state)[0]!.id] }
+    play(state, draft)
+    return [deal, draft]
+  }
+
+  describe('effectiveLog', () => {
+    it('leaves a log with no undos exactly as it is', () => {
+      const log = [lot(1), { kind: 'pass', seat: 0 } as Command]
+      expect(effectiveLog(log)).toEqual(log)
+    })
+
+    it('drops the last turn and the deals behind it', () => {
+      const state = createGame(solo())
+      const [deal, draft] = openingTurn(state)
+      // The restock the turn caused, written in the same breath by the server.
+      const after = lot(2)
+      expect(effectiveLog([deal!, draft!, after, UNDO])).toEqual([deal])
+    })
+
+    it('walks back a turn per undo', () => {
+      const state = createGame(solo())
+      const [deal, draft] = openingTurn(state)
+      // Two undos: the draft goes, then the deal has no turn behind it, so nothing more goes.
+      expect(effectiveLog([deal!, draft!, UNDO, UNDO])).toEqual([deal])
+    })
+
+    it('drops an undo that has nothing to cancel', () => {
+      expect(effectiveLog([UNDO])).toEqual([])
+      expect(effectiveLog([lot(1), UNDO])).toEqual([lot(1)])
+    })
+
+    it('never leaves an undo in the result, so the fold need not know one', () => {
+      const state = createGame(solo())
+      const [deal, draft] = openingTurn(state)
+      const resolved = effectiveLog([deal!, draft!, UNDO])
+      expect(resolved.some(c => c.kind === 'undo')).toBe(false)
+    })
+
+    it('is idempotent, so folding an already-resolved log is safe', () => {
+      const state = createGame(solo())
+      const [deal, draft] = openingTurn(state)
+      const once = effectiveLog([deal!, draft!, UNDO])
+      expect(effectiveLog(once)).toEqual(once)
+    })
+  })
+
+  it('refuses to apply an undo to a state — it is a fact about the log', () => {
+    const state = createGame(solo())
+    const result = applyCommand(state, UNDO)
+    expect(result.ok).toBe(false)
+  })
+
+  /*
+   * The assertion the whole feature rests on. Not "the board looks right" but "the position is the
+   * one that was there before" — every tile, every drawer slot, the turn counter and the hidden
+   * petals included. Anything undo failed to put back shows up here rather than in a score three
+   * rounds later.
+   */
+  it('restores the exact position the turn was played from', () => {
+    const opts = solo()
+    const before = createGame(opts)
+    play(before, lot(1))
+    const beforeTurn = snapshot(before)
+
+    const log: Command[] = [lot(1), { kind: 'draft', seat: 0, ids: [draftItems(before)[0]!.id] }]
+    expect(snapshot(replayGame(opts, [...log, UNDO]))).toEqual(beforeTurn)
+  })
+
+  it('restores it through several undos in a row', () => {
+    const opts = solo()
+    const state = createGame(opts)
+    play(state, lot(1))
+    const beforeAnyTurn = snapshot(state)
+
+    const first = { kind: 'draft', seat: 0, ids: [draftItems(state)[0]!.id] } as Command
+    play(state, first)
+    const second = { kind: 'draft', seat: 0, ids: [draftItems(state)[0]!.id] } as Command
+
+    const log: Command[] = [lot(1), first, second, UNDO, UNDO]
+    expect(snapshot(replayGame(opts, log))).toEqual(beforeAnyTurn)
+  })
+
+  /*
+   * A placement, not a draft. Undo treats every turn kind the same way — it cancels commands rather
+   * than reversing them — but a `put` is the kind that moves a piece onto the *board* and pays for it,
+   * so it is the one where "the position came back" is worth saying out loud rather than assuming from
+   * the draft case.
+   */
+  it('takes a placement back, board and drawer alike', () => {
+    const opts = solo()
+    const state = createGame(opts)
+    play(state, lot(1))
+    const ones = draftItems(state).filter(item => item.value === 1).map(item => item.id)
+    const draft: Command = { kind: 'draft', seat: 0, ids: ones }
+    play(state, draft)
+
+    const seat = state.seats[0]!
+    const held = seat.tableau.tiles().find(tile => tile.location.kind === 'drawer')!
+    const plate = seat.tableau.plates()[0]!
+    const petal = [0, 1, 2, 3, 4, 5].find(p =>
+      seat.tableau.canPlaceTile({ kind: 'onPlate', plateId: plate.id, petal: p }, held.id))!
+    const to = { kind: 'onPlate' as const, plateId: plate.id, petal }
+
+    // The position with the tile in the drawer, before it goes down.
+    const beforePut = snapshot(replayGame(opts, [lot(1), draft]))
+
+    const put: Command = { kind: 'put', seat: 0, item: { kind: 'tile', id: held.id }, to, paying: [] }
+    const placed = replayGame(opts, [lot(1), draft, put])
+    expect(placed.seats[0]!.tableau.tile(held.id)?.location).toEqual(to)
+
+    expect(snapshot(replayGame(opts, [lot(1), draft, put, UNDO]))).toEqual(beforePut)
+  })
+
+  describe('what the desks are owed', () => {
+    it('names the deals to put back on the front', () => {
+      const opts = solo()
+      const state = createGame(opts)
+      const [deal, draft] = openingTurn(state)
+      const restock = lot(2) as Extract<Command, { kind: 'deal' }>
+
+      const plan = planUndo(opts, [deal!, draft!, restock])
+      expect(plan.turn).toEqual(draft)
+      expect(plan.cancelled).toEqual([draft, restock])
+      // The restocked lot goes back to the bags; the lot before the turn stays dealt.
+      expect(plan.dealt.tiles).toEqual(restock.tiles)
+      expect(plan.dealt.plates).toEqual([{ color: restock.plate.color, value: restock.plate.value }])
+    })
+
+    it('strips the petal from a plate going back, because the bag never gave it one', () => {
+      const opts = solo()
+      const state = createGame(opts)
+      const [deal, draft] = openingTurn(state)
+      const plan = planUndo(opts, [deal!, draft!, lot(2)])
+      for (const plate of plan.dealt.plates) {
+        expect(Object.keys(plate).sort()).toEqual(['color', 'value'])
+      }
+    })
+
+    it('has nothing to say about a log with no turn in it', () => {
+      const opts = solo()
+      expect(planUndo(opts, [lot(1)]).turn).toBeNull()
+      expect(planUndo(opts, []).turn).toBeNull()
+    })
+  })
+
+  describe('the gate', () => {
+    it('opens for a solo game with the setting on and a turn played', () => {
+      const opts = solo()
+      const state = createGame(opts)
+      const [deal, draft] = openingTurn(state)
+      expect(canUndo(opts, [deal!, draft!])).toBe(true)
+    })
+
+    it('stays shut when the game was set up without undo', () => {
+      const opts = solo({ allowUndo: false })
+      const state = createGame(opts)
+      const [deal, draft] = openingTurn(state)
+      expect(canUndo(opts, [deal!, draft!])).toBe(false)
+    })
+
+    it('stays shut at a shared table, however the settings read', () => {
+      // A rewind of a draft the others have already seen is not a mechanic.
+      const opts = options({ players: 3, allowUndo: true })
+      const state = createGame(opts)
+      const [deal, draft] = openingTurn(state)
+      expect(canUndo(opts, [deal!, draft!])).toBe(false)
+    })
+
+    it('stays shut before anybody has taken a turn', () => {
+      const opts = solo()
+      expect(canUndo(opts, [])).toBe(false)
+      expect(canUndo(opts, [lot(1)])).toBe(false)
+    })
+
+    /*
+     * The scope, and the only reason `withinRound` exists. Undo reaches back to the start of the round
+     * in progress — so the pass that *closed* a round is out of reach, because its round is over. A
+     * banked score the player has already been shown does not come back.
+     */
+    it('will not reach back past a round it has already closed', () => {
+      const opts = solo()
+      const state = createGame(opts)
+      const [deal, draft] = openingTurn(state)
+      const closing: Command = { kind: 'pass', seat: 0 }
+      play(state, closing)
+
+      const log = [deal!, draft!, closing]
+      // The round moved on, so there is nothing in this one to take back.
+      expect(replayGame(opts, log).round).toBe(2)
+      expect(planUndo(opts, log).withinRound).toBe(false)
+      expect(canUndo(opts, log)).toBe(false)
+    })
   })
 })

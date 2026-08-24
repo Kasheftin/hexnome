@@ -20,13 +20,18 @@ import {
   drawFromDesk,
   tileCode,
   tileFromCode,
+  undiscardFromDesk,
+  undrawFromDesk,
   type DeskState,
 } from './desk'
 import {
   applyCommand,
+  canUndo,
   createGame,
   draftItems,
   needsDeal,
+  planUndo,
+  replayGame,
   type Command,
   type GameOptions,
 } from './game'
@@ -239,5 +244,222 @@ describe('conservation', () => {
       expect(game.census()).toEqual(game.whole)
     }
     expect(game.state.finished).toBe(true)
+  })
+})
+
+/**
+ * Conservation across an undo, which is the one place it can quietly break.
+ *
+ * Everything above drives the state directly; undo cannot be tested that way, because it is not a
+ * change to a state at all — it is a change to the **log**, and the position afterwards is a fresh
+ * fold of what survives. So this harness models what the server actually does: keep a log, fold it for
+ * the position, and drive the two desks alongside it.
+ *
+ * The desks are the whole risk. A re-fold puts the board, the drawers and the source back on its own,
+ * so a bug there shows up immediately and loudly. A bug in handing the bags back does not: the tiles
+ * are simply gone from the game, the position looks perfectly reasonable, and the only symptom is a
+ * deck that runs out early several rounds later.
+ */
+function servedTable({ tileCopies = 3, plateCopies = 1 } = {}) {
+  const settings: GameSettings = {
+    ...defaultGameSettings(0),
+    kind: 'singleplayer',
+    players: 1,
+    tileCopies,
+    plateCopies,
+    allowUndo: true,
+  }
+  const options: GameOptions = {
+    settings,
+    gameId: SEED,
+    cells: hexRectangle(8, 8),
+    sourceTilesPerLot: TILES_PER_LOT,
+    agenda: createAgenda(SEED, settings.mode),
+  }
+
+  function built(tag: string, copies: number, exclude?: readonly number[]): DeskState {
+    const result = createDesk(`${SEED}:${tag}`, { copies, exclude })
+    if (!result.ok) throw new Error(result.error)
+    return result.value
+  }
+
+  let tileDesk = built('tiles', tileCopies)
+  let plateDesk = built('plates', plateCopies, openingPlateCodes(SEED, 1))
+  const log: Command[] = []
+
+  const specOf = (code: number): TileSpec => {
+    const spec = tileFromCode(code)
+    if (!spec) throw new Error(`${code} is not a tile code`)
+    return spec
+  }
+
+  const state = () => replayGame(options, log)
+
+  function discard(which: 'tiles' | 'plates', items: readonly TileSpec[]): void {
+    if (items.length === 0) return
+    const desk = which === 'tiles' ? tileDesk : plateDesk
+    const result = discardToDesk(desk, items.map(tileCode))
+    if (!result.ok) throw new Error(result.error)
+    if (which === 'tiles') tileDesk = result.value
+    else plateDesk = result.value
+  }
+
+  /** Fill the source while it wants filling, drawing from the bags exactly as the server does. */
+  function restock(): void {
+    const live = state()
+    while (needsDeal(live)) {
+      if (deskRemaining(plateDesk) < 1 || deskRemaining(tileDesk) < TILES_PER_LOT) break
+      const plateDraw = drawFromDesk(plateDesk, 1)
+      const tileDraw = drawFromDesk(tileDesk, TILES_PER_LOT)
+      if (!plateDraw.ok || !tileDraw.ok) break
+      plateDesk = plateDraw.value.state
+      tileDesk = tileDraw.value.state
+      const deal: Command = {
+        kind: 'deal',
+        plate: specOf(plateDraw.value.codes[0] as number),
+        tiles: tileDraw.value.codes.map(specOf),
+      }
+      if (!applyCommand(live, deal).ok) break
+      log.push(deal)
+    }
+  }
+
+  /** One turn, the way `TurnsService.submit` does it: apply, restock, then hand back what it spent. */
+  function submit(command: Command): boolean {
+    const played = applyCommand(state(), command)
+    if (!played.ok) return false
+    log.push(command)
+    restock()
+
+    // The pile is the desk's, and the state cannot reach it.
+    discard('tiles', played.toDesk.tiles)
+    discard('plates', played.toDesk.plates)
+    return true
+  }
+
+  // The opening lot, written before anybody plays — `TurnsService.open`. Without it the first turn
+  // would have nothing to draft from, which is exactly what it used to be.
+  restock()
+
+  /** Take the last turn back, rewinding both bags — `TurnsService.takeBack` in miniature. */
+  function undo(): boolean {
+    if (!canUndo(options, log)) return false
+    const plan = planUndo(options, log)
+
+    for (const [which, drew, returned] of [
+      ['tiles', plan.dealt.tiles, plan.returned.tiles],
+      ['plates', plan.dealt.plates, plan.returned.plates],
+    ] as const) {
+      const desk = which === 'tiles' ? tileDesk : plateDesk
+      // The reverse of the order the turn played them: the pile first, then the draw.
+      const unpiled = undiscardFromDesk(desk, returned.map(tileCode))
+      if (!unpiled.ok) throw new Error(unpiled.error)
+      const undrawn = undrawFromDesk(unpiled.value, drew.map(tileCode))
+      if (!undrawn.ok) throw new Error(undrawn.error)
+      if (which === 'tiles') tileDesk = undrawn.value
+      else plateDesk = undrawn.value
+    }
+
+    log.push({ kind: 'undo', seat: 0 })
+    return true
+  }
+
+  function census() {
+    const live = state()
+    const tilesIn = (t: { tiles: () => readonly { fixed: boolean }[] }) =>
+      t.tiles().filter(tile => !tile.fixed).length
+    const platesIn = (t: { plates: () => readonly unknown[] }) => t.plates().length
+
+    let tiles = deskRemaining(tileDesk) + tilesIn(live.source)
+    let plates = deskRemaining(plateDesk) + platesIn(live.source)
+    for (const seat of live.seats) {
+      tiles += tilesIn(seat.tableau)
+      plates += platesIn(seat.tableau)
+    }
+    return { tiles, plates }
+  }
+
+  return {
+    state,
+    submit,
+    undo,
+    census,
+    log,
+    whole: { tiles: DISTINCT_TILES * tileCopies, plates: DISTINCT_TILES * plateCopies },
+    desks: () => ({ tiles: tileDesk, plates: plateDesk }),
+  }
+}
+
+/** A complete draft off whatever is showing, one id per kind. False when nothing can be taken. */
+function sweepServed(game: ReturnType<typeof servedTable>): boolean {
+  const items = draftItems(game.state())
+  for (const value of new Set(items.map(item => item.value))) {
+    const oneEach = new Map<string, string>()
+    for (const item of items) {
+      if (item.value === value) oneEach.set(`${item.color}:${item.value}`, item.id)
+    }
+    if (game.submit({ kind: 'draft', seat: 0, ids: [...oneEach.values()] })) return true
+  }
+  return false
+}
+
+describe('conservation across an undo', () => {
+  it('opens with the whole deck accounted for', () => {
+    const game = servedTable()
+    game.submit({ kind: 'pass', seat: 0 })
+    expect(game.census()).toEqual(game.whole)
+  })
+
+  it('loses nothing when a draft is taken back', () => {
+    const game = servedTable()
+    // An opening lot to draft from.
+    expect(sweepServed(game)).toBe(true)
+    expect(game.census()).toEqual(game.whole)
+
+    expect(game.undo()).toBe(true)
+    expect(game.census()).toEqual(game.whole)
+  })
+
+  it('puts the bags back byte for byte, not merely by count', () => {
+    /*
+     * A count is not enough. A bag drained and refilled from the wrong end conserves every tile and
+     * still deals a different game — which is the failure this whole rewind exists to prevent, and the
+     * one a census cannot see.
+     */
+    const game = servedTable()
+    // A deep copy, since the desks are handed back by reference and the test is about their contents.
+    const before = JSON.parse(JSON.stringify(game.desks())) as unknown
+
+    expect(sweepServed(game)).toBe(true)
+    expect(game.undo()).toBe(true)
+    expect(JSON.parse(JSON.stringify(game.desks()))).toEqual(before)
+  })
+
+  it('holds over a run of turns and undos', () => {
+    const game = servedTable()
+    for (let round = 0; round < 6; round++) {
+      if (!sweepServed(game)) break
+      expect(game.census()).toEqual(game.whole)
+      if (round % 2 === 0) {
+        expect(game.undo()).toBe(true)
+        expect(game.census()).toEqual(game.whole)
+      }
+    }
+    expect(game.census()).toEqual(game.whole)
+  })
+
+  it('leaves the position identical to the one the turn was played from', () => {
+    const game = servedTable()
+    expect(sweepServed(game)).toBe(true)
+    const before = game.census()
+    const beforeState = game.state()
+
+    expect(sweepServed(game)).toBe(true)
+    expect(game.undo()).toBe(true)
+
+    expect(game.census()).toEqual(before)
+    expect(game.state().turn).toBe(beforeState.turn)
+    expect(game.state().seats[0]!.tableau.tiles().length)
+      .toBe(beforeState.seats[0]!.tableau.tiles().length)
   })
 })

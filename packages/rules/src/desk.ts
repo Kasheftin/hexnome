@@ -247,3 +247,85 @@ export function discardToDesk(state: DeskState, codes: readonly number[]): DeskR
 
   return ok({ ...state, discard: [...state.discard, ...inDiscardOrder(codes)] })
 }
+
+/**
+ * Put drawn codes back on the front of the bag: the inverse of {@link drawFromDesk}.
+ *
+ * For undo. The desk is the one part of a game that a re-fold cannot rebuild — the log is the truth
+ * everywhere else, but a bag is a mutable row — so taking a turn back means handing the bag back
+ * exactly what it gave.
+ *
+ * `codes` go on **in draw order**, which is also the order they came off: a draw takes from the front,
+ * so several draws in a row removed one run, and prepending that run whole restores it.
+ *
+ * ## The reshuffle, and how this knows without being told
+ *
+ * A reshuffle empties the pile into the bag and permutes it, and the permutation is one-way — the pile
+ * it consumed no longer exists to be put back. An undo reaching across one cannot restore the order
+ * that was there, and pretending otherwise would silently change every deal that follows.
+ *
+ * The obvious guard is "was the generation the same when the turn was played" — but nothing records
+ * that, and threading it through the log would be storing a fact to answer a question the state can
+ * answer itself. Two observations settle it, and this must be called **after** the turn's batch has
+ * been lifted off the pile:
+ *
+ * - `generation === 0` means no reshuffle has ever happened here, so nothing can have been lost.
+ * - otherwise, material still sitting in the pile got there *before* this draw, because a draw only
+ *   ever reshuffles by consuming the pile whole. So a non-empty pile proves no reshuffle has happened
+ *   since — and an empty one cannot rule one out, so it is refused.
+ *
+ * Conservative in one direction only: it may refuse an undo that would have been safe, in a game whose
+ * bag has already run dry once and whose pile is momentarily empty. It never allows one that is not.
+ *
+ * In a default game it cannot fire at all: 108 tiles against 64 dealt over four rounds, 36 plates
+ * against 16. It becomes reachable only at one copy of each tile, where 36 must cover 64 draws.
+ */
+export function undrawFromDesk(state: DeskState, codes: readonly number[]): DeskResult<DeskState> {
+  if (!Array.isArray(codes)) return fail('codes must be an array')
+  if (codes.length === 0) return ok(state)
+  if (state.generation > 0 && state.discard.length === 0) {
+    return fail('the bag may have been reshuffled since that turn, so its order cannot be restored')
+  }
+
+  const held = new Map<number, number>()
+  const bump = (code: number): number => {
+    const next = (held.get(code) ?? 0) + 1
+    held.set(code, next)
+    return next
+  }
+  for (const code of state.desk) bump(code)
+  for (const code of state.discard) bump(code)
+
+  for (const code of codes) {
+    if (!isTileCode(code)) return fail(`${String(code)} is not a tile code`)
+    // The same guard `discardToDesk` uses, for the same reason: a desk that would hold more of a code
+    // than the game contains is being handed something that was never drawn from it.
+    if (bump(code) > state.copies) return fail(`${code} was never drawn from this desk`)
+  }
+
+  return ok({ ...state, desk: [...codes, ...state.desk] })
+}
+
+/**
+ * Take a whole batch back out of the pile: the inverse of {@link discardToDesk}.
+ *
+ * One command's returns are discarded as one batch, so an undo takes back one batch — the tail of the
+ * pile. Checked rather than assumed: the tail must be exactly the batch being taken back, sorted the
+ * way it landed. That check is what catches an undo arriving after something else has already
+ * discarded, and a reshuffle, without either needing its own case.
+ */
+export function undiscardFromDesk(state: DeskState, codes: readonly number[]): DeskResult<DeskState> {
+  if (!Array.isArray(codes)) return fail('codes must be an array')
+  if (codes.length === 0) return ok(state)
+
+  const want = inDiscardOrder(codes)
+  const at = state.discard.length - want.length
+  if (at < 0) return fail('the pile holds less than that turn returned to it')
+
+  const tail = state.discard.slice(at)
+  if (tail.some((code, i) => code !== want[i])) {
+    return fail('the pile has moved on since that turn, so its batch is no longer on top')
+  }
+
+  return ok({ ...state, discard: state.discard.slice(0, at) })
+}

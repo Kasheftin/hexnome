@@ -51,6 +51,17 @@ const props = defineProps<{
   anchorY: number
   turnLabel: string
   /**
+   * Does this game have undo at all? Solo, and set up for it.
+   *
+   * Separate from {@link canUndo} because the two mean different things to a player. A game without
+   * undo shows no button — a control that can never be pressed is clutter that has to be read and
+   * dismissed every turn. A game with undo shows it greyed when there is nothing to take back, which
+   * says the feature is there and this moment is not it.
+   */
+  offersUndo: boolean
+  /** Is there a turn to take back right now? */
+  canUndo: boolean
+  /**
    * Which board is being watched, for a viewer with no seat — and null for a player.
    *
    * Non-null is what puts the bar in its fourth face. It carries the text rather than a boolean so
@@ -60,7 +71,7 @@ const props = defineProps<{
 }>()
 
 defineEmits<{
-  choose: [action: 'take' | 'put' | 'pass']
+  choose: [action: 'take' | 'put' | 'pass' | 'undo']
   confirm: []
   apply: []
   cancel: []
@@ -161,6 +172,16 @@ const draftSummary = computed(() => {
           @click="$emit('choose', 'pass')"
         >
           Pass
+        </button>
+        <button
+          v-if="offersUndo"
+          type="button"
+          class="action quiet"
+          :disabled="!canUndo"
+          :title="canUndo ? 'Take the last turn back' : 'Nothing to take back this round'"
+          @click="$emit('choose', 'undo')"
+        >
+          Undo
         </button>
       </div>
     </template>

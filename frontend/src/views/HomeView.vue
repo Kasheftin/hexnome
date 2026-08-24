@@ -55,6 +55,7 @@ import {
   DEFAULT_FINE_UNPLACED,
   DEFAULT_GROUP_BONUSES,
   DEFAULT_MIN_GROUP_SIZE,
+  DEFAULT_ALLOW_UNDO,
   DEFAULT_REWARD_STEMS,
   effectiveGroupBonuses,
   effectiveFirstPassFine,
@@ -132,6 +133,7 @@ const minGroupSize = ref<number>(DEFAULT_MIN_GROUP_SIZE)
  */
 const fineUnplaced = ref<number>(DEFAULT_FINE_UNPLACED ? 1 : 0)
 const rewardStems = ref<number>(DEFAULT_REWARD_STEMS ? 1 : 0)
+const allowUndo = ref<number>(DEFAULT_ALLOW_UNDO ? 1 : 0)
 
 /**
  * One ref per group size, rather than one ref holding the table.
@@ -278,6 +280,24 @@ const PASSING_DIALS: readonly Dial[] = [
 ]
 
 /**
+ * The one band that exists only *away* from a table — the mirror of the passing band above.
+ *
+ * Undo rewinds the shared source, so at a table it would take back a lot the others have already
+ * drafted against. The band disappears rather than the dial being disabled inside it, for the same
+ * reason: there is nothing to explain to somebody it can never apply to.
+ */
+const SOLO_DIALS: readonly Dial[] = [
+  {
+    key: 'allowUndo',
+    ...textOf('allowUndo'),
+    choices: SWITCH_CHOICES,
+    labels: SWITCH_LABELS,
+    model: allowUndo,
+    applies: () => kind.value === 'singleplayer',
+  },
+]
+
+/**
  * The only reward for building *wide*.
  *
  * Everything else on this panel pays for tiles, so without these a player is best served by one plate
@@ -363,6 +383,13 @@ const SECTIONS: readonly DialSection[] = [
     dials: PASSING_DIALS,
     note: 'Passing takes you out of the round, not out of the game. The first to go pays the fine and '
       + 'opens the next round.',
+  },
+  {
+    key: 'solo',
+    title: 'Playing alone',
+    dials: SOLO_DIALS,
+    note: 'Undo reaches back to the start of the round you are in, one turn at a time. The deck is '
+      + 'put back as it was, so replaying the same turn deals the same tiles.',
   },
   { key: 'deck', title: 'Deck', dials: DECK_DIALS },
   { key: 'drawer', title: 'Drawer', dials: DRAWER_DIALS },
@@ -556,6 +583,7 @@ async function startGame(): Promise<void> {
     groupBonuses: groupBonuses.value,
     fineUnplaced: fineUnplaced.value === 1,
     rewardStems: rewardStems.value === 1,
+    allowUndo: allowUndo.value === 1,
     createdAt: 0,
   }
 

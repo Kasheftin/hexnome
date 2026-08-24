@@ -154,6 +154,17 @@ export function parseCommand(value: unknown): PlayerCommand | null {
     case 'pass':
       return { kind: 'pass', seat }
 
+    /*
+     * Nothing to read but the seat: an undo names no turn, because "the last one still standing" is
+     * the log's answer and not the client's to offer. A client that could nominate which turn to take
+     * back could take back a turn from three rounds ago, or somebody else's.
+     *
+     * Whether it is *allowed* — solo, the setting on, the turn inside this round — is `canUndo`'s
+     * question, asked by the service against the log. This only says the request has a shape.
+     */
+    case 'undo':
+      return { kind: 'undo', seat }
+
     case 'draft': {
       const taking = ids(raw.ids, MAX_DRAFT)
       return taking === null ? null : { kind: 'draft', seat, ids: taking }

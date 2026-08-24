@@ -54,6 +54,7 @@ const valid = {
   groupBonuses: [0, 0, 0, 0, 0, 5, 7],
   fineUnplaced: false,
   rewardStems: true,
+  allowUndo: false,
   createdAt: 1_700_000_000_000,
 }
 
@@ -357,6 +358,30 @@ describe('the end-of-game switches', () => {
   it('defaults both on for a fresh game', () => {
     const fresh = defaultGameSettings(0)
     expect([fresh.fineUnplaced, fresh.rewardStems]).toEqual([true, true])
+  })
+})
+
+describe('undo, which defaults the other way', () => {
+  /*
+   * The two switches above are on unless turned off, so a record written before they existed keeps
+   * playing the real game. Undo is the opposite: a record that never mentioned it must not acquire it,
+   * because it changes what a turn is rather than how one scores.
+   */
+  it('stays off for a record that predates it', () => {
+    const older: Record<string, unknown> = { ...valid }
+    delete older.allowUndo
+    expect(parseGameSettings(older)?.allowUndo).toBe(false)
+  })
+
+  it('is off for a fresh game', () => {
+    expect(defaultGameSettings(0).allowUndo).toBe(false)
+  })
+
+  it('needs an explicit true, and takes nothing else for one', () => {
+    expect(parseGameSettings({ ...valid, allowUndo: true })?.allowUndo).toBe(true)
+    for (const junk of [1, 'yes', 'true', {}, [], null, undefined, NaN]) {
+      expect(parseGameSettings({ ...valid, allowUndo: junk })?.allowUndo).toBe(false)
+    }
   })
 })
 

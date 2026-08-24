@@ -53,7 +53,7 @@ import {
   type TileLocation,
   type TileSpec,
 } from './tableau'
-import { effectiveFirstPassFine, type GameSettings } from './gameSettings'
+import { effectiveFirstPassFine, SOLO, type GameSettings } from './gameSettings'
 
 /** Where every player's tableau grows from. The board is a rectangle centred here. */
 export const BOARD_CENTRE: Axial = { q: 0, r: 0 }
@@ -210,6 +210,23 @@ export type Command =
     /** Plate id per bay, null for an empty one. */
     readonly bays: readonly (string | null)[]
   }
+  /**
+   * Take the last turn back. Singleplayer only, and only when the settings allow it.
+   *
+   * **Appended, never a deletion.** The log is read by an append-only cursor (`useGameSync.ts`), so a
+   * client holding seq 40 would never learn that 38–40 had been removed; deleting would need an epoch
+   * on the game and a full reload every time. As a row it costs nothing: the chain, the `cmdId` retry
+   * path and `@@unique([gameId, prevSeq])` all keep working, and the history survives for the score
+   * sheet's `throughRound` replay to walk.
+   *
+   * **Resolved by {@link effectiveLog}, not applied.** It cancels commands rather than changing the
+   * board, which is a property of the log and not of a position — so `applyCommand` refuses it and the
+   * fold never sees one. That is what keeps `applyCommand` a pure per-command function.
+   *
+   * Carries a seat for authorization only: the server checks it against the seat token, exactly as it
+   * does for a turn.
+   */
+  | { readonly kind: 'undo', readonly seat: number }
 
 /**
  * A command a **player** may issue: everything except the deal.
@@ -532,6 +549,14 @@ export function applyCommand(state: GameState, command: Command): CommandResult 
     return done()
   }
 
+  /*
+   * An undo is a fact about the **log**, not a move on a board: it cancels commands rather than
+   * changing a position, and {@link effectiveLog} resolves it away before any fold begins. Reaching
+   * here means somebody folded a raw log, and the position that produces is not the one the log means
+   * — so it is refused out loud rather than skipped quietly.
+   */
+  if (command.kind === 'undo') return refuse('an undo is resolved by the log, not applied to a state')
+
   const seat = state.seats[command.seat]
   if (!seat) return refuse(`there is no seat ${command.seat}`)
 
@@ -788,6 +813,78 @@ export interface ReplayOptions {
    * a few points short. Skipping it silently is how that stays hidden, so a caller can ask to hear.
    */
   readonly onRefused?: (command: Command, error: string, at: number) => void
+  /**
+   * Told about every command that *did* apply, and what it did.
+   *
+   * The fold already computes this and then drops it. Undo needs it back: reversing a turn means
+   * knowing what that turn sent to the desk, and the alternative is applying it a second time
+   * somewhere else — a second answer to a question with one right answer.
+   */
+  readonly onApplied?: (step: ReplayStep) => void
+}
+
+/**
+ * What the desks handed over, as the desks think of it.
+ *
+ * A plate is a `TileSpec` here rather than a `PlateSpec` on purpose: a desk is a bag of codes and a
+ * petal is the *state's* — dealt from its own stream, never from the bag (see the `deal` command). So
+ * a plate going back to the desk has no petal to give, and inventing one to satisfy a type would be
+ * writing down a fact that is not true.
+ */
+export interface DeskDrawn {
+  readonly tiles: readonly TileSpec[]
+  readonly plates: readonly TileSpec[]
+}
+
+/** One applied command, and what folding it did. See {@link ReplayOptions.onApplied}. */
+export interface ReplayStep {
+  readonly command: Command
+  /** Index into the **effective** log — undone commands are not in it. */
+  readonly at: number
+  /** The round this was played in. Not the round after: a pass can close one. */
+  readonly roundBefore: number
+  readonly toDesk: DeskReturns
+  readonly awarded: readonly string[]
+}
+
+/** The kinds that are a turn. An `arrange` is tidying and a `deal` is the server's; neither is one. */
+const TURN_KINDS: ReadonlySet<Command['kind']> = new Set(['draft', 'put', 'pass'])
+
+export function isTurn(command: Command): boolean {
+  return TURN_KINDS.has(command.kind)
+}
+
+/**
+ * The log with its undos resolved: what actually counts.
+ *
+ * Each `undo` cancels the last **turn still standing** and everything appended after it — the deals it
+ * caused and any tidying since. Walking forwards and keeping a live list is what makes repeated undos
+ * fall out for free: the second one finds the turn before the first, because the first is no longer in
+ * the list to be found.
+ *
+ * An `undo` with nothing left to cancel is dropped. It cannot arrive from a client — the server
+ * refuses it — and a log that reads as far as it can beats one that throws.
+ *
+ * The undos themselves never survive into the result, which is why `applyCommand` never has to know
+ * what one is.
+ */
+export function effectiveLog(log: readonly Command[]): Command[] {
+  const live: number[] = []
+  for (let at = 0; at < log.length; at++) {
+    const command = log[at]
+    if (!command) continue
+    if (command.kind !== 'undo') {
+      live.push(at)
+      continue
+    }
+    let target = live.length - 1
+    while (target >= 0 && !isTurn(log[live[target] as number] as Command)) target--
+    // Nothing to take back.
+    if (target < 0) continue
+    // Drop that turn and everything after it.
+    live.length = target
+  }
+  return live.map(at => log[at] as Command)
 }
 
 /**
@@ -797,19 +894,122 @@ export interface ReplayOptions {
  * the state it already has, and that is only allowed because it produces the same answer. `game.spec`
  * checks exactly that after every command.
  *
+ * **Undos are resolved here**, so every caller gets them from one place and none has to remember to
+ * ask. Resolving is idempotent, so folding an already-resolved log is safe.
+ *
  * A refused command during a replay is a bug in the log, not in the game, and is skipped rather than
  * thrown — a log that cannot be read at all is worse than one that reads as far as it can.
  */
 export function replayGame(
   options: GameOptions,
   log: readonly Command[],
-  { throughRound, onRefused }: ReplayOptions = {},
+  { throughRound, onRefused, onApplied }: ReplayOptions = {},
 ): GameState {
   const state = createGame(options)
-  log.forEach((command, at) => {
+  effectiveLog(log).forEach((command, at) => {
     if (throughRound !== undefined && (state.round > throughRound || state.finished)) return
+    const roundBefore = state.round
     const result = applyCommand(state, command)
-    if (!result.ok) onRefused?.(command, result.error, at)
+    if (!result.ok) {
+      onRefused?.(command, result.error, at)
+      return
+    }
+    onApplied?.({ command, at, roundBefore, toDesk: result.toDesk, awarded: result.awarded })
   })
   return state
+}
+
+/**
+ * What taking the last turn back would mean.
+ *
+ * Everything the server needs in one fold: which commands stop counting, and what has to be put back
+ * on the desks. The desks are mutable rows outside the log — the one part of this game that a re-fold
+ * cannot fix by itself — so undo has to hand back exactly what those commands took and took back.
+ */
+export interface UndoPlan {
+  /** The turn being taken back, or null when there is nothing to take back. */
+  readonly turn: Command | null
+  /** That turn and everything appended after it, in log order. */
+  readonly cancelled: readonly Command[]
+  /**
+   * What the cancelled commands sent **to** the desks, to be taken back out of the discard pile.
+   *
+   * The turn's payment and, when the turn closed a round, its sweep.
+   */
+  readonly returned: DeskReturns
+  /** What the cancelled deals took **from** the desks, to be put back on the front. */
+  readonly dealt: DeskDrawn
+  /** Is the turn part of the round in progress? Undo does not reach back past a closed round. */
+  readonly withinRound: boolean
+}
+
+const NO_UNDO: UndoPlan = {
+  turn: null,
+  cancelled: [],
+  returned: nothing,
+  dealt: { tiles: [], plates: [] },
+  withinRound: false,
+}
+
+/**
+ * Plan an undo against a log, without taking it.
+ *
+ * One fold answers everything, which is the point: the client asks it to decide whether the button is
+ * live, and the server asks it to decide whether the request is allowed and what to give the desks
+ * back. Two callers, one answer, no chance of them disagreeing about which turn is next to go.
+ */
+export function planUndo(options: GameOptions, log: readonly Command[]): UndoPlan {
+  const effective = effectiveLog(log)
+  const steps: ReplayStep[] = []
+  const state = replayGame(options, effective, { onApplied: step => steps.push(step) })
+
+  let at = steps.length - 1
+  while (at >= 0 && !isTurn((steps[at] as ReplayStep).command)) at--
+  if (at < 0) return NO_UNDO
+
+  const turnStep = steps[at] as ReplayStep
+  const cancelledSteps = steps.slice(at)
+  const tiles: TileSpec[] = []
+  const plates: PlateSpec[] = []
+  const drawnTiles: TileSpec[] = []
+  const drawnPlates: TileSpec[] = []
+
+  for (const step of cancelledSteps) {
+    tiles.push(...step.toDesk.tiles)
+    plates.push(...step.toDesk.plates)
+    if (step.command.kind === 'deal') {
+      drawnTiles.push(...step.command.tiles)
+      // Stripped to what the bag deals. The petal came from the state's stream, not from the desk.
+      drawnPlates.push({ color: step.command.plate.color, value: step.command.plate.value })
+    }
+  }
+
+  return {
+    turn: turnStep.command,
+    cancelled: cancelledSteps.map(step => step.command),
+    returned: { tiles, plates },
+    dealt: { tiles: drawnTiles, plates: drawnPlates },
+    /*
+     * The round the turn was played in, against the round now. A pass that closed a round therefore
+     * fails this: its round is over, and "the round in progress" no longer contains it.
+     */
+    withinRound: !state.finished && turnStep.roundBefore === state.round,
+  }
+}
+
+/**
+ * May a turn be taken back right now?
+ *
+ * **The whole gate, in one place.** The button asks it to decide whether to light up and the server
+ * asks it to decide whether to accept — so an undo the player is offered is one the server will take,
+ * and there is no second copy of the rule to fall out of step with the first.
+ *
+ * Singleplayer only, and only when the game was set up for it: over a shared source, one player
+ * rewinding a draft the others have already seen is not a mechanic.
+ */
+export function canUndo(options: GameOptions, log: readonly Command[]): boolean {
+  if (!options.settings.allowUndo) return false
+  if (options.settings.players > SOLO) return false
+  const plan = planUndo(options, log)
+  return plan.turn !== null && plan.withinRound
 }
