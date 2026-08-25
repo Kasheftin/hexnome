@@ -116,7 +116,6 @@ import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
 import RoundResults from '@/ui/RoundResults.vue'
 import GameSettingsPanel from '@/ui/GameSettingsPanel.vue'
-import HintTip from '@/ui/HintTip.vue'
 import RulesPanel from '@/ui/RulesPanel.vue'
 import NoticePanel from '@/ui/NoticePanel.vue'
 import SourceScroll from '@/ui/SourceScroll.vue'
@@ -2052,19 +2051,17 @@ const ROTATE_ICONS = {
 } as const
 
 /**
- * Their tooltips, switched off where nothing can hover.
+ * Their tooltips. Switched off where nothing can hover — see `:disabled` on the `v-tooltip`s.
  *
- * A tap on a touch screen focuses the button, and `HintTip` opens on focus as well as on hover — so
- * every rotation would leave a bubble hanging until the next tap elsewhere, naming a key the device
- * has not got. Empty text is `HintTip`'s own way of saying "no tooltip", and the buttons' aria-labels
- * carry the same words for anyone reading them aloud.
+ * A tap on a touch screen focuses the button, and a tooltip opens on focus as well as on hover, so
+ * every rotation would otherwise leave a bubble hanging until the next tap elsewhere — naming a key
+ * the device has not got. The buttons' aria-labels carry the same words for anyone reading them
+ * aloud, so nothing is lost by suppressing the bubble.
  */
-const rotateHints = computed(() => (touchPrimary.value
-  ? { counterClockwise: '', clockwise: '' }
-  : {
-      counterClockwise: 'Rotate counter-clockwise (Q while dragging)',
-      clockwise: 'Rotate clockwise (E while dragging)',
-    }))
+const rotateHints = {
+  counterClockwise: 'Rotate counter-clockwise (Q while dragging)',
+  clockwise: 'Rotate clockwise (E while dragging)',
+} as const
 
 /** Key light from the upper left, matching the direction the tile art assumes. */
 const KEY_LIGHT_POSITION = new Vector3(-7, 12, 5)
@@ -2166,46 +2163,44 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       @pointerenter="overButtons = true"
       @pointerleave="overButtons = false"
     >
-      <HintTip
+      <v-tooltip
         :text="rotateHints.counterClockwise"
-        side="below"
+        :disabled="touchPrimary"
+        location="bottom"
       >
-        <button
-          type="button"
-          class="rotate-button"
-          :style="boxStyle(rotateBoxes.left)"
-          aria-label="Rotate plate counter-clockwise"
-          @click="rotate(control.plateId, -1)"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path :d="ROTATE_ICONS.counterClockwise" />
-          </svg>
-        </button>
-      </HintTip>
-      <HintTip
+        <template #activator="{ props: tip }">
+          <v-btn
+            v-bind="tip"
+            :icon="ROTATE_ICONS.counterClockwise"
+            :style="boxStyle(rotateBoxes.left)"
+            :border="false"
+            density="compact"
+            color="primary"
+            class="rotate-button"
+            aria-label="Rotate plate counter-clockwise"
+            @click="rotate(control.plateId, -1)"
+          />
+        </template>
+      </v-tooltip>
+      <v-tooltip
         :text="rotateHints.clockwise"
-        side="below"
+        :disabled="touchPrimary"
+        location="bottom"
       >
-        <button
-          type="button"
-          class="rotate-button"
-          :style="boxStyle(rotateBoxes.right)"
-          aria-label="Rotate plate clockwise"
-          @click="rotate(control.plateId, 1)"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path :d="ROTATE_ICONS.clockwise" />
-          </svg>
-        </button>
-      </HintTip>
+        <template #activator="{ props: tip }">
+          <v-btn
+            v-bind="tip"
+            :icon="ROTATE_ICONS.clockwise"
+            :style="boxStyle(rotateBoxes.right)"
+            :border="false"
+            density="compact"
+            color="primary"
+            class="rotate-button"
+            aria-label="Rotate plate clockwise"
+            @click="rotate(control.plateId, 1)"
+          />
+        </template>
+      </v-tooltip>
     </div>
 
     <NoticePanel
@@ -2289,9 +2284,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
             <v-btn
               v-bind="tip"
               :icon="mdiArrowLeft"
-              :border="false"
-              variant="text"
-              density="comfortable"
+              density="compact"
               color="muted"
               to="/"
               aria-label="Back to the menu"
@@ -2307,9 +2300,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
             <v-btn
               v-bind="tip"
               :icon="mdiHelpCircleOutline"
-              :border="false"
-              variant="text"
-              density="comfortable"
+              density="compact"
               color="muted"
               aria-label="Game rules"
               @click="rulesOpen = true"
@@ -2325,9 +2316,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
             <v-btn
               v-bind="tip"
               :icon="mdiCogOutline"
-              :border="false"
-              variant="text"
-              density="comfortable"
+              density="compact"
               color="muted"
               aria-label="This game's settings"
               @click="gameSettingsOpen = true"
@@ -2391,9 +2380,11 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         class="rule"
         aria-hidden="true"
       />
-      <button
+      <v-btn
         v-if="!scoringOpen && roundTargets.length"
-        type="button"
+        :border="false"
+        density="compact"
+        color="primary"
         class="agenda-strip"
         aria-label="Open the scoring panel"
         @click="setScoringOpen(true)"
@@ -2412,7 +2403,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
           </span>
         </span>
         <span class="earned live">{{ scoreOf(count.round - 1) }}</span>
-      </button>
+      </v-btn>
     </header>
 
     <!--
@@ -2431,22 +2422,23 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         <h2 class="chrome-title">
           Scoring
         </h2>
-        <HintTip text="Shrink this to a strip in the header">
-          <button
-            type="button"
-            class="collapse"
-            aria-label="Close the scoring panel"
-            @click="setScoringOpen(false)"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path :d="mdiChevronDown" />
-            </svg>
-          </button>
-        </HintTip>
+        <v-tooltip
+          text="Shrink this to a strip in the header"
+          location="bottom"
+        >
+          <template #activator="{ props: tip }">
+            <v-btn
+              v-bind="tip"
+              :icon="mdiChevronDown"
+              :border="false"
+              density="compact"
+              color="muted-dim"
+              class="collapse"
+              aria-label="Close the scoring panel"
+              @click="setScoringOpen(false)"
+            />
+          </template>
+        </v-tooltip>
       </div>
       <ol>
         <li
@@ -2505,9 +2497,13 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
           v-for="row in seatRows"
           :key="row.seat"
         >
-          <button
-            type="button"
-            :class="{ active: row.active, viewed: row.viewed }"
+          <v-btn
+            :border="false"
+            :active="row.viewed"
+            :color="row.viewed ? 'primary' : 'muted'"
+            density="comfortable"
+            class="seat-row"
+            :class="{ active: row.active }"
             :aria-pressed="row.viewed"
             @click="viewSeat(row.seat)"
           >
@@ -2550,7 +2546,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
               </template>
               <strong>{{ row.total }}</strong>
             </span>
-          </button>
+          </v-btn>
         </li>
       </ul>
     </section>
@@ -2713,49 +2709,12 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
  * Reuses the header helpers' shape and hover, being the same kind of thing: a quiet control that is
  * there when looked for and does not compete with what it sits beside.
  */
+/*
+ * Nothing but the size. The shape, hover, focus ring and the hairline that used to be a `::before`
+ * are the `v-btn`'s — 40 lines of them, gone.
+ */
 .collapse {
-  position: relative;
-  display: grid;
-  place-items: center;
-  /* 24px like the header's helpers, so the two panels' first rows match and their titles line up. */
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #6b7382;
-  cursor: pointer;
-  transition: color 140ms;
-}
-
-.collapse::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border: 1px solid transparent;
-  border-radius: inherit;
-  pointer-events: none;
-  transition: border-color 140ms;
-}
-
-.collapse svg {
-  width: 16px;
-  height: 16px;
-  fill: currentcolor;
-}
-
-.collapse:hover {
-  color: #e8c878;
-}
-
-.collapse:hover::before {
-  border-color: #33383f;
-}
-
-.collapse:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 1px;
+  flex: none;
 }
 
 /*
@@ -2764,49 +2723,19 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
  * A button rather than a bare row: pressing it is how the panel comes back, and the whole strip is the
  * target — on a phone an icon-sized hit area beside four other controls is the thing everybody misses.
  */
+/*
+ * Sized to its contents rather than to the button's 40px: the chips inside are 23px and the strip has
+ * to sit in a 56px header beside the counters. Everything else — background, hover, focus, radius —
+ * is the button's.
+ */
 .agenda-strip {
-  position: relative;
-  display: flex;
+  height: auto;
+  min-height: 0;
+  padding: 2px 8px;
+}
+
+.agenda-strip :deep(.v-btn__content) {
   gap: 8px;
-  align-items: center;
-  /*
-   * The same 24px as every other control in the header. Its chips are 23px, so they fit with a pixel
-   * to spare and the row height stops depending on what the round happens to be collecting.
-   */
-  height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #e8c878;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  cursor: pointer;
-  transition: background-color 140ms;
-}
-
-.agenda-strip::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border: 1px solid transparent;
-  border-radius: inherit;
-  pointer-events: none;
-  transition: border-color 140ms;
-}
-
-.agenda-strip:hover {
-  background: rgb(232 200 120 / 7%);
-}
-
-.agenda-strip:hover::before {
-  border-color: #33383f;
-}
-
-.agenda-strip:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 1px;
 }
 
 .agenda ol {
@@ -2908,40 +2837,47 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
  * scale the drawer was laid out at and on whether anything can hover — neither of which is a
  * number a stylesheet can reach. What is left here is everything that does not move.
  */
+/*
+ * The rotate handles, sitting *over* the canvas.
+ *
+ * These keep a fill and an edge of their own, unlike every other button in the app, and the reason is
+ * the background: a transparent control over a board of brass plates and coloured tiles is unreadable
+ * whatever colour its glyph is. So they stay opaque discs, and turn mint on hover — the same mint the
+ * board uses for "this is the target".
+ *
+ * `left`, `top`, `width`, `height` and `--glyph` all come from `boxStyle`, which positions them
+ * against the plate they rotate, so the size is not stated here.
+ */
 .rotate-button {
   position: absolute;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid #4a3f28;
+  min-width: 0;
+  border: 1px solid rgb(var(--v-theme-secondary-darken-1));
   border-radius: 50%;
-  background: rgb(14 18 22 / 92%);
-  color: #e8c878;
-  cursor: pointer;
+  background: rgb(var(--v-theme-background) / 92%);
   transition: border-color 120ms, background-color 120ms, transform 120ms;
   pointer-events: auto;
 }
 
-.rotate-button svg {
+/*
+ * `:deep`, because this block is still `scoped` and the icon belongs to the `v-btn` — a scope
+ * attribute cannot reach into a component's own markup. When GameView moves to the `components`
+ * layer this goes away with the scoping.
+ */
+.rotate-button :deep(.v-icon) {
+  font-size: var(--glyph);
   width: var(--glyph);
   height: var(--glyph);
-  /* The glyph inherits the button's colour, so hover restyles both at once. */
-  fill: currentcolor;
 }
 
 .rotate-button:hover {
-  border-color: #8fe6c0;
-  background: rgb(24 34 30 / 96%);
-  color: #8fe6c0;
+  border-color: rgb(var(--v-theme-success));
+  background: rgb(var(--v-theme-background) / 96%);
+  color: rgb(var(--v-theme-success));
 }
 
+/* The press, said in the shortest way there is. */
 .rotate-button:active {
   transform: scale(0.9);
-}
-
-.rotate-button:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
 }
 
 /* ── waiting for the table ─────────────────────────────────────────────────── */
@@ -3020,40 +2956,30 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   list-style: none;
 }
 
-.seats button {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+/*
+ * A seat row: full width, ragged left, sized to its line rather than to a control's 40px.
+ *
+ * `.v-btn__content` needs its width said out loud — it is an inline-flex that shrinks to its text, so
+ * without this the name and its mark bunch in the middle of the row.
+ */
+.seat-row {
   width: 100%;
+  height: auto;
+  min-height: 0;
   padding: 5px 6px;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: transparent;
-  color: #79808f;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
+  justify-content: flex-start;
   text-align: left;
-  cursor: pointer;
 }
 
-.seats button:hover {
-  border-color: #33383f;
-  color: #cfd4de;
+.seat-row :deep(.v-btn__content) {
+  width: 100%;
+  gap: 8px;
+  justify-content: flex-start;
 }
 
 /* Whose turn it is, and which board is on screen: two different facts, so two different marks. */
-.seats button.active .seat-name {
-  color: #cfd4de;
-}
-
-.seats button.viewed {
-  border-color: #3a3222;
-  background: rgb(232 200 120 / 6%);
-}
-
-.seats button.viewed .seat-name {
-  color: #e8c878;
+.seat-row.active .seat-name {
+  color: rgb(var(--v-theme-on-surface));
 }
 
 /*
@@ -3167,8 +3093,4 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   font-weight: inherit;
 }
 
-.seats button:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 1px;
-}
 </style>

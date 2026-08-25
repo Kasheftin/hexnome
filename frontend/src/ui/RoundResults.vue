@@ -223,10 +223,13 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
         class="seat-tabs"
         role="tablist"
       >
-        <button
+        <v-btn
           v-for="tab in props.seats"
           :key="tab.seat"
-          type="button"
+          :border="false"
+          :active="tab.viewed"
+          :color="tab.viewed ? 'primary' : 'muted'"
+          density="comfortable"
           role="tab"
           class="seat-tab"
           :class="{ chosen: tab.viewed }"
@@ -243,7 +246,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
             class="seat-tab-sum"
           >{{ tab.rounds }} + {{ tab.final }} =</span>
           <strong class="seat-tab-total">{{ tab.total }}</strong>
-        </button>
+        </v-btn>
       </div>
 
       <!--
@@ -256,8 +259,10 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
         class="fold"
         :class="{ open: open === record.round }"
       >
-        <button
-          type="button"
+        <v-btn
+          :border="false"
+          variant="text"
+          density="comfortable"
           class="fold-head"
           :aria-expanded="open === record.round"
           :disabled="open === record.round"
@@ -269,7 +274,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           >{{ open === record.round ? '▾' : '▸' }}</span>
           <span class="fold-name">Round {{ record.round }}</span>
           <strong class="fold-score">{{ bankedIn(record) }}</strong>
-        </button>
+        </v-btn>
         <div
           v-if="open === record.round"
           class="fold-body"
@@ -307,8 +312,10 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
         class="fold"
         :class="{ open: open === 'final' }"
       >
-        <button
-          type="button"
+        <v-btn
+          :border="false"
+          variant="text"
+          density="comfortable"
           class="fold-head"
           :aria-expanded="open === 'final'"
           :disabled="open === 'final'"
@@ -320,7 +327,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           >{{ open === 'final' ? '▾' : '▸' }}</span>
           <span class="fold-name">Final scoring</span>
           <strong class="fold-score">{{ props.finalTally.total }}</strong>
-        </button>
+        </v-btn>
         <div
           v-if="open === 'final'"
           class="fold-body"
@@ -350,30 +357,31 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
         </RouterLink>
       </template>
 
-      <button
+      <v-btn
         v-else-if="showingFinal"
-        type="button"
+        color="muted"
         class="action skip"
         @click="finalReveal?.skip()"
       >
         Skip
-      </button>
-      <button
+      </v-btn>
+      <v-btn
         v-else-if="done"
-        type="button"
+        color="success"
+        variant="outlined"
         class="action next"
         @click="advance"
       >
         {{ props.final ? 'Calculate final score' : 'Next round' }}
-      </button>
-      <button
+      </v-btn>
+      <v-btn
         v-else
-        type="button"
+        color="muted"
         class="action skip"
         @click="reveal?.skip()"
       >
         Skip
-      </button>
+      </v-btn>
     </section>
   </div>
 </template>
@@ -529,45 +537,13 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
   line-height: var(--text-base-line);
 }
 
+/* The advance and the way past it; both full width, the colour said by props. */
 .action {
-  display: block;
-  margin-top: 16px;
-  text-align: center;
-  text-decoration: none;
-  padding: 9px 16px;
   width: 100%;
-  border: 1px solid #4a6b58;
-  border-radius: 3px;
-  background: transparent;
-  color: #8fe6c0;
-  font: inherit;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: border-color 140ms, background-color 140ms;
-}
-
-.action:hover {
-  border-color: #8fe6c0;
-  background: rgb(143 230 192 / 8%);
-}
-
-.action:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
+  margin-top: 16px;
 }
 
 /* Quieter than the advance: leaving early is allowed, not encouraged. */
-.skip {
-  border-color: #33383f;
-  color: #79808f;
-}
-
-.skip:hover {
-  border-color: #7d6a41;
-  background: rgb(232 200 120 / 7%);
-  color: #e8c878;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .action {
     transition: none;

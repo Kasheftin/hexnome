@@ -36,14 +36,15 @@ const emit = defineEmits<{ retry: [] }>()
         {{ message }}
       </p>
       <div class="ways">
-        <button
+        <v-btn
           v-if="retryable"
-          type="button"
+          color="primary"
+          variant="outlined"
           class="option"
           @click="emit('retry')"
         >
           <span class="option-label">Try again</span>
-        </button>
+        </v-btn>
         <RouterLink
           to="/"
           class="option"
@@ -124,37 +125,15 @@ h1 {
   gap: 10px;
 }
 
+/* Shares the row with its sibling; everything else is the button. */
 .option {
   flex: 1 1 auto;
-  padding: 12px 14px;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #cfd4de;
-  font: inherit;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 140ms, background-color 140ms, color 140ms;
-}
-
-.option:first-child {
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-.option:hover {
-  background: rgb(232 200 120 / 14%);
 }
 
 .option-label {
   font-size: var(--text-base);
   line-height: var(--text-base-line);
   text-transform: uppercase;
-}
-
-.option:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

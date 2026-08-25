@@ -60,14 +60,15 @@ watch(() => props.notice, async (text) => {
         <p class="said">
           {{ notice }}
         </p>
-        <button
+        <v-btn
           ref="confirm"
-          type="button"
+          color="success"
+          variant="outlined"
           class="action"
           @click="emit('dismiss')"
         >
           Got it
-        </button>
+        </v-btn>
       </section>
     </div>
   </Transition>
@@ -98,28 +99,9 @@ watch(() => props.notice, async (text) => {
 }
 
 /* The same affordance the results panel advances on, so a dismissal reads as a dismissal. */
+/* Full width; the mint edge and its hover are `color="success" variant="outlined"`. */
 .action {
-  display: block;
   width: 100%;
-  padding: 9px 16px;
-  border: 1px solid #4a6b58;
-  border-radius: 3px;
-  background: transparent;
-  color: #8fe6c0;
-  font: inherit;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: border-color 140ms, background-color 140ms;
-}
-
-.action:hover {
-  border-color: #8fe6c0;
-  background: rgb(143 230 192 / 8%);
-}
-
-.action:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
 }
 
 .notice-enter-active,

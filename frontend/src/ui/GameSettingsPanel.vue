@@ -11,6 +11,7 @@
  * through `settingRows`. Neither is written here, so this panel cannot describe a game it is not
  * looking at, or explain a dial differently from the screen that sets it.
  */
+import { mdiClose } from '@mdi/js'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { GameSettings } from '@hexnome/rules/gameSettings'
 import { settingRows } from './gameSettingsRows'
@@ -53,20 +54,15 @@ watch(() => props.open, async (open) => {
           <h2 class="chrome-title">
             This game
           </h2>
-          <button
-            type="button"
+          <v-btn
+            :icon="mdiClose"
+            :border="false"
+            variant="text"
+            density="comfortable"
             class="close"
             aria-label="Close the settings"
             @click="emit('close')"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
+          />
         </header>
 
         <p class="note">
@@ -100,13 +96,15 @@ watch(() => props.open, async (open) => {
         </div>
 
         <footer class="actions">
-          <button
-            type="button"
+          <v-btn
+            color="primary"
+            variant="outlined"
+            block
             class="done"
             @click="emit('close')"
           >
             Done
-          </button>
+          </v-btn>
         </footer>
       </section>
     </div>
@@ -230,26 +228,11 @@ watch(() => props.open, async (open) => {
   border-top: 1px solid #2a2c33;
 }
 
+/* Full width; the brass edge is `color="primary" variant="outlined"`. */
 .done {
-  display: block;
   width: 100%;
-  padding: 9px 16px;
-  border: 1px solid #7d6a41;
-  border-radius: 3px;
-  background: transparent;
-  color: #e8c878;
-  font: inherit;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: border-color 140ms, background-color 140ms;
 }
 
-.done:hover {
-  border-color: #e8c878;
-  background: rgb(232 200 120 / 8%);
-}
-
-.done:focus-visible,
 .sheet:focus-visible {
   outline: 2px solid #8fe6c0;
   outline-offset: 2px;

@@ -152,45 +152,45 @@ const draftSummary = computed(() => {
 
     <!-- Choosing -->
     <template v-else-if="phase.kind === 'idle'">
-      <button
-        type="button"
+      <v-btn
+        color="primary"
+        variant="outlined"
         class="action"
         :disabled="!options.take"
         @click="$emit('choose', 'take')"
       >
         Take
-      </button>
-      <button
-        type="button"
+      </v-btn>
+      <v-btn
+        color="primary"
+        variant="outlined"
         class="action"
         :disabled="!options.put"
         @click="$emit('choose', 'put')"
       >
         Put
-      </button>
-      <button
-        type="button"
-        class="action quiet"
+      </v-btn>
+      <v-btn
+        class="action"
         :disabled="!options.pass"
         @click="$emit('choose', 'pass')"
       >
         Pass
-      </button>
+      </v-btn>
       <span
         v-if="offersUndo"
         class="rule"
         aria-hidden="true"
       />
-      <button
+      <v-btn
         v-if="offersUndo"
-        type="button"
-        class="action quiet"
+        class="action"
         :disabled="!canUndo"
         :title="canUndo ? 'Take the last turn back' : 'Nothing to take back this round'"
         @click="$emit('choose', 'undo')"
       >
         Undo
-      </button>
+      </v-btn>
     </template>
 
     <!-- Drafting -->
@@ -209,34 +209,33 @@ const draftSummary = computed(() => {
         />
       </span>
       <span class="hint">{{ draftSummary }}</span>
-      <button
-        type="button"
+      <v-btn
+        color="primary"
+        variant="outlined"
         class="action"
         :disabled="!canConfirm"
         @click="$emit('confirm')"
       >
         Take
-      </button>
-      <button
-        type="button"
-        class="action quiet"
+      </v-btn>
+      <v-btn
+        class="action"
         @click="$emit('cancel')"
       >
         Cancel
-      </button>
+      </v-btn>
     </template>
 
     <!-- Placing -->
     <template v-else-if="phase.kind === 'putting'">
       <span class="verb">Put</span>
       <span class="hint">drag a plate or tile onto the board</span>
-      <button
-        type="button"
-        class="action quiet"
+      <v-btn
+        class="action"
         @click="$emit('cancel')"
       >
         Cancel
-      </button>
+      </v-btn>
     </template>
 
     <!-- Paying -->
@@ -256,21 +255,21 @@ const draftSummary = computed(() => {
         />
       </span>
       <span class="hint">{{ paySummary }}</span>
-      <button
-        type="button"
+      <v-btn
+        color="primary"
+        variant="outlined"
         class="action"
         :disabled="!canApply"
         @click="$emit('apply')"
       >
         Apply
-      </button>
-      <button
-        type="button"
-        class="action quiet"
+      </v-btn>
+      <v-btn
+        class="action"
         @click="$emit('cancel')"
       >
         Cancel
-      </button>
+      </v-btn>
     </template>
   </div>
 </template>
@@ -301,76 +300,29 @@ const draftSummary = computed(() => {
 
 .turn {
   margin: 0;
-  color: #6b7382;
+  color: rgb(var(--v-theme-muted-dim));
   font-size: var(--text-base);
   line-height: var(--text-base-line);
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-.action {
-  position: relative;
-  padding: 8px 16px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #e8c878;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background-color 140ms, color 140ms;
-}
-
 /*
- * The ring, drawn over the button rather than by it — the house rule, see `.chrome-panel::before`.
+ * What the button does not decide: how tall it is.
  *
- * It matters more here than anywhere: these sit in a row whose height the bar is sized to, so an edge
- * counted as content is an edge that moves the bar.
+ * The bar's height follows this row, and a control four grid steps tall makes the bar taller than the
+ * strip it floats over. Everything else — the brass on brass for a committing move, the slate hairline
+ * on a quiet one, hover, disabled, the focus ring — is now said by the props: `color="primary"
+ * variant="outlined"` for the first, the house default for the rest.
+ *
+ * That is 65 lines of hand-drawn button gone, including the `::before` ring, which mattered most here:
+ * these sit in a row whose height the bar is sized to, so an edge counted as content was an edge that
+ * moved the bar. A `v-btn` has an explicit height, so its border is absorbed rather than added.
  */
-.action::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border: 1px solid #7d6a41;
-  border-radius: inherit;
-  pointer-events: none;
-  transition: border-color 140ms;
-}
-
-.action:hover:not(:disabled) {
-  background: rgb(232 200 120 / 14%);
-}
-
-/* Reuses the mint the board already uses to mean "this is the committing move". */
-.action:not(.quiet):not(:disabled) {
-  color: #8fe6c0;
-}
-
-.action:not(.quiet):not(:disabled)::before {
-  border-color: #8fe6c0;
-}
-
-.action:not(.quiet):hover:not(:disabled) {
-  background: rgb(143 230 192 / 14%);
-}
-
-.action.quiet {
-  color: #cfd4de;
-}
-
-.action.quiet::before {
-  border-color: #33383f;
-}
-
-.action:disabled {
-  color: #575d68;
-  cursor: not-allowed;
-}
-
-.action:disabled::before {
-  border-color: #24272d;
+.action {
+  height: auto;
+  min-height: 0;
+  padding: 8px 16px;
 }
 
 /*
@@ -387,18 +339,18 @@ const draftSummary = computed(() => {
   flex: none;
   width: 0;
   height: 24px;
-  border-left: 1px solid #33383f;
+  border-left: 1px solid rgb(var(--v-theme-border));
 }
 
 .verb {
-  color: #cfd4de;
+  color: rgb(var(--v-theme-on-surface));
   font-size: var(--text-base);
   line-height: var(--text-base-line);
   text-transform: uppercase;
 }
 
 .hint {
-  color: #79808f;
+  color: rgb(var(--v-theme-muted));
   font-size: var(--text-base);
   line-height: var(--text-base-line);
   white-space: nowrap;
@@ -409,14 +361,4 @@ const draftSummary = computed(() => {
   gap: 4px;
 }
 
-:is(.action):focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .action {
-    transition: none;
-  }
-}
 </style>

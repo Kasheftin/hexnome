@@ -140,14 +140,16 @@ async function join(): Promise<void> {
             @keyup.enter="join"
           >
         </label>
-        <button
-          type="button"
+        <v-btn
+          color="primary"
+          variant="outlined"
+          block
           class="option start"
           :disabled="joining"
           @click="join"
         >
           <span class="option-label">{{ joining ? 'Sitting…' : 'Join' }}</span>
-        </button>
+        </v-btn>
       </div>
 
       <p
@@ -178,13 +180,13 @@ async function join(): Promise<void> {
             aria-label="Link to this game"
             @focus="(event) => (event.target as HTMLInputElement).select()"
           >
-          <button
-            type="button"
+          <v-btn
+            density="comfortable"
             class="copy"
             @click="copyLink"
           >
             {{ copied ? 'Copied' : 'Copy' }}
-          </button>
+          </v-btn>
         </div>
       </div>
 
@@ -417,36 +419,15 @@ input:focus-visible {
   color: #e8c878;
 }
 
+/* Only the sizing. `color="primary" variant="outlined"` carries the brass. */
 .option {
   flex: none;
-  padding: 8px 16px;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #cfd4de;
-  font: inherit;
-  cursor: pointer;
-  transition: border-color 140ms, background-color 140ms, color 140ms;
 }
 
 .option-label {
   font-size: var(--text-base);
   line-height: var(--text-base-line);
   text-transform: uppercase;
-}
-
-.option.start {
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-.option.start:hover:not(:disabled) {
-  background: rgb(232 200 120 / 14%);
-}
-
-.option:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 .back {
