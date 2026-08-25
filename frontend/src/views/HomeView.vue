@@ -64,9 +64,16 @@ import {
   PLACEMENT_RULE_HINTS,
   PLACEMENT_RULE_LABELS,
   modeInfo,
+  roundsOf,
   type GameKind,
+  type GameSettings,
   type SingleplayerMode,
 } from '@hexnome/rules/gameSettings'
+import {
+  GAME_PRESETS,
+  presetSettings,
+  type GamePreset,
+} from '@hexnome/rules/presets'
 import {
   DEFAULT_PLACEMENT_RULE,
   isPlacementRule,
@@ -82,7 +89,7 @@ import { playerName, rememberName, suggestName } from '@/composables/playerName'
 import { forgetSetup, rememberSetup, savedSetup, type SavedSetup } from '@/composables/savedSetup'
 import { rememberSeat } from '@/composables/useSeat'
 
-type Step = 'title' | 'setup'
+type Step = 'title' | 'preset' | 'setup'
 
 /** A yes/no dial, as the numbers the dial machinery expects and the words a player should read. */
 const SWITCH_CHOICES: readonly number[] = [0, 1]
@@ -597,10 +604,21 @@ function closeSettings(): void {
 
 function chooseKind(id: GameKind): void {
   kind.value = id
-  step.value = 'setup'
+  step.value = 'preset'
 }
 
+/**
+ * Back one step, not back to the start.
+ *
+ * The preset screen is between the kinds and the dials, so the way out of the dials is the presets —
+ * somebody who opened Custom to look and changed their mind wants the list they came from, not the
+ * front door.
+ */
 function back(): void {
+  if (step.value === 'setup') {
+    step.value = 'preset'
+    return
+  }
   step.value = 'title'
   kind.value = null
 }
@@ -621,14 +639,73 @@ const startProblem = ref('')
  * `waiting`. Reading it off the answer means this screen has no opinion about which kinds have
  * lobbies, and the store would put a wrong guess right anyway (stores/game.ts).
  */
-async function startGame(): Promise<void> {
+async function startGame(chosen?: GameSettings): Promise<void> {
   if (starting.value) return
   starting.value = true
   startProblem.value = ''
 
+  const settings = chosen ?? settingsFromDials()
+
+  try {
+    const claim = await createGame(settings, name.value)
+    /*
+     * Remembered here, after the table exists — "the setup my last game ran with", not "the last
+     * thing I fiddled with". A create that failed leaves the screen exactly as it was, so there is
+     * nothing to recover and nothing worth writing down.
+     */
+    rememberSetup(currentSetup())
+    // Before navigating: the store's first fetch must carry the token, or the creator arrives at
+    // their own table as a spectator.
+    rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
+    const path = claim.game.status === 'waiting' ? '/join' : '/game'
+    await router.push({ path, query: { id: claim.game.id } })
+  } catch (error) {
+    startProblem.value = error instanceof ApiError ? error.message : 'Cannot reach the table.'
+  } finally {
+    starting.value = false
+  }
+}
+
+/** How many are at the table, which a preset needs before it can say what it deals. */
+const seats = computed(() => (kind.value === 'multiplayer' ? playerCount.value : SOLO))
+
+/**
+ * Start one of the named games.
+ *
+ * The preset supplies the rules and this supplies the people: `presetSettings` deliberately says
+ * nothing about who is playing, so the name is added here exactly as the dialled path adds it.
+ */
+function startPreset(preset: GamePreset): void {
+  void startGame({
+    ...presetSettings(preset, seats.value),
+    playerNames: [name.value],
+  })
+}
+
+/**
+ * The cards, with their numbers read off the settings they will actually deal.
+ *
+ * Derived rather than written down: a card claiming "5 plates/round" beside a preset that deals seven
+ * is the one failure this screen can have that a player would not spot until the game was under way.
+ */
+const presetCards = computed(() => GAME_PRESETS.map((preset) => {
+  const settings = presetSettings(preset, seats.value)
+  const rounds = roundsOf(settings.mode)
+  return {
+    preset,
+    summary: [
+      `${rounds} ${rounds === 1 ? 'round' : 'rounds'}`,
+      `${settings.platesPerRound} ${rounds === 1 ? 'plates' : 'plates/round'}`,
+      settings.placementRule === 'strict' ? 'strict' : 'regular',
+    ].join(' · '),
+  }
+}))
+
+/** Everything the dials say, for the custom path. */
+function settingsFromDials(): GameSettings {
   const multiplayer = kind.value === 'multiplayer'
   const players = multiplayer ? playerCount.value : SOLO
-  const settings = {
+  return {
     kind: multiplayer ? 'multiplayer' : 'singleplayer',
     players,
     // Seat 0 is whoever made the game. The rest name themselves as they join.
@@ -657,28 +734,16 @@ async function startGame(): Promise<void> {
     allowUndo: allowUndo.value === 1,
     createdAt: 0,
   }
-
-  try {
-    const claim = await createGame(settings, name.value)
-    /*
-     * Remembered here, after the table exists — "the setup my last game ran with", not "the last
-     * thing I fiddled with". A create that failed leaves the screen exactly as it was, so there is
-     * nothing to recover and nothing worth writing down.
-     */
-    rememberSetup(currentSetup())
-    // Before navigating: the store's first fetch must carry the token, or the creator arrives at
-    // their own table as a spectator.
-    rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
-    const path = claim.game.status === 'waiting' ? '/join' : '/game'
-    await router.push({ path, query: { id: claim.game.id } })
-  } catch (error) {
-    startProblem.value = error instanceof ApiError ? error.message : 'Cannot reach the table.'
-  } finally {
-    starting.value = false
-  }
 }
 
 const selectedMode = computed(() => modeInfo(mode.value))
+
+/** What a screen reader is told the panel is, since all three steps share one card. */
+const PANEL_LABELS: Readonly<Record<Step, string>> = {
+  title: 'Main menu',
+  preset: 'Choose a game',
+  setup: 'Game setup',
+}
 </script>
 
 <template>
@@ -695,7 +760,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
     <div class="hx-menu__column">
       <v-card
         class="hx-panel"
-        :aria-label="step === 'title' ? 'Main menu' : 'Game setup'"
+        :aria-label="PANEL_LABELS[step]"
       >
         <!-- Step 1 -->
         <template v-if="step === 'title'">
@@ -788,6 +853,83 @@ const selectedMode = computed(() => modeInfo(mode.value))
         </template>
 
         <!-- Step 2 -->
+        <template v-else-if="step === 'preset'">
+          <!--
+          The table first, because a preset deals differently to two players than to four and the
+          numbers on the cards below change as it moves. Absent when playing alone, where it would be
+          a control with one setting.
+        -->
+          <fieldset
+            v-if="kind === 'multiplayer'"
+            class="hx-group"
+          >
+            <legend class="hx-group__legend">
+              Players
+            </legend>
+            <v-btn-toggle
+              v-model="playerCount"
+              color="success"
+              base-color="on-surface"
+              variant="text"
+              mandatory
+              class="hx-choices"
+            >
+              <v-btn
+                v-for="count in PLAYER_COUNT_CHOICES"
+                :key="count"
+                :value="count"
+              >
+                {{ count }}
+              </v-btn>
+            </v-btn-toggle>
+          </fieldset>
+
+          <fieldset class="hx-group hx-group--stack">
+            <legend class="hx-group__legend">
+              Game
+            </legend>
+            <v-btn
+              v-for="card in presetCards"
+              :key="card.preset.id"
+              block
+              :disabled="starting"
+              class="hx-option hx-preset"
+              @click="startPreset(card.preset)"
+            >
+              <span class="hx-preset__text">
+                <span class="hx-option__label">{{ card.preset.label }}</span>
+                <span class="hx-preset__note">{{ card.preset.note }}</span>
+                <span class="hx-preset__facts">{{ card.summary }}</span>
+              </span>
+            </v-btn>
+
+            <!--
+            Not a preset, and deliberately not in the list above: the others deal a game, this one
+            opens the dials. Kept in the same group so it reads as the last of the ways to start.
+          -->
+            <v-btn
+              block
+              :disabled="starting"
+              class="hx-option hx-preset"
+              @click="step = 'setup'"
+            >
+              <span class="hx-preset__text">
+                <span class="hx-option__label">Custom</span>
+                <span class="hx-preset__note">Set every rule yourself.</span>
+                <span class="hx-preset__facts">{{ visibleDials.length }} settings</span>
+              </span>
+            </v-btn>
+          </fieldset>
+
+          <p
+            v-if="startProblem"
+            class="hx-panel__problem"
+          >
+            {{ startProblem }}
+          </p>
+        </template>
+
+        <!-- Step 3 -->
         <template v-else>
           <!--
           First, because it is the biggest thing about a table and everything below reads differently
@@ -1284,6 +1426,61 @@ const selectedMode = computed(() => modeInfo(mode.value))
     .v-btn__content {
       width: 100%;
     }
+  }
+
+  /*
+   * A preset card is three stacked lines: what it is called, why you would pick it, and what it
+   * deals.
+   *
+   * **Stacked rather than name-left, numbers-right.** That was the first arrangement and the panel is
+   * 460px wide: the numbers ran off the edge and the reason for picking it was squeezed into a column
+   * four lines tall beside them. Down the card each line gets the full width, and the flavour fits on
+   * one line where it belongs.
+   *
+   * `height: auto` because a `v-btn` is a fixed height by default, and the lines below the first
+   * would otherwise spill out of it.
+   */
+  .hx-preset {
+    height: auto;
+    min-height: 64px;
+    padding-block: 10px;
+
+    /*
+     * `.hx-option` puts `justify-content: flex-start` on the *button*, which was enough while a
+     * `v-spacer` held the two halves apart. With one child left it is the content box that decides,
+     * and its default is `center` — so every card sat centred on its own longest line, and the three
+     * labels started at three different x positions.
+     */
+    .v-btn__content {
+      justify-content: flex-start;
+    }
+  }
+
+  /* Facts, under the flavour: rounds, plates and the placement rule this card will actually deal. */
+  .hx-preset__facts {
+    color: rgb(var(--v-theme-muted));
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .hx-preset__text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .hx-preset__note {
+    color: rgb(var(--v-theme-muted-dim));
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
+    letter-spacing: normal;
+    text-transform: none;
+    white-space: normal;
   }
 
   /*
