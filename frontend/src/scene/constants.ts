@@ -247,15 +247,21 @@ export const PLATE_SLOT_FILL = 0.92
 /** Flush with the header, which `.top` also puts 16px from the left edge. */
 export const SOURCE_LEFT_PX = 16
 /**
- * Clear of the header at its **tallest**, not its shortest.
+ * Air between the header's bottom edge and the top of the column.
  *
- * The header sits 16px down and is 56px tall on a wide screen, but it wraps on a narrow one — and the
- * column's top is a constant, so a value chosen for the unwrapped case put the header straight over
- * lot 0 on a phone. That overlap has been growing all along: 18px when it was first measured, then
- * 54px after the type scale, then 70px once the header's icons went from 24 to 40.
+ * The column's actual top is **measured**, not stated — `scene/headerBox.ts` watches the header and
+ * the layout puts the column this far below wherever it ends. A constant could not work: the header
+ * wraps to two rows on a narrow screen and to three when the scoring panel is closed and its strip
+ * moves up into it, so any single number was wrong in some state. The overlap that caused grew every
+ * time the header gained anything — 18px, then 54px after the type scale, then 70px when its icons
+ * went from 24 to 40.
+ */
+export const SOURCE_HEADER_GAP_PX = 16
+/**
+ * Where the column starts before the header has been measured, which is one frame at most.
  *
- * 104 = 16 above the header + 88 for a header of two rows + 16 of gap below it. A single-row header
- * simply leaves more air above the column, which costs nothing.
+ * 104 = the header's own 16px offset + 88 for two rows + the gap above. Only a seed: a wrong guess
+ * here shows for a frame, where a wrong *constant* showed for the life of the screen.
  */
 export const SOURCE_TOP_PX = 104
 export const SOURCE_PADDING_PX = 9

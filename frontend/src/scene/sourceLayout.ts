@@ -87,6 +87,18 @@ export function createSourceLayout(
   lots: number,
   drawerShape: DrawerShape,
   scroll = 0,
+  /**
+   * Where the column starts, in screen pixels.
+   *
+   * **Measured, not assumed** — `scene/headerBox.ts` watches the header and the caller passes its
+   * bottom edge plus a gap. A constant cannot work here: the header wraps to two rows on a narrow
+   * screen and to three when the scoring strip moves up into it, so any single value is wrong in some
+   * state, and the column ends up under it.
+   *
+   * Defaults to the old constant so the specs — and the first frame, before the observer has fired —
+   * still have an answer.
+   */
+  top = SOURCE_TOP_PX,
 ): SourceLayout {
   const lotCount = Math.max(1, Math.floor(lots))
   /**
@@ -107,7 +119,7 @@ export function createSourceLayout(
     : canvasHeight - SOURCE_BOTTOM_GAP_PX
 
   // Fit the lots to what is left, then let the panel hug them.
-  const available = Math.max(0, bottomLimit - SOURCE_TOP_PX)
+  const available = Math.max(0, bottomLimit - top)
   const forLots = available - SOURCE_PADDING_PX * 2 - SOURCE_LOT_GAP_PX * (lotCount - 1)
   /*
    * Clamp the *width* and re-derive the height from it, so clamping never distorts the aspect.
@@ -139,7 +151,6 @@ export function createSourceLayout(
   const maxScroll = Math.max(0, contentHeight - height)
   const scrollTop = Math.min(maxScroll, Math.max(0, scroll))
   const left = SOURCE_LEFT_PX
-  const top = SOURCE_TOP_PX
 
   const lotsLeft = left + SOURCE_PADDING_PX
   const lotsTop = top + SOURCE_PADDING_PX

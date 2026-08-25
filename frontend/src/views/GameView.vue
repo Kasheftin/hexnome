@@ -128,6 +128,7 @@ import {
   departureMillis,
 } from '@/scene/constants'
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
+import { measureHeader, resetHeaderBox } from '@/scene/headerBox'
 import {
   DEFAULT_FINE_UNPLACED,
   DEFAULT_GROUP_BONUSES,
@@ -1827,6 +1828,27 @@ function applyPayment(): void {
  */
 const DRAFT_SETTLE_MS = 520
 
+/**
+ * The header's own size, watched, so the source column can start below it.
+ *
+ * The column is drawn in the canvas and cannot see the DOM, and the header's height is not a value
+ * anything owns — it is decided by wrapping, which depends on its contents, the font and the viewport
+ * at once. So it is measured and published; see scene/headerBox.ts.
+ */
+const header = shallowRef<HTMLElement | null>(null)
+let unmeasure: (() => void) | null = null
+
+watch(header, (element) => {
+  unmeasure?.()
+  unmeasure = element ? measureHeader(element) : null
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  unmeasure?.()
+  unmeasure = null
+  resetHeaderBox()
+})
+
 /** How long the stems an enclosure paid out are given to come in from the left. */
 const AWARD_SETTLE_MS = 560
 
@@ -2262,7 +2284,10 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       @shown="onCardShown"
     />
 
-    <header class="chrome-panel top">
+    <header
+      ref="header"
+      class="chrome-panel top"
+    >
       <h1 class="chrome-title">
         hexnome
       </h1>

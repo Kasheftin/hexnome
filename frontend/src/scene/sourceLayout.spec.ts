@@ -49,6 +49,44 @@ describe('fitting the lots', () => {
  * The floor is only affordable because the overflow has somewhere to go. These are the properties that
  * make that true — and the last one is what keeps the pieces from lagging behind the scrollbar.
  */
+/*
+ * The column starts below the header, and the header's height is not a constant — it wraps to two
+ * rows on a narrow screen and to three when the scoring strip moves up into it. So the top is passed
+ * in, measured (`scene/headerBox.ts`), and these pin what the layout does with it.
+ */
+describe('starting below the header', () => {
+  it('puts the column where it is told', () => {
+    expect(createSourceLayout(1600, 950, 4, DEFAULT, 0, 88).top).toBe(88)
+    expect(createSourceLayout(1600, 950, 4, DEFAULT, 0, 152).top).toBe(152)
+  })
+
+  it('falls back to the seed when not told', () => {
+    expect(createSourceLayout(1600, 950, 4, DEFAULT).top).toBe(SOURCE_TOP_PX)
+  })
+
+  /*
+   * The height it has to fit into shrinks as the header grows, which is the whole reason the top has
+   * to be measured: a taller header means less room, and the lots have to give way rather than the
+   * column running under the drawer.
+   */
+  it('has less room for lots under a taller header', () => {
+    const high = createSourceLayout(1024, 700, 6, DEFAULT, 0, 88)
+    const low = createSourceLayout(1024, 700, 6, DEFAULT, 0, 200)
+    expect(low.height).toBeLessThan(high.height)
+    expect(low.maxScroll).toBeGreaterThan(high.maxScroll)
+  })
+
+  it('still never reaches the drawer, however low it starts', () => {
+    for (const top of [66, 104, 152, 240]) {
+      for (const shape of [DEFAULT, LARGEST]) {
+        const drawer = createDrawerLayout(1024, 700, shape)
+        const column = createSourceLayout(1024, 700, 6, shape, 0, top)
+        expect(column.top + column.height).toBeLessThanOrEqual(drawer.top - SOURCE_BOTTOM_GAP_PX + 0.5)
+      }
+    }
+  })
+})
+
 describe('scrolling', () => {
   /** A phone held sideways: the case the floor exists for. Six lots at 104px cannot all be shown. */
   const cramped = () => createSourceLayout(844, 390, 6, DEFAULT)
