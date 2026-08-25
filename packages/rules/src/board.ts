@@ -17,8 +17,12 @@ import { hexRectangle, type Axial } from './hex'
  * Half-extent of the board, in cells, measured from the centre.
  *
  * The playfield is a **rectangle** in world space, not a hex disc: 20 cells in every direction comes
- * to 1681 cells. Large enough that, with panning clamped short of the edge, it can never be reached —
- * so the board reads as endless without pretending to be infinite.
+ * to **1661** cells — 41 rows, of which 21 hold 41 cells and 20 hold 40, because offset rows
+ * necessarily alternate length. (It is not 41x41: that would be 1681.)
+ *
+ * Large enough that, with panning clamped short of the edge, it can never be reached — so the board
+ * reads as endless without pretending to be infinite. What a player can actually reach is this inset
+ * by `PAN_MARGIN_CELLS`, which is 2: **37 columns and 37 rows**, 18 out from the centre each way.
  */
 export const BOARD_HALF_COLS = 20
 export const BOARD_HALF_ROWS = 20
