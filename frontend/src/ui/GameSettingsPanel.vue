@@ -11,10 +11,23 @@
  * through `settingRows`. Neither is written here, so this panel cannot describe a game it is not
  * looking at, or explain a dial differently from the screen that sets it.
  */
-import { mdiClose } from '@mdi/js'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed } from 'vue'
 import type { GameSettings } from '@hexnome/rules/gameSettings'
+import SettingsFlyout from './SettingsFlyout.vue'
 import { settingRows } from './gameSettingsRows'
+
+/**
+ * **The shell is `SettingsFlyout`**, the same one the setup screen opens.
+ *
+ * Two panels that are a header, a scrolling body and a pinned Done should not be two implementations
+ * of that — they sit one keypress apart in the same game, and the pair that drifts is the pair nobody
+ * is looking at. Everything this file used to draw for itself — the scrim, the frame, the title row,
+ * the close button, Escape, the focus trap, the transition — belongs to the shell.
+ *
+ * Wider than the shell's default: this is a two-column table whose explanations need room, not a
+ * stack of dials.
+ */
+const WIDTH = 560
 
 const props = defineProps<{
   open: boolean
@@ -24,158 +37,53 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>()
 
-const panel = ref<HTMLElement | null>(null)
 const rows = computed(() => (props.settings ? settingRows(props.settings) : []))
-
-watch(() => props.open, async (open) => {
-  if (!open) return
-  await nextTick()
-  panel.value?.focus()
-})
 </script>
 
 <template>
-  <Transition name="settings">
-    <div
-      v-if="open"
-      class="backdrop"
-      @click.self="emit('close')"
-      @keydown.esc="emit('close')"
-    >
-      <section
-        ref="panel"
-        class="chrome-panel sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label="This game's settings"
-        tabindex="-1"
-      >
-        <header class="head">
-          <h2 class="chrome-title">
-            This game
-          </h2>
-          <v-btn
-            :icon="mdiClose"
-            :border="false"
-            variant="text"
-            density="comfortable"
-            class="close"
-            aria-label="Close the settings"
-            @click="emit('close')"
-          />
-        </header>
+  <SettingsFlyout
+    :open="open"
+    :width="WIDTH"
+    title="This game"
+    @close="emit('close')"
+  >
+    <p class="note">
+      Chosen when the game was made, and fixed for its whole life. Nothing here can be changed.
+    </p>
 
-        <p class="note">
-          Chosen when the game was made, and fixed for its whole life. Nothing here can be changed.
-        </p>
-
-        <div class="body">
-          <table class="rows">
-            <tbody>
-              <tr
-                v-for="row in rows"
-                :key="row.key"
-              >
-                <!--
-                  The explanation sits under the name rather than in a third column: at this width a
-                  three-line sentence beside a two-word label leaves both hard to read.
-                -->
-                <th scope="row">
-                  <span class="name">{{ row.label }}</span>
-                  <span
-                    v-if="row.hint"
-                    class="hint"
-                  >{{ row.hint }}</span>
-                </th>
-                <td class="value">
-                  {{ row.value }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <footer class="actions">
-          <v-btn
-            color="primary"
-            variant="outlined"
-            block
-            class="done"
-            @click="emit('close')"
-          >
-            Done
-          </v-btn>
-        </footer>
-      </section>
-    </div>
-  </Transition>
+    <table class="rows">
+      <tbody>
+        <tr
+          v-for="row in rows"
+          :key="row.key"
+        >
+          <!--
+            The explanation sits under the name rather than in a third column: at this width a
+            three-line sentence beside a two-word label leaves both hard to read.
+          -->
+          <th scope="row">
+            <span class="name">{{ row.label }}</span>
+            <span
+              v-if="row.hint"
+              class="hint"
+            >{{ row.hint }}</span>
+          </th>
+          <td class="value">
+            {{ row.value }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </SettingsFlyout>
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(4 5 8 / 62%);
-  z-index: 60;
-}
-
-.sheet {
-  display: flex;
-  flex-direction: column;
-  width: min(560px, 100%);
-  max-height: min(86vh, 760px);
-  overflow: hidden;
-}
-
-.head {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px 8px;
-}
-
-.close {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: transparent;
-  color: #79808f;
-  cursor: pointer;
-}
-
-.close svg {
-  width: 16px;
-  height: 16px;
-  fill: currentcolor;
-}
-
-.close:hover {
-  border-color: #33383f;
-  color: #cfd4de;
-}
-
+/* The shell's body pads itself, so this only needs the gap to the table below it. */
 .note {
-  flex: none;
-  margin: 0;
-  padding: 0 20px 12px;
-  color: #79808f;
+  margin: 0 0 12px;
+  color: rgb(var(--v-theme-muted));
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-}
-
-.body {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 0 20px 8px;
-  overflow-y: auto;
 }
 
 .rows {
@@ -185,7 +93,7 @@ watch(() => props.open, async (open) => {
 
 .rows th {
   padding: 8px 12px 8px 0;
-  border-top: 1px solid #22252b;
+  border-top: 1px solid rgb(var(--v-theme-surface-bright));
   font-weight: 400;
   text-align: left;
 }
@@ -197,7 +105,7 @@ watch(() => props.open, async (open) => {
 
 .name {
   display: block;
-  color: #cfd4de;
+  color: rgb(var(--v-theme-on-surface));
   font-size: var(--text-base);
   line-height: var(--text-base-line);
 }
@@ -205,15 +113,15 @@ watch(() => props.open, async (open) => {
 .hint {
   display: block;
   margin-top: 2px;
-  color: #6b7382;
+  color: rgb(var(--v-theme-muted-dim));
   font-size: var(--text-base);
   line-height: var(--text-base-line);
 }
 
 .value {
   padding: 8px 0;
-  border-top: 1px solid #22252b;
-  color: #e8c878;
+  border-top: 1px solid rgb(var(--v-theme-surface-bright));
+  color: rgb(var(--v-theme-primary));
   font-size: var(--text-base);
   line-height: var(--text-base-line);
   font-variant-numeric: tabular-nums;
@@ -222,37 +130,4 @@ watch(() => props.open, async (open) => {
   white-space: nowrap;
 }
 
-.actions {
-  flex: none;
-  padding: 12px 20px 18px;
-  border-top: 1px solid #2a2c33;
-}
-
-/* Full width; the brass edge is `color="primary" variant="outlined"`. */
-.done {
-  width: 100%;
-}
-
-.sheet:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
-}
-
-.settings-enter-active,
-.settings-leave-active {
-  transition: opacity 140ms;
-}
-
-.settings-enter-from,
-.settings-leave-to {
-  opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .done,
-  .settings-enter-active,
-  .settings-leave-active {
-    transition: none;
-  }
-}
 </style>

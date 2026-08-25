@@ -2286,6 +2286,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
               :icon="mdiArrowLeft"
               density="compact"
               color="muted"
+              rounded="md"
               to="/"
               aria-label="Back to the menu"
             />
@@ -2302,6 +2303,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
               :icon="mdiHelpCircleOutline"
               density="compact"
               color="muted"
+              rounded="md"
               aria-label="Game rules"
               @click="rulesOpen = true"
             />
@@ -2316,8 +2318,9 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
             <v-btn
               v-bind="tip"
               :icon="mdiCogOutline"
-              density="compact"
               color="muted"
+              density="compact"
+              rounded="md"
               aria-label="This game's settings"
               @click="gameSettingsOpen = true"
             />
@@ -2382,10 +2385,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
       <v-btn
         v-if="!scoringOpen && roundTargets.length"
-        :border="false"
-        density="compact"
-        color="primary"
-        class="agenda-strip"
+        density="comfortable"
+        color="muted"
         aria-label="Open the scoring panel"
         @click="setScoringOpen(true)"
       >
@@ -2433,7 +2434,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
               :border="false"
               density="compact"
               color="muted-dim"
-              class="collapse"
+              rounded="md"
               aria-label="Close the scoring panel"
               @click="setScoringOpen(false)"
             />

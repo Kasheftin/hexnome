@@ -19,17 +19,19 @@
  */
 import { mdiClose } from '@mdi/js'
 
-/**
- * **Width matches a column of the menu behind it** — 460px, the same as each half of the setup
- * screen. The dials in here are the same dials that screen summarises, so a panel of a different
- * width would read as a different kind of thing.
- */
-const WIDTH = 460
-
-defineProps<{
+withDefaults(defineProps<{
   open: boolean
   title: string
-}>()
+  /**
+   * **Defaults to a column of the menu behind it** — 460px, the same as each half of the setup
+   * screen. The dials in there are the same dials that screen summarises, so a panel of a different
+   * width would read as a different kind of thing.
+   *
+   * The in-game readout asks for more, because it is a two-column table rather than a stack of
+   * dials and its explanations need somewhere to sit.
+   */
+  width?: number
+}>(), { width: 460 })
 
 const emit = defineEmits<{ close: [] }>()
 </script>
@@ -45,7 +47,7 @@ const emit = defineEmits<{ close: [] }>()
   -->
   <v-dialog
     :model-value="open"
-    :max-width="WIDTH"
+    :max-width="width"
     scrollable
     :aria-label="title"
     @update:model-value="emit('close')"
