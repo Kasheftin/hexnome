@@ -33,16 +33,50 @@
   $border-width-root: 1px
 );
 
-// **Only global settings can go above, and that is a Vuetify 4 constraint worth knowing.**
+// **Per-component variables are configured by forwarding their own module, one `@forward` each.**
 //
-// `vuetify/styles/settings` forwards `variables`, `colors`, `elevations` and `utilities` — the
-// framework-wide values. Per-component variables like `$button-height` live in each component's own
-// `_variables.scss` (`vuetify/lib/components/VBtn/_variables.scss`), which this `@forward` does not
-// reach and the package's `exports` map does not publish. Setting one here fails the build with
+// `vuetify/styles/settings` above only carries the framework-wide values — `variables`, `colors`,
+// `elevations`, `utilities`. Anything named for a component (`$button-height`, `$tooltip-…`) lives in
+// that component's own `_variables.scss`, and putting it in the block above fails the build with
 // "This variable was not declared with !default in the @used module".
 //
-// Vuetify 3 shipped a `_component-variables.sass` that made them discoverable; version 4 dropped it.
+// Reaching it means naming the file: `vuetify/lib/components/VBtn/variables`. That path is **not** in
+// the package's `exports` map — Sass finds it by falling back to plain filesystem resolution — so it
+// is the one thing here that a Vuetify release could move without it being a breaking change. If a
+// build ever fails on "Can't find stylesheet to import", this is why, and the fix is to follow the
+// file rather than to give up on the setting.
 //
-// So per-component sizing and typography are set at **runtime** instead, through `defaults` in
-// plugins/vuetify.ts, and anything that genuinely needs CSS goes in the `components` layer. That is
-// no worse: `defaults` are per-instance overridable, which SCSS variables are not.
+// Verified rather than assumed: forwarding `$button-disabled-opacity: 0.5` changed `.v-btn--disabled`
+// from `opacity:.26` to `opacity:.5` in the built CSS.
+
+// Buttons.
+//
+// A disabled control still has to be **readable** — it is telling you something exists and is not
+// available yet, which it cannot do at Vuetify's 0.26 against a near-black panel. Quiz Mode was
+// effectively invisible.
+//
+// The height and typography say what the app already decided: base-size text in sentence case, at the
+// 40px that keeps a control four grid steps tall.
+@forward 'vuetify/lib/components/VBtn/variables' with (
+  $button-disabled-opacity: 0.5,
+  $button-height: 40px,
+  $button-font-size: 1rem,
+  $button-font-weight: 500
+);
+
+// Tooltips.
+//
+// Vuetify draws these from `surface-variant`, which in this theme is a near-black slate — so a
+// tooltip arrived the same colour as the panel behind it and was barely there. Set here rather than by
+// moving `surface-variant` in the theme, because that colour is also what `v-chip`, `v-switch`,
+// `v-field`, `v-badge` and `v-snackbar` read; brightening it for the tooltip would have quietly
+// repainted five other components.
+//
+// Light text on a lifted slate, so it reads as something floating above the page rather than part of
+// it — and `$tooltip-font-size` joins the type scale instead of sitting at Vuetify's 0.875rem.
+@forward 'vuetify/lib/components/VTooltip/variables' with (
+  $tooltip-background-color: #2f333c,
+  $tooltip-text-color: #e8e4dc,
+  $tooltip-font-size: 1rem,
+  $tooltip-line-height: 1.5
+);

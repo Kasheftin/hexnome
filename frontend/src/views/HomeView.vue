@@ -668,9 +668,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
                   :icon="mdiDiceMultiple"
                   variant="text"
                   size="small"
-                  density="comfortable"
                   aria-label="Suggest another name"
-                  class="hx-panel__reroll"
                   @click="reroll"
                 />
               </template>
@@ -1044,11 +1042,6 @@ const selectedMode = computed(() => modeInfo(mode.value))
 
   .hx-panel__start {
     margin-top: 4px;
-  }
-
-  /* Nudged in so the die sits on the field's edge rather than floating inside it. */
-  .hx-panel__reroll {
-    margin-inline-end: -4px;
   }
 
   .hx-group {

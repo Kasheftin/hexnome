@@ -26,13 +26,13 @@
  * here. Which entry is lit follows an `IntersectionObserver` over the headings rather than a scroll
  * handler, so it costs nothing while the panel is still.
  */
+import { mdiClose } from '@mdi/js'
 import { nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import type { RulesSection } from './rulesDocument'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
-const panel = ref<HTMLElement | null>(null)
 const body = ref<HTMLElement | null>(null)
 const html = shallowRef('')
 const sections = shallowRef<readonly RulesSection[]>([])
@@ -110,7 +110,6 @@ watch(() => props.open, async (open) => {
   }
   await load()
   await nextTick()
-  panel.value?.focus()
   watchHeadings()
 })
 
@@ -118,393 +117,342 @@ onBeforeUnmount(() => watching?.disconnect())
 </script>
 
 <template>
-  <Transition name="rules">
-    <div
-      v-if="open"
-      class="backdrop"
-      @click.self="emit('close')"
-      @keydown.esc="emit('close')"
-    >
-      <section
-        ref="panel"
-        class="panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Game rules"
-        tabindex="-1"
-      >
-        <header class="head">
-          <h2>Game rules</h2>
-          <button
-            type="button"
-            class="close"
-            aria-label="Close the rules"
-            @click="emit('close')"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
-        </header>
+  <!--
+    A `v-dialog`, which is what removes most of this component.
+    
+    The backdrop, the scrim, Escape, the focus trap, returning focus to whatever opened it and the
+    enter/leave transition were all hand-written here and are all the dialog's job. What is left is
+    the reading pane and its rail — the part that is actually about rules.
 
-        <div class="columns">
-          <!-- Every entry the document offers, in its own order. -->
-          <nav
-            v-if="sections.length"
-            class="rail"
-            aria-label="Sections"
-          >
-            <button
-              v-for="section in sections"
-              :key="section.slug"
-              type="button"
-              class="rail-entry"
-              :class="{ here: section.slug === here }"
-              @click="goTo(section.slug)"
-            >
-              {{ section.title }}
-            </button>
-          </nav>
+    `:model-value` and an emit rather than `v-model`, so the existing `open` / `close` contract with
+    both call sites is untouched by the change of shell.
+  -->
+  <v-dialog
+    :model-value="open"
+    :max-width="920"
+    scrollable
+    aria-label="Game rules"
+    @update:model-value="emit('close')"
+  >
+    <v-card class="hx-rules">
+      <v-card-title class="hx-rules__head">
+        <span class="chrome-title">Game rules</span>
+        <v-spacer />
+        <v-btn
+          :icon="mdiClose"
+          :border="false"
+          variant="text"
+          density="comfortable"
+          aria-label="Close the rules"
+          @click="emit('close')"
+        />
+      </v-card-title>
 
-          <div
-            ref="body"
-            class="body"
+      <v-divider />
+
+      <div class="hx-rules__columns">
+        <!-- Every entry the document offers, in its own order. -->
+        <nav
+          v-if="sections.length"
+          class="hx-rules__rail"
+          aria-label="Sections"
+        >
+          <v-btn
+            v-for="section in sections"
+            :key="section.slug"
+            :border="false"
+            :active="section.slug === here"
+            :color="section.slug === here ? 'primary' : 'muted'"
+            variant="text"
+            class="hx-rules__entry"
+            @click="goTo(section.slug)"
           >
-            <p v-if="failed">
-              The rules could not be loaded. Reloading the page should fix it.
-            </p>
-            <!--
-              Our own markdown, compiled into this bundle by Vite. Sanitising it would be sanitising
-              this repository's own source; the reasoning, and what would have to change if the rules
-              ever came from anywhere else, is on `renderRules`.
-            -->
-            <!-- eslint-disable vue/no-v-html -->
-            <article
-              v-else-if="html"
-              class="prose"
-              v-html="html"
-            />
-            <!-- eslint-enable vue/no-v-html -->
-            <p v-else>
-              Opening the rules…
-            </p>
-          </div>
+            {{ section.title }}
+          </v-btn>
+        </nav>
+
+        <div
+          ref="body"
+          class="hx-rules__body"
+        >
+          <p v-if="failed">
+            The rules could not be loaded. Reloading the page should fix it.
+          </p>
+          <!--
+            Our own markdown, compiled into this bundle by Vite. Sanitising it would be sanitising
+            this repository's own source; the reasoning, and what would have to change if the rules
+            ever came from anywhere else, is on `renderRules`.
+          -->
+          <!-- eslint-disable vue/no-v-html -->
+          <article
+            v-else-if="html"
+            class="prose"
+            v-html="html"
+          />
+          <!-- eslint-enable vue/no-v-html -->
+          <p v-else>
+            Opening the rules…
+          </p>
         </div>
-      </section>
-    </div>
-  </Transition>
+      </div>
+    </v-card>
+  </v-dialog>
 </template>
 
-<style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(4 5 8 / 62%);
-  z-index: 60;
-}
-
-/* Wider than the settings flyout, which holds a column of dials. This holds prose and pictures. */
-.panel {
-  display: flex;
-  flex-direction: column;
-  width: min(920px, 100%);
-  max-height: min(88vh, 820px);
-  overflow: hidden;
-  border: 1px solid #3a3222;
-  border-radius: 4px;
-  background: rgb(21 23 28 / 97%);
-  box-shadow: 0 8px 40px rgb(0 0 0 / 60%);
-}
-
-.panel:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: -2px;
-}
-
-.head {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 22px;
-  border-bottom: 1px solid #2a2c33;
-}
-
-.head h2 {
-  margin: 0;
-  color: #e8c878;
-  font-weight: 600;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-transform: uppercase;
-}
-
-.close {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: transparent;
-  color: #79808f;
-  cursor: pointer;
-}
-
-.close svg {
-  width: 16px;
-  height: 16px;
-  fill: currentcolor;
-}
-
-.close:hover {
-  border-color: #33383f;
-  color: #cfd4de;
-}
-
-.columns {
-  display: flex;
-  min-height: 0;
-  /* The rail scrolls with nothing; only the prose does. */
-  align-items: stretch;
-}
-
-.rail {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: 1px;
-  width: 208px;
-  padding: 14px 10px 20px;
-  overflow-y: auto;
-  border-right: 1px solid #2a2c33;
-}
-
-.rail-entry {
-  padding: 6px 10px;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: transparent;
-  color: #79808f;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-align: left;
-  cursor: pointer;
-  transition: color 140ms, background-color 140ms;
-}
-
-.rail-entry:hover {
-  color: #cfd4de;
-}
-
-.rail-entry.here {
-  background: rgb(232 200 120 / 8%);
-  color: #e8c878;
-}
-
-.rail-entry:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: -2px;
-}
-
-.body {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 6px 26px 28px;
-  overflow-y: auto;
-  color: #cfd4de;
-}
-
-/* ── the rendered document ────────────────────────────────────────────────────── */
-
-.prose {
-  /* A measure, not a width: prose past about 80 characters a line is hard to track back. */
-  max-width: 62ch;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-}
-
-.prose :deep(h1) {
-  margin: 18px 0 6px;
-  color: #e8c878;
-  font-size: var(--text-lg);
-  line-height: var(--text-lg-line);
-}
-
-.prose :deep(h2) {
-  /* Clears the top edge when a rail entry scrolls one into view. */
-  margin: 30px 0 10px;
-  padding-top: 14px;
-  border-top: 1px solid #2a2c33;
-  color: #e8c878;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  scroll-margin-top: 6px;
-}
-
-.prose :deep(h3) {
-  margin: 20px 0 6px;
-  color: #cfd4de;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-}
-
-.prose :deep(p),
-.prose :deep(ul),
-.prose :deep(ol) {
-  margin: 0 0 12px;
-}
-
-.prose :deep(ul),
-.prose :deep(ol) {
-  padding-left: 20px;
-}
-
-.prose :deep(li) {
-  margin-bottom: 5px;
-}
-
-.prose :deep(strong) {
-  color: #e8e4dc;
-  font-weight: 600;
-}
-
-.prose :deep(em) {
-  color: #cfd4de;
-}
+<style lang="scss">
+@use '@/styles/mixins.import' as *;
 
 /*
- * Dense material, deliberately one step down.
- *
- * A three-column rules table is 334px wide at the base size against a 278px column on a phone — it
- * overflowed. Tables and inline code are what the small tier is *for*: they are scanned rather than
- * read, and they are the one place where fitting the width matters more than matching the body.
+ * Not `scoped`. A scoped style stamps every selector with a `[data-v-…]` attribute, which raises its
+ * specificity — the one thing cascade layers exist to make irrelevant. Unscoped inside `components`,
+ * a plain `.prose h2` already wins, and `` stops being needed at all: it existed only to reach
+ * past the scope attribute into `v-html` output, which has no scope id of its own.
  */
-.prose :deep(code) {
-  padding: 1px 4px;
-  border-radius: 2px;
-  background: rgb(255 255 255 / 6%);
-  color: #e8c878;
-  font-size: var(--text-sm);
-  line-height: var(--text-sm-line);
-}
-
-.prose :deep(a) {
-  color: #8fe6c0;
-}
-
-.prose :deep(img) {
-  display: block;
-  max-width: 100%;
-  margin: 14px 0;
-  border: 1px solid #2a2c33;
-  border-radius: 3px;
-}
-
-/*
- * A symbol in a table cell, shown the way the game shows it: on a tile.
- *
- * The art is dark brown on transparency — it is drawn to sit on a coloured tile face, and against
- * this panel it would be very nearly invisible. So the cell supplies the face. One warm neutral for
- * all six rather than the six tile colours, because colour and value are independent in this game and
- * a coloured-per-row table would teach a pairing that does not exist.
- */
-.prose :deep(td:first-child) {
-  width: 46px;
-  padding: 5px 10px 5px 0;
-}
-
-.prose :deep(td:first-child img) {
-  width: 36px;
-  height: 45px;
-  margin: 0;
-  padding: 3px;
-  border: 1px solid #7d6a41;
-  border-radius: 3px;
-  background: #c8a86d;
-  object-fit: contain;
-}
-
-.prose :deep(blockquote) {
-  margin: 0 0 12px;
-  padding: 2px 0 2px 14px;
-  border-left: 2px solid #3a3222;
-  color: #9aa1ad;
-}
-
-.prose :deep(table) {
-  width: 100%;
-  margin: 0 0 14px;
-  border-collapse: collapse;
-  font-size: var(--text-sm);
-  line-height: var(--text-sm-line);
-}
-
-.prose :deep(th),
-.prose :deep(td) {
-  padding: 6px 10px;
-  border-bottom: 1px solid #2a2c33;
-  text-align: left;
-}
-
-.prose :deep(th) {
-  color: #79808f;
-  font-weight: 500;
-  text-transform: uppercase;
-}
-
-.prose :deep(hr) {
-  margin: 22px 0;
-  border: 0;
-  border-top: 1px solid #2a2c33;
-}
-
-/*
- * Narrow: the rail goes above the prose rather than squeezing it. A 208px column against a phone
- * leaves the text about twenty characters wide, which is unreadable in a way no styling fixes.
- */
-@media (width <= 700px) {
-  .columns {
+@layer components {
+  /*
+   * What the dialog does not do.
+   *
+   * The backdrop, the panel's own frame, the header row, the close button and the focus ring are all
+   * gone: `v-dialog` and `v-card` draw them, and Escape, the focus trap and returning focus to the
+   * opener come with them. Left here are the reading pane's two columns, which are layout, and the
+   * rendered document below, which is the actual subject.
+   */
+  .hx-rules {
+    display: flex;
     flex-direction: column;
-  }
-
-  .rail {
-    flex-direction: row;
-    width: auto;
-    overflow-x: auto;
-    border-right: none;
-    border-bottom: 1px solid #2a2c33;
-  }
-
-  .rail-entry {
-    white-space: nowrap;
-  }
+    max-height: min(88vh, 820px);
+    overflow: hidden;
 }
 
-.rules-enter-active,
-.rules-leave-active {
-  transition: opacity 160ms;
+  .hx-rules__head {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
 }
 
-.rules-enter-from,
-.rules-leave-to {
-  opacity: 0;
+  .hx-rules__columns {
+    display: flex;
+    min-height: 0;
+    /* The rail scrolls with nothing; only the prose does. */
+    align-items: stretch;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .rail-entry,
+  .hx-rules__rail {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 1px;
+    width: 208px;
+    padding: 14px 10px 20px;
+    overflow-y: auto;
+    border-right: thin solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+  /* Entries read as a list, not as a column of buttons: ragged left, full width, no frame. */
+  .hx-rules__entry {
+    justify-content: flex-start;
+    height: auto;
+    min-height: 32px;
+    padding: 6px 10px;
+    text-align: left;
+
+    .v-btn__content {
+      width: 100%;
+      justify-content: flex-start;
+      white-space: normal;
+    }
+}
+
+  .hx-rules__body {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 6px 26px 28px;
+    overflow-y: auto;
+}
+
+  /* ── the rendered document ────────────────────────────────────────────────────── */
+
+  .prose {
+    /* A measure, not a width: prose past about 80 characters a line is hard to track back. */
+    max-width: 62ch;
+    font-size: var(--text-base);
+    line-height: var(--text-base-line);
+}
+
+  .prose h1 {
+    margin: 18px 0 6px;
+    color: rgb(var(--v-theme-primary));
+    font-size: var(--text-lg);
+    line-height: var(--text-lg-line);
+}
+
+  .prose h2 {
+    /* Clears the top edge when a rail entry scrolls one into view. */
+    margin: 30px 0 10px;
+    padding-top: 14px;
+    border-top: 1px solid rgb(var(--v-theme-divider));
+    color: rgb(var(--v-theme-primary));
+    font-size: var(--text-base);
+    line-height: var(--text-base-line);
+    scroll-margin-top: 6px;
+}
+
+  .prose h3 {
+    margin: 20px 0 6px;
+    color: rgb(var(--v-theme-on-surface));
+    font-size: var(--text-base);
+    line-height: var(--text-base-line);
+}
+
+  .prose p,
+  .prose ul,
+  .prose ol {
+    margin: 0 0 12px;
+}
+
+  .prose ul,
+  .prose ol {
+    padding-left: 20px;
+}
+
+  .prose li {
+    margin-bottom: 5px;
+}
+
+  .prose strong {
+    color: rgb(var(--v-theme-on-surface));
+    font-weight: 600;
+}
+
+  .prose em {
+    color: rgb(var(--v-theme-on-surface));
+}
+
+  /*
+   * Dense material, deliberately one step down.
+   *
+   * A three-column rules table is 334px wide at the base size against a 278px column on a phone — it
+   * overflowed. Tables and inline code are what the small tier is *for*: they are scanned rather than
+   * read, and they are the one place where fitting the width matters more than matching the body.
+   */
+  .prose code {
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: rgb(255 255 255 / 6%);
+    color: rgb(var(--v-theme-primary));
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
+}
+
+  .prose a {
+    color: rgb(var(--v-theme-success));
+}
+
+  .prose img {
+    display: block;
+    max-width: 100%;
+    margin: 14px 0;
+    border: 1px solid rgb(var(--v-theme-divider));
+    border-radius: 3px;
+}
+
+  /*
+   * A symbol in a table cell, shown the way the game shows it: on a tile.
+   *
+   * The art is dark brown on transparency — it is drawn to sit on a coloured tile face, and against
+   * this panel it would be very nearly invisible. So the cell supplies the face. One warm neutral for
+   * all six rather than the six tile colours, because colour and value are independent in this game and
+   * a coloured-per-row table would teach a pairing that does not exist.
+   */
+  .prose td:first-child {
+    width: 46px;
+    padding: 5px 10px 5px 0;
+}
+
+  .prose td:first-child img {
+    width: 36px;
+    height: 45px;
+    margin: 0;
+    padding: 3px;
+    border: 1px solid rgb(var(--v-theme-secondary));
+    border-radius: 3px;
+    background: rgb(var(--v-theme-primary-darken-1));
+    object-fit: contain;
+}
+
+  .prose blockquote {
+    margin: 0 0 12px;
+    padding: 2px 0 2px 14px;
+    border-left: 2px solid rgb(var(--v-theme-border-brass));
+    color: rgb(var(--v-theme-muted));
+}
+
+  .prose table {
+    width: 100%;
+    margin: 0 0 14px;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
+}
+
+  .prose th,
+  .prose td {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgb(var(--v-theme-divider));
+    text-align: left;
+}
+
+  .prose th {
+    color: rgb(var(--v-theme-muted));
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+  .prose hr {
+    margin: 22px 0;
+    border: 0;
+    border-top: 1px solid rgb(var(--v-theme-divider));
+}
+
+  /*
+   * Narrow: the rail goes above the prose rather than squeezing it. A 208px column against a phone
+   * leaves the text about twenty characters wide, which is unreadable in a way no styling fixes.
+   */
+  @media (width <= 700px) {
+    .columns {
+      flex-direction: column;
+    }
+
+    .rail {
+      flex-direction: row;
+      width: auto;
+      overflow-x: auto;
+      border-right: none;
+      border-bottom: 1px solid rgb(var(--v-theme-divider));
+    }
+
+    .rail-entry {
+      white-space: nowrap;
+    }
+}
+
   .rules-enter-active,
   .rules-leave-active {
-    transition: none;
-  }
+    transition: opacity 160ms;
+}
+
+  .rules-enter-from,
+  .rules-leave-to {
+    opacity: 0;
+}
+
+  @media (prefers-reduced-motion: reduce) {
+    .rail-entry,
+    .rules-enter-active,
+    .rules-leave-active {
+      transition: none;
+    }
+}
 }
 </style>
