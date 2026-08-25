@@ -22,10 +22,17 @@ import type { DrawerLayout } from './drawerLayout'
  * on it, so on a narrow screen it crosses right over where these would otherwise want to be.
  */
 
-/** The design, at scale 1: a 26px button centred 58px out and 44px up from the bay's centre. */
+/** The design, at scale 1: a 26px button tucked 16px in from the bay's top corners. */
 const DESIGN_SIZE = 26
-const DESIGN_OUT = 58
-const DESIGN_UP = 44
+/**
+ * How far the button sits inside the bay's own corner, on both axes.
+ *
+ * They used to float *above* the bay — 58px out and 44px up from its centre — which put them over the
+ * board rather than over the thing they act on, and left the pair unmoored from any edge. In the
+ * corners they read as belonging to the bay, and the same rule serves touch: what used to be a
+ * separate layout for fingers is now the same one with a smaller inset.
+ */
+const DESIGN_INSET = 16
 /** The glyph inside it — 15 of the button's 26, kept as the ratio's two halves so 26 gives exactly 15. */
 const DESIGN_GLYPH = 15
 
@@ -58,21 +65,19 @@ export function rotateButtonBoxes(layout: DrawerLayout, touch: boolean): RotateB
   const size = touch ? touchSize(layout) : DESIGN_SIZE * layout.scale
   const glyph = (size * DESIGN_GLYPH) / DESIGN_SIZE
 
-  if (!touch) {
-    const out = DESIGN_OUT * layout.scale
-    const top = -(DESIGN_UP * layout.scale) - size / 2
-    return {
-      left: { left: -out - size / 2, top, size, glyph },
-      right: { left: out - size / 2, top, size, glyph },
-    }
-  }
-
-  // Tucked into the bay's own upper corners, measured from its edges rather than from the design.
+  /*
+   * The bay's upper corners, measured from its own edges.
+   *
+   * One layout for both cases now. A finger still gets a bigger button and a tighter inset — it needs
+   * the room — but the *placement* no longer differs, so a plate does not gain two controls in a
+   * different place depending on what is pointing at it.
+   */
+  const inset = touch ? TOUCH_INSET : DESIGN_INSET * layout.scale
   const halfWidth = layout.plateSlotWidth / 2
-  const top = -(layout.plateSlotHeight / 2 - TOUCH_INSET)
+  const top = -(layout.plateSlotHeight / 2) + inset
   return {
-    left: { left: -(halfWidth - TOUCH_INSET), top, size, glyph },
-    right: { left: halfWidth - TOUCH_INSET - size, top, size, glyph },
+    left: { left: -halfWidth + inset, top, size, glyph },
+    right: { left: halfWidth - inset - size, top, size, glyph },
   }
 }
 

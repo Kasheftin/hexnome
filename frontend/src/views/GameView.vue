@@ -2919,6 +2919,13 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .rotate-button {
   position: absolute;
   min-width: 0;
+  /*
+   * **The one line that makes the size stick.** `.v-btn` carries `max-width: 100%`, and these hang in
+   * a wrapper that is absolutely positioned with no width of its own — its children are absolute too,
+   * so it measures zero. `100%` of zero capped every button at its two 1px borders: 30px of inline
+   * height, 2px of width. The native `<button>` these replaced had no such cap.
+   */
+  max-width: none;
   border: 1px solid rgb(var(--v-theme-secondary-darken-1));
   border-radius: 50%;
   background: rgb(var(--v-theme-background) / 92%);

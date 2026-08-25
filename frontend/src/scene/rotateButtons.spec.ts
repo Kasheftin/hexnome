@@ -34,27 +34,49 @@ function bay(layout: DrawerLayout): { halfWidth: number, halfHeight: number } {
   return { halfWidth: layout.plateSlotWidth / 2, halfHeight: layout.plateSlotHeight / 2 }
 }
 
-describe('with a pointer, the design is left exactly as it was', () => {
-  /** The three numbers that used to be written in the stylesheet, reproduced from the design. */
-  it('puts a full-size drawer where the hand-written CSS did', () => {
-    const boxes = rotateButtonBoxes(createDrawerLayout(1920, 1080, DEFAULT), false)
+describe('with a pointer, the pair sit in the bay\'s top corners', () => {
+  /*
+   * They used to float above the bay — 58px out and 44px up from its centre — which put them over the
+   * board rather than over the thing they act on. Now they are inset from its own corners, so they
+   * read as belonging to the bay whatever size it is.
+   */
+  it('insets them 16px from a full-size bay\'s top corners', () => {
+    const layout = createDrawerLayout(1920, 1080, DEFAULT)
+    expect(layout.scale).toBe(1)
+    const { halfWidth, halfHeight } = bay(layout)
+    const { left, right } = rotateButtonBoxes(layout, false)
 
-    expect(boxes.left).toEqual({ left: -71, top: -57, size: 26, glyph: 15 })
-    expect(boxes.right).toEqual({ left: 45, top: -57, size: 26, glyph: 15 })
+    expect(left.left).toBeCloseTo(-halfWidth + 16, 6)
+    expect(right.left + right.size).toBeCloseTo(halfWidth - 16, 6)
+    expect(left.top).toBeCloseTo(-halfHeight + 16, 6)
+    expect(right.top).toBeCloseTo(-halfHeight + 16, 6)
+    expect(left.size).toBe(26)
   })
 
   /**
-   * The bug the hover path had too, quietly: a 1000px window with the biggest drawer scales to about
-   * 0.75, and the buttons were still placed at 58px out. Nobody noticed because they were only ever
-   * a quarter of a bay wrong, but they were wrong.
+   * The inset follows the drawer, as the size does. A 1000px window with the biggest drawer scales to
+   * about 0.75, and a fixed 16px there would be a fifth of the bay rather than a margin.
    */
-  it('follows the drawer down when the window is too narrow for it', () => {
+  it('scales the inset with the drawer', () => {
     const layout = createDrawerLayout(1000, 800, { tileSlots: 16, plateSlots: 3 })
     expect(layout.scale).toBeLessThan(1)
+    const { halfWidth } = bay(layout)
 
-    const boxes = rotateButtonBoxes(layout, false)
-    expect(boxes.right.size).toBeCloseTo(26 * layout.scale, 6)
-    expect(boxes.right.left + boxes.right.size / 2).toBeCloseTo(58 * layout.scale, 6)
+    const { left, right } = rotateButtonBoxes(layout, false)
+    expect(right.size).toBeCloseTo(26 * layout.scale, 6)
+    expect(left.left).toBeCloseTo(-halfWidth + 16 * layout.scale, 6)
+  })
+
+  /** Whatever the pointer, a button belongs inside the bay it acts on. */
+  it.each(WINDOWS)('keeps both buttons inside the bay at %s', (_name, width, height) => {
+    const layout = createDrawerLayout(width, height, DEFAULT)
+    const { halfWidth, halfHeight } = bay(layout)
+    const { left, right } = rotateButtonBoxes(layout, false)
+
+    expect(left.left).toBeGreaterThanOrEqual(-halfWidth)
+    expect(right.left + right.size).toBeLessThanOrEqual(halfWidth)
+    expect(left.top).toBeGreaterThanOrEqual(-halfHeight)
+    expect(left.top + left.size).toBeLessThanOrEqual(halfHeight)
   })
 })
 
