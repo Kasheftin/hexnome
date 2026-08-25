@@ -249,9 +249,18 @@ onBeforeUnmount(() => watching?.disconnect())
     border-right: thin solid rgba(var(--v-border-color), var(--v-border-opacity));
 }
 
-  /* Entries read as a list, not as a column of buttons: ragged left, full width, no frame. */
+  /*
+   * Entries read as a list, not as a column of buttons: ragged left, full width, no frame.
+   *
+   * **And in sentence case**, against the uppercase every other button now carries. These are not
+   * controls with short verbs on them, they are the document's own headings — and set in capitals
+   * "Stems, and the anchors that pay them" runs to three lines of shouting that has to be read
+   * rather than scanned. The button default is right; this is the one place it is not.
+   */
   .hx-rules__entry {
     justify-content: flex-start;
+    text-transform: none;
+    letter-spacing: normal;
     height: auto;
     min-height: 32px;
     padding: 6px 10px;

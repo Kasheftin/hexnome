@@ -61,7 +61,19 @@
   $button-disabled-opacity: 0.5,
   $button-height: 40px,
   $button-font-size: 1rem,
-  $button-font-weight: 500
+  $button-font-weight: 500,
+
+  // Uppercase, as Vuetify did by default until version 4 dropped it for Material 3's sentence case.
+  //
+  // Here it is not nostalgia: the whole game is set in uppercase with wide tracking — panel titles,
+  // legends, the counters in the header — and a control in sentence case reads as belonging to some
+  // other application. Saying it once in the settings is what stops it being repeated on every label.
+  $button-text-transform: uppercase,
+
+  // Tracking has to come with it. Vuetify's 0.00714em is tuned for sentence case; uppercase at that
+  // spacing sets solid, because capitals have no ascenders or descenders to separate them. This is
+  // Vuetify 2's own button tracking, and close to the 0.08em the option labels already used.
+  $button-text-letter-spacing: 0.0892857143em
 );
 
 // Tooltips.

@@ -1079,14 +1079,24 @@ const selectedMode = computed(() => modeInfo(mode.value))
     color: rgb(var(--v-theme-muted));
   }
 
+  /* Tracking only: the uppercase comes from the button, for every button, in the settings. */
   .hx-option__label {
     letter-spacing: 0.08em;
-    text-transform: uppercase;
   }
 
+  /*
+   * Wider tracking than the button's, so a note reads as an aside to the label beside it.
+   *
+   * **The uppercase here is not redundant**, even though every button now carries it. This class is
+   * also on the "Soon" chip, and `v-chip` declares `text-transform: none` — so the chip would drop
+   * out of the button's casing on its own. Saying it here wins from the `components` layer without
+   * having to out-specify anything.
+   */
   .hx-option__note {
     color: rgb(var(--v-theme-muted-dim));
     letter-spacing: 0.16em;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
     text-transform: uppercase;
     white-space: nowrap;
   }
@@ -1202,7 +1212,6 @@ const selectedMode = computed(() => modeInfo(mode.value))
     color: rgb(var(--v-theme-muted-dim));
     font-size: var(--text-sm);
     line-height: var(--text-sm-line);
-    text-transform: uppercase;
   }
 
   .hx-summary__value {
