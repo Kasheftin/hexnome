@@ -77,9 +77,9 @@ describe('what the design doc says the numbers are', () => {
   })
 
   /*
-   * Against the *mode's* choices, not `PLATES_PER_ROUND_CHOICES`. That constant is the union of every
-   * mode's range and exists only so the parser knows what to tolerate; the doc describes the game, and
-   * a player choosing a classic game is offered four numbers, not eight.
+   * Against the *mode's* choices, which since the union constant was retired is the only list there
+   * is. The scoring modes reach to ten so that a preset can seat four players; quick counts in a
+   * different currency entirely, so the doc states the two ranges separately.
    */
   it('describes the round budget', () => {
     states('plates per round', `${list(platesPerRoundChoices('classic'))}, default **${DEFAULT_PLATES_PER_ROUND}**`)

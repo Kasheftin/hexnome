@@ -1004,7 +1004,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
               variant="text"
               mandatory
               class="hx-choices"
-              :class="{ 'hx-choices--wide': dial.choices.length > 4 }"
+              :class="{ 'hx-choices--wide': dial.choices.length > 8 }"
             >
               <v-btn
                 v-for="(count, index) in dial.choices"
@@ -1251,6 +1251,14 @@ const selectedMode = computed(() => modeInfo(mode.value))
   }
 
   /* Ten choices sit as two rows of five; at four columns they would come out 4 + 4 + 2. */
+  /*
+   * Five columns, for the one dial long enough to want them.
+   *
+   * The threshold is 8 rather than 4 because five columns only helps a count that divides by five:
+   * the group bonuses are ten and fall into 5 + 5, while the plate counts are seven and would fall
+   * into a lopsided 5 + 2. At the default four columns those seven are 4 + 3, which is the shape the
+   * range was chosen for.
+   */
   .hx-choices--wide {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }

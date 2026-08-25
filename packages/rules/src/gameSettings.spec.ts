@@ -85,7 +85,7 @@ describe('parsing settings that came back from storage', () => {
 
   it('falls back rather than failing on a bad plate count', () => {
     // A dial, not an identity: worth repairing instead of discarding the game.
-    for (const bad of [0, 2, 7, 4.5, -4, '4', null, undefined, NaN]) {
+    for (const bad of [0, 2, 11, 4.5, -4, '4', null, undefined, NaN]) {
       const parsed = parseGameSettings({ ...valid, platesPerRound: bad })
       expect(parsed?.platesPerRound).toBe(DEFAULT_PLATES_PER_ROUND)
     }
@@ -531,8 +531,8 @@ describe('how much material the game is dealt from', () => {
  */
 describe('plates per round, by mode', () => {
   it('offers a handful for the scoring modes and a whole game for quick', () => {
-    expect(platesPerRoundChoices('classic')).toEqual([3, 4, 5, 6])
-    expect(platesPerRoundChoices('random')).toEqual([3, 4, 5, 6])
+    expect(platesPerRoundChoices('classic')).toEqual([4, 5, 6, 7, 8, 9, 10])
+    expect(platesPerRoundChoices('random')).toEqual([4, 5, 6, 7, 8, 9, 10])
     expect(platesPerRoundChoices('quick')).toEqual([8, 12, 16, 20])
   })
 
@@ -552,8 +552,20 @@ describe('plates per round, by mode', () => {
   })
 
   it('still refuses a number no mode offers', () => {
-    expect(parseGameSettings({ ...valid, platesPerRound: 7 })?.platesPerRound)
+    expect(parseGameSettings({ ...valid, platesPerRound: 11 })?.platesPerRound)
       .toBe(DEFAULT_PLATES_PER_ROUND)
+  })
+
+  /*
+   * The scoring range reaches ten so a preset can seat four players. The gap between the two ranges is
+   * now a single step - ten to twelve - which is worth an assertion of its own: it is the only place
+   * left where a chosen value can be legal in one mode and not in its neighbour.
+   */
+  it('reaches far enough for a four-seat table', () => {
+    for (const count of [4, 5, 7, 9]) {
+      expect(platesPerRoundChoices('classic')).toContain(count)
+    }
+    expect(platesPerRoundChoices('classic')).not.toContain(12)
   })
 
   /*
@@ -563,13 +575,13 @@ describe('plates per round, by mode', () => {
   it('moves a chosen value onto the range the new mode offers', () => {
     expect(nearestPlatesPerRound('quick', 4)).toBe(8)
     expect(nearestPlatesPerRound('quick', 6)).toBe(8)
-    expect(nearestPlatesPerRound('classic', 12)).toBe(6)
-    expect(nearestPlatesPerRound('classic', 8)).toBe(6)
+    expect(nearestPlatesPerRound('classic', 20)).toBe(10)
+    expect(nearestPlatesPerRound('classic', 12)).toBe(10)
   })
 
   it('leaves a value the mode already offers alone', () => {
     expect(nearestPlatesPerRound('quick', 16)).toBe(16)
-    expect(nearestPlatesPerRound('classic', 3)).toBe(3)
+    expect(nearestPlatesPerRound('classic', 9)).toBe(9)
   })
 })
 
@@ -602,7 +614,7 @@ describe('reconciling settings with their mode', () => {
   })
 
   it('answers with the mode default for anything that is not a count at all', () => {
-    for (const junk of [undefined, null, '12', Number.NaN, 7]) {
+    for (const junk of [undefined, null, '12', Number.NaN, 11]) {
       expect(reconcilePlatesPerRound('quick', junk)).toBe(12)
       expect(reconcilePlatesPerRound('classic', junk)).toBe(4)
     }

@@ -317,7 +317,7 @@ draft, it is an impossible one, and the action bar says **"out of space"** rathe
 
 ### How many plates a round deals
 
-**Plates per round** — 3, 4, 5 or 6, default **4**, in the modes that score rounds. It is the round's whole budget of new material,
+**Plates per round** — 4, 5, 6, 7, 8, 9 or 10, default **4**, in the modes that score rounds. It is the round's whole budget of new material,
 and it is also the height of the source column: the column has exactly as many slots as the round has
 plates, so a round's worth can never be pushed off the bottom before anyone has had a chance at it.
 

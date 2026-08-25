@@ -95,11 +95,18 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
  * `reconcileSettings`.
  */
 
-/** Rounds deal a handful; quick deals the whole game at once. */
+/**
+ * Rounds deal a handful; quick deals the whole game at once.
+ *
+ * The scoring modes reach to ten because the count follows the table: the reference game deals more
+ * factories to more players, and the presets do the same — 4, 5, 7, 9 from one seat to four. A range
+ * that stopped at six could not express its own presets, and the parser would have repaired them into
+ * a game nobody chose.
+ */
 const PLATES_PER_ROUND_BY_MODE: Readonly<Record<SingleplayerMode, readonly number[]>> = {
-  classic: [3, 4, 5, 6],
-  classicReversed: [3, 4, 5, 6],
-  random: [3, 4, 5, 6],
+  classic: [4, 5, 6, 7, 8, 9, 10],
+  classicReversed: [4, 5, 6, 7, 8, 9, 10],
+  random: [4, 5, 6, 7, 8, 9, 10],
   quick: [8, 12, 16, 20],
 }
 
