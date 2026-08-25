@@ -16,6 +16,7 @@
  * once it has finished does *Next round* take that place. Sharing one button would let a second click
  * land on a round the player had not seen yet.
  */
+import { mdiChevronDown, mdiChevronRight } from '@mdi/js'
 import { computed, shallowRef, watch } from 'vue'
 import type { FinalTally } from '@hexnome/rules/groups'
 import FinalScore from './FinalScore.vue'
@@ -279,10 +280,11 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           :disabled="open === record.round"
           @click="toggle(record.round)"
         >
-          <span
+          <v-icon
+            :icon="open === record.round ? mdiChevronDown : mdiChevronRight"
+            size="small"
             class="caret"
-            aria-hidden="true"
-          >{{ open === record.round ? '▾' : '▸' }}</span>
+          />
           <span class="fold-name">Round {{ record.round }}</span>
           <strong class="fold-score">{{ bankedIn(record) }}</strong>
         </v-btn>
@@ -332,10 +334,11 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           :disabled="open === 'final'"
           @click="toggle('final')"
         >
-          <span
+          <v-icon
+            :icon="open === 'final' ? mdiChevronDown : mdiChevronRight"
+            size="small"
             class="caret"
-            aria-hidden="true"
-          >{{ open === 'final' ? '▾' : '▸' }}</span>
+          />
           <span class="fold-name">Final scoring</span>
           <strong class="fold-score">{{ props.finalTally.total }}</strong>
         </v-btn>
@@ -462,8 +465,23 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 }
 
 .caret {
-  width: 10px;
-  color: #6b7382;
+  flex: none;
+  color: rgb(var(--v-theme-muted-dim));
+}
+
+/*
+ * The row's own spacing, said on `.v-btn__content` rather than on `.fold-head`.
+ *
+ * A `v-btn` wraps its children in that element, so a `gap` on the button never reaches them — the
+ * chevron, the name and the score ran together as one word. The width has to be stated too, because
+ * the content box is an inline-flex that shrinks to its text, and `.fold-name`'s `flex: 1` has
+ * nothing to grow into until it does.
+ */
+.fold-head :deep(.v-btn__content) {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
 }
 
 .fold-name {
