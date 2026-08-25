@@ -667,7 +667,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
                   v-bind="tip"
                   :icon="mdiDiceMultiple"
                   variant="text"
-                  size="small"
+                  size="x-small"
                   aria-label="Suggest another name"
                   @click="reroll"
                 />
@@ -985,7 +985,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
     align-items: center;
     justify-content: center;
     height: 100%;
-    max-width: 952px;
+    max-width: 1016px;
     /* 32px of breathing room, the same inset the other full-page screens use. */
     padding: 32px;
     margin: 0 auto;
@@ -1027,7 +1027,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 20px;
+    padding: 16px;
   }
 
   .hx-panel__rules {
@@ -1109,16 +1109,38 @@ const selectedMode = computed(() => modeInfo(mode.value))
     gap: 8px;
     height: auto;
     border: 0;
+    /*
+     * `v-btn-group` sets `overflow-x: auto; overflow-y: hidden` so a long strip of segments can be
+     * swiped. Ours is a grid that wraps, so there is nothing to swipe and the hidden axis only
+     * clipped the buttons' own edges.
+     */
+    overflow: visible;
 
-    /* The toggle rounds only its end buttons and hides the seams between them; on a grid there are
-       no seams, and every cell is its own control. */
+    /*
+     * **Put the borders back.** A button group deliberately strips them: `:not(:last-child)` loses
+     * its inline-end and `:not(:first-child)` its inline-start, so the segments read as one control
+     * with seams rather than as several with edges. Measured on the middle button, that leaves
+     * `1px/0/1px/0`.
+     *
+     * On a grid there are no seams — every cell is a separate control with a gap around it — so each
+     * one needs all four sides and its own radius back.
+     */
     .v-btn {
       height: auto;
       min-height: 40px;
       border-radius: $v-border-radius-root;
-      border-width: $v-border-width-root;
+      border: $v-border-width-root solid rgba(var(--v-border-color), var(--v-border-opacity));
       font-variant-numeric: tabular-nums;
       opacity: 1;
+    }
+
+    /*
+     * The chosen one wears its own colour on its edge as well as its text — mint, the same the board
+     * uses for "this is the target". `currentColor` rather than naming it again: the component has
+     * already worked out what `color="success"` means here, and a second copy could disagree with it.
+     */
+    .v-btn--active {
+      border-color: currentcolor;
     }
   }
 

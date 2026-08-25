@@ -17,244 +17,121 @@
  * have to reposition itself against the viewport anyway, which is a lot of machinery for a panel that
  * wants the screen's attention regardless.
  */
-import { nextTick, ref, watch } from 'vue'
+import { mdiClose } from '@mdi/js'
 
-const props = defineProps<{
+/**
+ * **Width matches a column of the menu behind it** — 460px, the same as each half of the setup
+ * screen. The dials in here are the same dials that screen summarises, so a panel of a different
+ * width would read as a different kind of thing.
+ */
+const WIDTH = 460
+
+defineProps<{
   open: boolean
   title: string
 }>()
 
 const emit = defineEmits<{ close: [] }>()
-
-const panel = ref<HTMLElement | null>(null)
-
-/**
- * Move focus into the panel when it opens.
- *
- * The panel itself takes focus rather than the first control: a screen reader then reads the title
- * before the dials, which is the order the panel is meant to be understood in, and Tab still lands on
- * the first control from there.
- */
-watch(() => props.open, async (open) => {
-  if (!open) return
-  await nextTick()
-  panel.value?.focus()
-})
 </script>
 
 <template>
-  <Transition name="flyout">
-    <div
-      v-if="props.open"
-      class="backdrop"
-      @click.self="emit('close')"
-      @keydown.esc="emit('close')"
-    >
-      <section
-        ref="panel"
-        class="panel"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="props.title"
-        tabindex="-1"
-      >
-        <header class="head">
-          <h2>{{ props.title }}</h2>
-          <button
-            type="button"
-            class="close"
-            aria-label="Close settings"
-            @click="emit('close')"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
-        </header>
+  <!--
+    `v-dialog` supplies the scrim, Escape, the focus trap and the transition, and returns focus to
+    whatever opened it. What is left here is the three-band shape — header, scrolling body, pinned
+    actions — which is the part that is actually a decision.
 
-        <div class="body">
-          <slot />
-        </div>
+    `:model-value` with an emit rather than `v-model`, so the `open` / `close` contract both call
+    sites already use survives the change of shell.
+  -->
+  <v-dialog
+    :model-value="open"
+    :max-width="WIDTH"
+    scrollable
+    :aria-label="title"
+    @update:model-value="emit('close')"
+  >
+    <v-card class="hx-flyout">
+      <v-card-title class="hx-flyout__head">
+        <span class="chrome-title">{{ title }}</span>
+        <v-spacer />
+        <v-btn
+          :icon="mdiClose"
+          :border="false"
+          variant="text"
+          density="comfortable"
+          aria-label="Close settings"
+          @click="emit('close')"
+        />
+      </v-card-title>
 
-        <!--
-          The footer stays put while the body scrolls, so anything here is reachable from any point
-          in a long list of dials. `aside` is for what the caller wants beside Done — see HomeView's
-          reset, which has to be findable rather than buried under thirteen sections.
-        -->
-        <footer class="actions">
-          <slot name="aside" />
-          <button
-            type="button"
-            class="done"
-            @click="emit('close')"
-          >
-            Done
-          </button>
-        </footer>
-      </section>
-    </div>
-  </Transition>
+      <v-divider />
+
+      <div class="hx-flyout__body">
+        <slot />
+      </div>
+
+      <v-divider />
+
+      <!--
+        The footer stays put while the body scrolls, so anything here is reachable from any point in
+        a long list of dials. `aside` is for what the caller wants beside Done — see HomeView's
+        reset, which has to be findable rather than buried under thirteen sections.
+      -->
+      <v-card-actions class="hx-flyout__actions">
+        <slot name="aside" />
+        <v-spacer />
+        <v-btn
+          color="primary"
+          class="hx-flyout__done"
+          @click="emit('close')"
+        >
+          Done
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
-<style scoped>
+<style lang="scss">
 /*
- * Takes pointer events, so a click meant for a dial that lands beside one hits the backdrop and closes
- * rather than reaching the menu underneath and changing a mode by accident.
+ * Not `scoped`: a scope attribute raises specificity, which is what the layers exist to make
+ * irrelevant. See styles/layers.scss.
+ *
+ * Everything the dialog and the card already draw is gone — backdrop, frame, header rule, close
+ * button, focus ring, transition. What is left is the band structure: the panel does not scroll,
+ * its body does, so the title stays put and Done stays reachable however long the dials get.
  */
-.backdrop {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(4 5 8 / 62%);
-  z-index: 60;
-}
+@layer components {
+  .hx-flyout {
+    display: flex;
+    flex-direction: column;
+    max-height: min(86vh, 720px);
+    /* None of its own: each band pads itself, so the scrollbar runs the body's full height. */
+    overflow: hidden;
+  }
 
-.panel {
-  display: flex;
-  flex-direction: column;
-  width: min(420px, 100%);
-  max-height: min(86vh, 720px);
-  /* No padding of its own: each band pads itself, so the scrollbar runs the body's full height. */
-  overflow: hidden;
-  border: 1px solid #3a3222;
-  border-radius: 4px;
-  background: rgb(21 23 28 / 97%);
-  box-shadow: 0 8px 40px rgb(0 0 0 / 60%);
-}
+  .hx-flyout__head {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+  }
 
-.panel:focus {
-  outline: none;
-}
+  /*
+   * `min-height: 0` is what makes the overflow work at all — a flex item's floor is its content,
+   * and without it the body would grow the panel past its max height instead of scrolling.
+   */
+  .hx-flyout__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 16px 22px;
+    overflow-y: auto;
+  }
 
-.head {
-  display: flex;
-  flex: none;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 22px 14px;
-  border-bottom: 1px solid #2a2c33;
-}
-
-h2 {
-  margin: 0;
-  color: #e8c878;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.close {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #79808f;
-  cursor: pointer;
-  transition: border-color 140ms, color 140ms;
-}
-
-.close svg {
-  width: 15px;
-  height: 15px;
-  fill: currentcolor;
-}
-
-.close:hover {
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-/*
- * `min-height: 0` is what makes this scroll at all: a flex item will not shrink below its content
- * without it, so the body would grow the panel past its max height instead of overflowing.
- */
-.body {
-  flex: 1;
-  min-height: 0;
-  padding: 16px 22px;
-  overflow-y: auto;
-}
-
-/* Pinned below the body, with a rule so the boundary reads even when nothing is scrolled. */
-.actions {
-  display: flex;
-  flex: none;
-  gap: 10px;
-  align-items: center;
-  padding: 14px 22px 20px;
-  border-top: 1px solid #2a2c33;
-}
-
-/* Done takes the room that is left, so an empty `aside` leaves the footer exactly as it was. */
-.actions .done {
-  flex: 1 1 auto;
-}
-
-.done {
-  display: block;
-  width: 100%;
-  padding: 10px 0;
-  border: 1px solid #7d6a41;
-  border-radius: 3px;
-  background: transparent;
-  color: #e8c878;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background-color 140ms;
-}
-
-.done:hover {
-  background: rgb(232 200 120 / 12%);
-}
-
-:is(.close, .done):focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
-}
-
-/* Short, and only on the scrim and a small rise: the panel should feel summoned, not animated. */
-.flyout-enter-active,
-.flyout-leave-active {
-  transition: opacity 140ms ease;
-}
-
-.flyout-enter-active .panel,
-.flyout-leave-active .panel {
-  transition: transform 140ms ease;
-}
-
-.flyout-enter-from,
-.flyout-leave-to {
-  opacity: 0;
-}
-
-.flyout-enter-from .panel,
-.flyout-leave-to .panel {
-  transform: translateY(6px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .flyout-enter-active,
-  .flyout-leave-active,
-  .flyout-enter-active .panel,
-  .flyout-leave-active .panel {
-    transition: none;
+  .hx-flyout__actions {
+    flex: none;
+    gap: 8px;
+    padding: 12px 16px;
   }
 }
 </style>
