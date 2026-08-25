@@ -935,7 +935,6 @@ const selectedMode = computed(() => modeInfo(mode.value))
   font: inherit;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.08em;
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
@@ -967,7 +966,6 @@ const selectedMode = computed(() => modeInfo(mode.value))
   font: inherit;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
   transition: border-color 140ms, color 140ms;
@@ -992,13 +990,12 @@ const selectedMode = computed(() => modeInfo(mode.value))
 .menu {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 64px;
+  gap: 32px;
   align-items: center;
   justify-content: center;
   height: 100%;
-  max-width: 940px;
+  max-width: 952px;
   margin: 0 auto;
-  padding: 32px;
 }
 
 @media (width <= 760px) {
@@ -1024,7 +1021,7 @@ h1 {
    */
   font-size: clamp(34px, 6vw, 52px);
   line-height: normal;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
@@ -1033,7 +1030,7 @@ h1 {
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.34em;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
 }
 
@@ -1065,7 +1062,7 @@ legend {
   color: #6b7382;
   font-size: var(--text-sm);
   line-height: var(--text-sm-line);
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -1140,7 +1137,7 @@ legend {
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -1197,7 +1194,6 @@ legend {
   font-size: var(--text-sm);
   line-height: var(--text-sm-line);
   font-weight: 600;
-  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
@@ -1260,7 +1256,6 @@ legend {
   color: #6b7382;
   font-size: var(--text-sm);
   line-height: var(--text-sm-line);
-  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
@@ -1297,7 +1292,7 @@ legend {
   color: #6b7382;
   font-size: var(--text-sm);
   line-height: var(--text-sm-line);
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -1374,7 +1369,6 @@ legend {
   font: inherit;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
 }

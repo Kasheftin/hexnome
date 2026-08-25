@@ -140,7 +140,6 @@ const emit = defineEmits<{ shown: [] }>()
   /* Opts out of the base line height too, which is absolute — see the `h1` lockup. Matches `.number`. */
   line-height: 1;
   font-weight: 500;
-  letter-spacing: 0.34em;
   text-transform: uppercase;
 }
 

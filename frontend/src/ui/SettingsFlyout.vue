@@ -148,7 +148,6 @@ h2 {
   font-size: var(--text-base);
   line-height: var(--text-base-line);
   font-weight: 600;
-  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
@@ -215,7 +214,6 @@ h2 {
   font: inherit;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
   transition: background-color 140ms;

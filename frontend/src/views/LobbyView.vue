@@ -237,7 +237,6 @@ h1 {
    */
   font-size: clamp(34px, 6vw, 52px);
   line-height: normal;
-  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -246,7 +245,6 @@ h1 {
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.34em;
   text-transform: uppercase;
 }
 
@@ -268,7 +266,6 @@ h1 {
   font-size: var(--text-sm);
   line-height: var(--text-sm-line);
   font-weight: 500;
-  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
@@ -326,7 +323,6 @@ h1 {
   color: #e8c878;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -412,7 +408,6 @@ input:focus-visible {
   font: inherit;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -437,7 +432,6 @@ input:focus-visible {
 .option-label {
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -462,7 +456,6 @@ input:focus-visible {
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 

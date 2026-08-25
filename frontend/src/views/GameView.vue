@@ -2599,21 +2599,13 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   display: flex;
   gap: 16px;
   align-items: center;
-  /*
-   * A floor, so the scoring strip appearing cannot change the header's height.
-   *
-   * 8 + 24 + 8: the padding and the tallest control in it. Every control in here is 24px for exactly
-   * this reason — the strip used to be 31px and took the header from 46 to 51 whenever it showed,
-   * which moved the whole board's top edge for a control the player had just pressed.
-   */
-  min-height: 40px;
+  min-height: 56px;
   padding: 8px 16px;
 }
 
 .back {
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.1em;
   text-decoration: none;
 }
 
@@ -2638,7 +2630,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #79808f;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 /*
@@ -2650,14 +2642,13 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   gap: 8px;
   align-items: center;
   margin: 0;
+  white-space: nowrap;
 }
 
 .counters dt {
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
 }
 
 .counters dd {
@@ -2667,6 +2658,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   line-height: var(--text-base-line);
   /* Tabular, so the header does not shift as the turn ticks past 9. */
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .counters .of {
@@ -2830,7 +2822,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .round-no {
   min-width: 24px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.08em;
 }
 
 .targets {
@@ -2862,7 +2853,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -2959,7 +2949,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #cfd4de;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.08em;
   text-align: center;
 }
 
@@ -2972,7 +2961,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #e8c878;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -2989,7 +2977,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -3009,7 +2996,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #7d6a41;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
@@ -3185,7 +3171,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #e8c878;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -3193,7 +3178,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 

@@ -55,7 +55,6 @@ const retryable = computed(() => store.loadingError !== null
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 </style>

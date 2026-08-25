@@ -292,9 +292,10 @@ const draftSummary = computed(() => {
   position: absolute;
   /* Anchored by its bottom-centre on the drawer's top edge. */
   display: flex;
-  gap: 8px;
+  gap: 16px;
+  height: 56px;
   align-items: center;
-  padding: 8px 12px;
+  padding: 16px;
   transform: translate(-50%, calc(-100% - 10px));
 }
 
@@ -303,7 +304,6 @@ const draftSummary = computed(() => {
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -318,7 +318,6 @@ const draftSummary = computed(() => {
   font: inherit;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
   transition: background-color 140ms, color 140ms;
@@ -386,16 +385,15 @@ const draftSummary = computed(() => {
  */
 .rule {
   flex: none;
-  width: 1px;
-  height: 16px;
-  background: #33383f;
+  width: 0;
+  height: 24px;
+  border-left: 1px solid #33383f;
 }
 
 .verb {
   color: #cfd4de;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 

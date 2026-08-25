@@ -30,7 +30,7 @@ body,
  * (`clamp(34px, 6vw, 52px)`) and `TurnAnnounce`'s full-screen numeral. Both are marked where they sit.
  */
 :root {
-  --text-sm: 0.75rem;
+  --text-sm: 0.875rem;
   --text-sm-line: 1rem;
   --text-base: 1rem;
   --text-base-line: 1.5rem;
@@ -162,7 +162,6 @@ a {
   font-weight: 600;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 

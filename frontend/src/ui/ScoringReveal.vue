@@ -432,7 +432,6 @@ const doubleCounted = computed(() =>
 
 .what {
   color: #79808f;
-  letter-spacing: 0.04em;
 }
 
 .tiles {
@@ -487,7 +486,6 @@ const doubleCounted = computed(() =>
   padding-top: 12px;
   border-top: 1px solid #3a3222;
   color: #79808f;
-  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 

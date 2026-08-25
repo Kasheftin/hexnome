@@ -107,7 +107,6 @@ watch(() => props.notice, async (text) => {
   background: transparent;
   color: #8fe6c0;
   font: inherit;
-  letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
   transition: border-color 140ms, background-color 140ms;

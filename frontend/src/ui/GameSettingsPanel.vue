@@ -239,7 +239,6 @@ watch(() => props.open, async (open) => {
   background: transparent;
   color: #e8c878;
   font: inherit;
-  letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
   transition: border-color 140ms, background-color 140ms;

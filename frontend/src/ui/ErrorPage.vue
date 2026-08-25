@@ -90,7 +90,6 @@ h1 {
    */
   font-size: clamp(34px, 6vw, 52px);
   line-height: normal;
-  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
@@ -99,7 +98,6 @@ h1 {
   color: #6b7382;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.34em;
   text-transform: uppercase;
 }
 
@@ -151,7 +149,6 @@ h1 {
 .option-label {
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 

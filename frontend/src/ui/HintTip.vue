@@ -189,7 +189,6 @@ function onKey(event: KeyboardEvent): void {
   color: #cfd4de;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.02em;
   /* It explains what is under the pointer; it must never become what is under the pointer. */
   pointer-events: none;
 }

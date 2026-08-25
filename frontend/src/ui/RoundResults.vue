@@ -455,7 +455,6 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 
 .fold-name {
   flex: 1;
-  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -512,7 +511,6 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
   padding-top: 10px;
   border-top: 1px solid #3a3222;
   color: #79808f;
-  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -543,7 +541,6 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
   background: transparent;
   color: #8fe6c0;
   font: inherit;
-  letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
   transition: border-color 140ms, background-color 140ms;

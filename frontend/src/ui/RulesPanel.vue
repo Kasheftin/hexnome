@@ -243,7 +243,6 @@ onBeforeUnmount(() => watching?.disconnect())
   font-weight: 600;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
@@ -357,7 +356,6 @@ onBeforeUnmount(() => watching?.disconnect())
   color: #cfd4de;
   font-size: var(--text-base);
   line-height: var(--text-base-line);
-  letter-spacing: 0.04em;
 }
 
 .prose :deep(p),
@@ -461,7 +459,6 @@ onBeforeUnmount(() => watching?.disconnect())
 .prose :deep(th) {
   color: #79808f;
   font-weight: 500;
-  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
