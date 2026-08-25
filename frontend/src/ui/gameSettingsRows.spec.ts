@@ -73,18 +73,22 @@ describe('what the panel lists', () => {
   })
 
   /**
-   * Shown even when the rules make it nothing — see `settingRows`.
+   * Shown holding the value the rules force on it — see `settingRows`.
    *
    * Built through `parseGameSettings`, which is how a real game's settings reach this panel: the
-   * server re-reads its stored JSON on the way out, and that is where `effectiveStrictBonus` collapses
-   * a bonus the strict rule already grants. A hand-built object would still say 1 and prove nothing
+   * server re-reads its stored JSON on the way out, and that is where `effectiveStrictBonus` forces a
+   * bonus the strict rule always earns. A hand-built object could say anything and would prove nothing
    * about what a player actually sees.
    */
-  it('keeps a dial that cannot apply, reading the zero the rules make it', () => {
-    const strict = parseGameSettings({ ...defaultGameSettings(0), placementRule: 'strict' })
+  it('reads the bonus a strict game is always paid, not the one that was stored', () => {
+    const strict = parseGameSettings({
+      ...defaultGameSettings(0),
+      placementRule: 'strict',
+      strictEnclosureBonus: 0,
+    })
     expect(strict).not.toBeNull()
 
-    expect(valueOf('strictEnclosureBonus', strict!)).toBe('0')
+    expect(valueOf('strictEnclosureBonus', strict!)).toBe('1')
     expect(settingRows(strict!).some(row => row.key === 'strictEnclosureBonus')).toBe(true)
   })
 

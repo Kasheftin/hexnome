@@ -739,10 +739,14 @@ if *every* pair shares a colour or a value — including the pair that wraps fro
 first — the enclosure pays `strictEnclosureBonus` on top (0 or 1, default **1**). With the defaults,
 an ordinary enclosure is worth 3 stems and a strict one 4.
 
-That bonus **does not exist under the strict placement rule**, and the setting is hidden there. Strict
-placement already guarantees a connected ring: of any adjacent pair, whichever tile went down second
-had to agree with every neighbour it found, including the first. The bonus would be the base rate
-under another name.
+That bonus is **always earned under the strict placement rule**, and the setting is shown locked there.
+Strict placement guarantees a connected ring: of any adjacent pair, whichever tile went down second
+had to agree with every neighbour it found, including the first. So a strict game pays 4 stems for
+every internal enclosure rather than 3.
+
+It was once forced the other way, on the reasoning that a bonus paid every time is the base rate under
+another name. True, and still wrong at the table: a player who had learned that a strict ring pays 4
+switched to the harder rule and found it paying 3.
 
 **A placement that would earn stems it cannot hold is illegal** — counting the bonus, so a ring that is
 about to close strictly reserves room for all four. Stems live in drawer slots, and a

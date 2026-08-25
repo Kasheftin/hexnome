@@ -160,8 +160,8 @@ around, and there are two kinds:
 
 Enclosing one pays **3 stems** for an internal anchor and **2** for an external one (*internal stems*,
 *external stems*). If the ring of six is **strict** — every neighbouring pair in it matching — it pays
-**1 more** (*strict bonus*). Under the strict placement rule that bonus is unavailable, since every
-ring is strict by then and there would be nothing to reward.
+**1 more** (*strict bonus*). Under the strict placement rule every ring is strict by then, so that
+bonus is earned every time — a strict game pays 4 for an internal anchor rather than 3.
 
 An anchor pays **once**, the first time it closes.
 

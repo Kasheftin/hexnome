@@ -61,6 +61,7 @@ import {
   effectiveGroupBonuses,
   effectiveFirstPassFine,
   effectiveStrictBonus,
+  STRICT_BONUS_WHEN_FORCED,
   PLACEMENT_RULE_HINTS,
   PLACEMENT_RULE_LABELS,
   modeInfo,
@@ -191,8 +192,16 @@ interface Dial {
   readonly labels?: readonly string[]
   readonly model: Ref<number>
   readonly hint?: string
-  /** False hides the dial entirely — see the strict bonus. */
+  /** False hides the dial entirely. */
   readonly applies?: () => boolean
+  /**
+   * When this returns a value, the dial shows that value, says why, and cannot be turned.
+   *
+   * Distinct from hiding it. A setting the rules decide for you is still worth seeing — a player who
+   * knows a strict ring pays a bonus needs to see that it is still being paid, or the stricter rule
+   * looks like it took something away.
+   */
+  readonly lockedTo?: () => { value: number, why: string } | null
   /** Omitted from the readout strip, which would otherwise run to a dozen pills. */
   readonly minor?: boolean
 }
@@ -271,12 +280,20 @@ const STEM_DIALS: readonly Dial[] = [
     choices: STRICT_BONUS_CHOICES,
     model: strictEnclosureBonus,
     /*
-     * Hidden rather than disabled under strict placement, because a disabled control invites the
-     * question "why can I not have this?" when the honest answer is that strict placement already gives
-     * it to you every time. The chosen value is kept while hidden, so switching to strict and back does
-     * not silently reset it.
+     * Locked rather than hidden under strict placement.
+     *
+     * It used to be hidden, on the reasoning that a control you cannot use invites the question "why
+     * can I not have this?". Hiding it asked a worse one: the bonus vanished from the panel at the
+     * same moment the rules started granting it every time, so a player who had learned that a strict
+     * ring pays a stem extra saw the stricter rule apparently take it away. Shown, holding its 1, with
+     * the reason written underneath.
+     *
+     * The chosen value is kept underneath the lock, so switching to strict and back does not silently
+     * reset it.
      */
-    applies: () => placementRule.value !== 'strict',
+    lockedTo: () => (placementRule.value === 'strict'
+      ? { value: STRICT_BONUS_WHEN_FORCED, why: 'Strict placement earns this at every enclosure, so it is always on.' }
+      : null),
   },
 ]
 
@@ -544,7 +561,7 @@ const visibleSections = computed(() => SECTIONS
     ...section,
     dials: section.dials
       .filter(dial => dial.applies?.() ?? true)
-      .map(dial => ({ ...dial, choices: choicesOf(dial) })),
+      .map(dial => ({ ...dial, choices: choicesOf(dial), lock: dial.lockedTo?.() ?? null })),
   }))
   .filter(section => section.dials.length > 0))
 
@@ -1140,13 +1157,15 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
               {{ dial.legend }}
             </legend>
             <v-btn-toggle
-              v-model="dial.model.value"
+              :model-value="dial.lock ? dial.lock.value : dial.model.value"
               color="success"
               base-color="on-surface"
               variant="text"
               mandatory
+              :disabled="!!dial.lock"
               class="hx-choices"
               :class="{ 'hx-choices--wide': dial.choices.length > 8 }"
+              @update:model-value="value => { if (!dial.lock) dial.model.value = value as number }"
             >
               <v-btn
                 v-for="(count, index) in dial.choices"
@@ -1157,10 +1176,10 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
               </v-btn>
             </v-btn-toggle>
             <p
-              v-if="dial.hint"
+              v-if="dial.lock || dial.hint"
               class="hx-group__hint"
             >
-              {{ dial.hint }}
+              {{ dial.lock ? dial.lock.why : dial.hint }}
             </p>
           </fieldset>
         </div>

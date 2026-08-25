@@ -247,10 +247,15 @@ export const DEFAULT_STEMS_PER_EXTERNAL_ANCHOR = 2
  * An extra stem when an enclosure is strict all the way round — every neighbouring pair of the six
  * sharing a colour or a value.
  *
- * **Meaningless under the strict placement rule, and forced to zero there.** Strict placement already
- * guarantees it: of any adjacent pair, whichever went down second had to agree with the first, so the
- * ring is always connected and the bonus would simply be part of the base rate under another name.
- * Only under the regular rule is placing strictly a choice, and only then is there something to reward.
+ * **Always earned under the strict placement rule, and forced on there.** Strict placement guarantees
+ * the ring: of any adjacent pair, whichever went down second had to agree with the first. So every
+ * enclosure in a strict game collects it, and the dial is shown holding a 1 that cannot be turned.
+ *
+ * It used to be forced the other way — zeroed under strict, on the reasoning that a bonus paid every
+ * time is the base rate under another name. That is arithmetically true and was still wrong at the
+ * table: a player who had learned that a strict ring pays four switched to the harder rule and found
+ * it paying three. A rule that asks more of you and returns less is not something "you could have set
+ * the base rate higher" ever explains.
  */
 export const STRICT_BONUS_CHOICES: readonly number[] = [0, 1]
 export const DEFAULT_STRICT_ENCLOSURE_BONUS = 1
@@ -506,17 +511,27 @@ export function parseGroupBonuses(value: unknown): readonly number[] {
 }
 
 /**
+ * What a strict game pays for a ring it was always going to close.
+ *
+ * Its own name rather than a bare `1`, because it is the same fact as `DEFAULT_STRICT_ENCLOSURE_BONUS`
+ * seen from the other side: the bonus exists, and strict placement earns it every time.
+ */
+export const STRICT_BONUS_WHEN_FORCED = DEFAULT_STRICT_ENCLOSURE_BONUS
+
+/**
  * The bonus a game actually runs with.
  *
- * One function so the rule cannot be applied in one place and forgotten in another: the menu hides the
+ * One function so the rule cannot be applied in one place and forgotten in another: the menu locks the
  * control under strict placement, and this makes the same thing true of a settings blob that was
- * hand-edited, stored before the rule existed, or written by an older build.
+ * hand-edited, stored before the rule changed, or written by an older build.
  */
 export function effectiveStrictBonus(settings: {
   placementRule: PlacementRule
   strictEnclosureBonus: number
 }): number {
-  return settings.placementRule === 'strict' ? 0 : settings.strictEnclosureBonus
+  return settings.placementRule === 'strict'
+    ? STRICT_BONUS_WHEN_FORCED
+    : settings.strictEnclosureBonus
 }
 
 /**

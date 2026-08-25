@@ -19,6 +19,7 @@ import {
   PLATE_BAG_LABELS,
   TILE_SLOT_CHOICES,
   DEFAULT_STRICT_ENCLOSURE_BONUS,
+  STRICT_BONUS_WHEN_FORCED,
   DEFAULT_FIRST_PASS_FINE,
   DEFAULT_POINTS_PER_EXTERNAL_ANCHOR,
   DEFAULT_POINTS_PER_INTERNAL_ANCHOR,
@@ -50,7 +51,9 @@ const valid = {
   stemsPerInternalAnchor: 4,
   stemsPerExternalAnchor: 1,
   placementRule: 'strict',
-  strictEnclosureBonus: 0,
+  // 1 because the rule above forces it: a strict game earns the bonus at every enclosure, so a fixture
+  // holding 0 would not survive its own round-trip.
+  strictEnclosureBonus: 1,
   pointsPerInternalAnchor: 2,
   pointsPerExternalAnchor: 1,
   firstPassFine: 2,
@@ -198,11 +201,23 @@ describe('the strict-enclosure bonus', () => {
     expect(parseGameSettings({ ...regular, strictEnclosureBonus: 0 })?.strictEnclosureBonus).toBe(0)
   })
 
-  it('is forced to zero under the strict rule, whatever was stored', () => {
-    // Strict placement already guarantees a connected ring, so the bonus would be the base rate
-    // under another name. Normalised on the way in rather than trusted.
-    const parsed = parseGameSettings({ ...valid, placementRule: 'strict', strictEnclosureBonus: 1 })
-    expect(parsed?.strictEnclosureBonus).toBe(0)
+  /*
+   * Forced *on* under strict, and this is the direction that was once reversed. Strict placement
+   * guarantees a connected ring, so every enclosure in such a game earns it - which is precisely why
+   * it must be paid rather than cancelled. A player who learns that a strict ring pays four should not
+   * find the stricter rule paying three.
+   */
+  it('is forced on under the strict rule, whatever was stored', () => {
+    for (const stored of [0, 1, undefined]) {
+      const parsed = parseGameSettings({ ...valid, placementRule: 'strict', strictEnclosureBonus: stored })
+      expect(parsed?.strictEnclosureBonus).toBe(STRICT_BONUS_WHEN_FORCED)
+    }
+  })
+
+  /* The rule the whole thing exists to make true: strict pays the base rate plus the bonus. */
+  it('leaves a strict game paying more per enclosure than the base rate, never less', () => {
+    const strict = parseGameSettings({ ...valid, placementRule: 'strict', strictEnclosureBonus: 0 })
+    expect(strict?.strictEnclosureBonus).toBeGreaterThan(0)
   })
 
   it('falls back for a value outside 0 or 1', () => {

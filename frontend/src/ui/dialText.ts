@@ -75,7 +75,7 @@ export const DIAL_TEXT: Readonly<Record<string, DialText>> = {
     legend: 'Stem bonus for strict enclosure',
     short: 'strict bonus',
     hint: 'Extra stems when every neighbouring pair around an enclosed anchor matches. Strict placement '
-      + 'guarantees that already, so the bonus only exists under the regular rule.',
+      + 'guarantees that, so a strict game earns it at every enclosure.',
   },
   firstPassFine: {
     legend: 'Fine for passing first',
