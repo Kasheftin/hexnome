@@ -339,7 +339,8 @@ function tileFaceY(fixed: boolean): number {
 const tileMaterials = new Map<number, Material>()
 
 interface View {
-  readonly object: Object3D
+  /** Not readonly: turning a plate over exchanges its body while the view itself survives. */
+  object: Object3D
   readonly world: Vector3
   screenX: number
   screenY: number
@@ -353,6 +354,18 @@ interface View {
   regime: string
   /** Whether this piece's materials currently carry the column's clipping planes. */
   clipped: boolean
+  /**
+   * How far the plate is tipped about the world X axis, in radians. 0 is lying flat.
+   *
+   * Set alongside the Y spin on the **same** object, which only works because the rotation order is
+   * `YXZ`: the plate turns about its own vertical first, then tips in world space. Under the default
+   * `XYZ` the spin would happen about an already-tilted axis and the plate would wobble as it turned.
+   */
+  flip: number
+  /** The turn in progress, or null. See `advanceTurn`. */
+  turning: { readonly faceDown: boolean, t: number, swapped: boolean } | null
+  /** Undoes this view's grabbable registration, so a mid-turn swap does not leave a stale one. */
+  unregister?: () => void
   /**
    * True once the scale ease has finished. While settled, scale is assigned *directly*
    * from the current target rather than eased toward it.
@@ -1445,6 +1458,13 @@ onBeforeRender(({ delta }) => {
      */
     if (view.anchor) view.anchor.holder.rotation.y = -view.spin
 
+    /*
+     * Turning over, if it is. Advanced after the spin because the swap copies the spin onto the new
+     * body, and applied after that because the swap replaces `view.object` from under us.
+     */
+    advanceTurn(view, plate.id, delta)
+    view.object.rotation.x = view.flip
+
     view.object.position.copy(view.world)
     view.object.scale.setScalar(view.scale)
     view.object.updateMatrixWorld()
@@ -1617,6 +1637,96 @@ function tileMaterialFor(colorIndex: number): Material {
  * Driven by the `revision` prop rather than run every frame. Every model mutation bumps it, so this
  * fires exactly when something could have changed and never allocates in the render loop.
  */
+/** How long a plate takes to turn over. Long enough to read as a turn, short enough not to wait. */
+const TURN_SECONDS = 0.34
+
+/**
+ * A plate's mesh, its draft decor and its anchor emblem — whichever face is showing.
+ *
+ * Extracted because it is now built in two places: when a plate first appears, and again halfway
+ * through a turn, when the face being shown changes. One builder means the swapped-in body cannot
+ * quietly differ from a freshly-created one.
+ */
+function buildPlateBody(id: string, faceDown: boolean): {
+  group: Group
+  decor: DraftDecor
+  anchor: AnchorVisual | undefined
+  unregister: () => void
+} {
+  const group: Group = faceDown ? createPlateBackVisual() : createPlateVisual()
+  group.renderOrder = 1
+  /*
+   * Y before X. The plate spins about its own vertical to one of six orientations, and *then* tips in
+   * world space to turn over. Under three's default `XYZ` the tip comes first and the spin is applied
+   * about an axis that is already tilted, which makes a turning plate wobble instead of rotate.
+   */
+  group.rotation.order = 'YXZ'
+  const decor = attachPlateDraftDecor(group)
+  // A face-down plate gets no emblem: one on the reverse would claim the front is showing.
+  const anchor = faceDown ? undefined : attachAnchorVisual(group)
+  owners.set(group, { kind: 'plate', id })
+  // Claims the press only while it is actually pickable — see `canDrag`. A plate sitting on the
+  // board is scenery, and pressing scenery pans.
+  const unregister = registerGrabbable(group, () => canDrag({ kind: 'plate', id }))
+  unregisters.push(unregister)
+  return { group, decor, anchor, unregister }
+}
+
+/**
+ * Turn a plate over: tip it to edge-on, change the face, tip it back.
+ *
+ * **The swap happens at exactly 90°, where neither face is visible.** A plate is 0.08 units thick
+ * against a 2-unit cell, so edge-on it is a sliver — replacing the mesh there cannot be seen, and the
+ * two halves read as one continuous rotation through 180°. The alternative, a single slab decorated
+ * on both surfaces, would look identical on something this thin and would cost a geometry rebuild.
+ *
+ * The second half runs from -90° rather than continuing past 90°, so the incoming face arrives the
+ * right way up: a mesh taken to 180° would be lying on its back.
+ *
+ * Everything except the mesh survives — position, scale, spin, screen anchor — because the view is
+ * kept and only its body is exchanged. Rebuilding the whole view here would reset `fresh` and snap
+ * the plate to its target from wherever it happened to be.
+ */
+function advanceTurn(view: View, id: string, delta: number): void {
+  const turn = view.turning
+  if (!turn) return
+
+  turn.t = Math.min(1, turn.t + delta / TURN_SECONDS)
+  const half = Math.PI / 2
+
+  if (turn.t < 0.5) {
+    view.flip = (turn.t / 0.5) * half
+    return
+  }
+
+  if (!turn.swapped) {
+    turn.swapped = true
+    view.unregister?.()
+    if (view.decor) disposeDraftDecor(view.decor)
+    if (view.anchor) disposeAnchorVisual(view.anchor)
+    owners.delete(view.object)
+    scene.value?.remove(view.object)
+
+    const body = buildPlateBody(id, turn.faceDown)
+    body.group.position.copy(view.object.position)
+    body.group.scale.copy(view.object.scale)
+    body.group.rotation.y = view.spin
+    scene.value?.add(body.group)
+
+    view.object = body.group
+    view.decor = body.decor
+    view.anchor = body.anchor
+    view.unregister = body.unregister
+    view.faceDown = turn.faceDown
+  }
+
+  view.flip = -half + ((turn.t - 0.5) / 0.5) * half
+  if (turn.t >= 1) {
+    view.flip = 0
+    view.turning = null
+  }
+}
+
 function reconcileViews(): void {
   // Tile views need their symbol texture, so there is nothing to do until the textures land. The
   // revision watcher will call again, and the load itself calls once.
@@ -1625,21 +1735,19 @@ function reconcileViews(): void {
   for (const plate of everyPlate()) {
     const existing = plateViews.get(plate.id)
     if (existing) {
-      // A plate that turned over: its face is baked into the mesh, so rebuild rather than restyle.
+      // Already on its way over; the turn will set `faceDown` when it swaps at the halfway point.
+      if (existing.turning) continue
       if (existing.faceDown === plate.faceDown) continue
-      if (existing.decor) disposeDraftDecor(existing.decor)
-      if (existing.anchor) disposeAnchorVisual(existing.anchor)
-      scene.value?.remove(existing.object)
-      owners.delete(existing.object)
-      plateViews.delete(plate.id)
+      /*
+       * A plate that turned over. Its face is baked into the mesh, so the mesh has to change — but it
+       * changes *during* the turn rather than instead of one, at the moment the plate is edge-on and
+       * neither face can be seen. See `advanceTurn`.
+       */
+      existing.turning = { faceDown: plate.faceDown, t: 0, swapped: false }
+      continue
     }
-    // A face-down plate shows its blank reverse. Chosen at creation rather than swapped later: nothing
-    // flips a plate yet, and revealing one will need to rebuild its view regardless.
-    const group: Group = plate.faceDown ? createPlateBackVisual() : createPlateVisual()
-    group.renderOrder = 1
-    const plateDecor = attachPlateDraftDecor(group)
-    // Face-down plates get none: an emblem on the reverse would claim the front is showing.
-    const anchor = plate.faceDown ? undefined : attachAnchorVisual(group)
+    const body = buildPlateBody(plate.id, plate.faceDown)
+    const { group, decor: plateDecor, anchor } = body
     plateViews.set(plate.id, {
       object: group,
       world: new Vector3(),
@@ -1652,15 +1760,14 @@ function reconcileViews(): void {
       settled: false,
       fresh: true,
       faceDown: plate.faceDown,
+      flip: 0,
+      turning: null,
+      unregister: body.unregister,
       decor: plateDecor,
       anchor,
     })
     group.rotation.y = -plate.rotation * (Math.PI / 3)
-    owners.set(group, { kind: 'plate', id: plate.id })
     scene.value.add(group)
-    // Claims the press only while it is actually pickable — see `canDrag`. A plate sitting on the
-    // board is scenery, and pressing scenery pans.
-    unregisters.push(registerGrabbable(group, () => canDrag({ kind: 'plate', id: plate.id })))
   }
 
   for (const tile of everyTile()) {
@@ -1687,6 +1794,8 @@ function reconcileViews(): void {
       spin: 0,
       regime: '',
       clipped: false,
+      flip: 0,
+      turning: null,
       settled: false,
       fresh: true,
       decor: attachDraftDecor(mesh, faceY),
@@ -1714,6 +1823,8 @@ function reconcileViews(): void {
       screenY: rewarded ? layout.value.slotCentre(stem.slot).y : 0,
       scale: 1,
       clipped: false,
+      flip: 0,
+      turning: null,
       spin: 0,
       regime: rewarded ? 'drawer' : '',
       settled: false,
