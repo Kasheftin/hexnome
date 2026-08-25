@@ -127,6 +127,7 @@ import {
   HEX_SIZE,
   departureMillis,
 } from '@/scene/constants'
+import { forgetCurrentGame, rememberCurrentGame } from '@/composables/currentGame'
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
 import { measureHeader, resetHeaderBox } from '@/scene/headerBox'
 import {
@@ -1385,6 +1386,28 @@ function startNextRound(): void {
 }
 
 const gameOver = shallowRef(false)
+
+/**
+ * Remember which game this is, so the menu can offer a way back into it, and forget it when it ends.
+ *
+ * Watched rather than done once on mount: the id comes from the route, and it is the route that
+ * changes when a player leaves one table for another.
+ *
+ * **Kept while the game is live, not only at the moment it is created.** A game is joined as often as
+ * it is started, and reloaded more often than either — remembering on every visit means the offer
+ * survives a refresh, which is exactly the case it exists for.
+ */
+watch(gameId, (id) => {
+  if (id) rememberCurrentGame(id)
+}, { immediate: true })
+
+/*
+ * The game is over: there is nothing to go back to, so the menu should stop offering it. Passing the
+ * id means a tab finishing an *old* game cannot clear the entry for one still being played elsewhere.
+ */
+watch(gameOver, (over) => {
+  if (over) forgetCurrentGame(gameId.value)
+})
 
 /** Back to the action list, with any part-built selection discarded. */
 function cancelAction(): void {

@@ -75,6 +75,7 @@ import RulesPanel from '@/ui/RulesPanel.vue'
 import { bonusKey, textOf } from '@/ui/dialText'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
 import { ApiError, createGame } from '@/api/games'
+import { currentGame } from '@/composables/currentGame'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
 import { forgetSetup, rememberSetup, savedSetup, type SavedSetup } from '@/composables/savedSetup'
 import { rememberSeat } from '@/composables/useSeat'
@@ -89,6 +90,14 @@ const router = useRouter()
 
 /** Read once on mount, so the field arrives filled rather than empty and then populated. */
 const name = ref(playerName())
+
+/**
+ * A game left unfinished, if there is one.
+ *
+ * Read once rather than watched: this screen cannot start or end a game without navigating away from
+ * itself, so the answer cannot change while it is on screen.
+ */
+const unfinished = ref(currentGame())
 
 /**
  * Another name from the pool, kept immediately.
@@ -630,13 +639,14 @@ const selectedMode = computed(() => modeInfo(mode.value))
       </p>
     </div>
 
-    <v-card
-      class="hx-panel"
-      :aria-label="step === 'title' ? 'Main menu' : 'Game setup'"
-    >
-      <!-- Step 1 -->
-      <template v-if="step === 'title'">
-        <!--
+    <div class="hx-menu__column">
+      <v-card
+        class="hx-panel"
+        :aria-label="step === 'title' ? 'Main menu' : 'Game setup'"
+      >
+        <!-- Step 1 -->
+        <template v-if="step === 'title'">
+          <!--
           Asked once, here, and kept. A name belongs to the person rather than to any one game, so it
           sits above the kinds rather than inside their settings — those are frozen against a game id.
           Optional: clear it and nothing insists.
@@ -644,179 +654,179 @@ const selectedMode = computed(() => modeInfo(mode.value))
           Stored on `change` rather than on every keystroke, so a half-typed name is not what gets
           remembered if the tab is closed mid-word.
         -->
-        <v-text-field
-          id="player-name"
-          v-model="name"
-          label="Your name"
-          placeholder="Player"
-          maxlength="40"
-          @change="rememberName(name)"
-        >
-          <!--
+          <v-text-field
+            id="player-name"
+            v-model="name"
+            label="Your name"
+            placeholder="Player"
+            maxlength="40"
+            @change="rememberName(name)"
+          >
+            <!--
             In the field's own slot rather than beside it. A button nested in a `<label>` is also a
             click on the label, which used to drag focus into the field it had just filled; the slot
             is inside the control but outside the label, so it does not.
           -->
-          <template #append-inner>
-            <v-tooltip
-              text="Suggest another name"
-              location="top"
+            <template #append-inner>
+              <v-tooltip
+                text="Suggest another name"
+                location="top"
+              >
+                <template #activator="{ props: tip }">
+                  <v-btn
+                    v-bind="tip"
+                    variant="text"
+                    icon
+                    rounded="md"
+                    size="x-small"
+                    aria-label="Suggest another name"
+                    @click="reroll"
+                  >
+                    <v-icon
+                      :icon="mdiDiceMultiple"
+                      size="32"
+                    />
+                  </v-btn>
+                </template>
+              </v-tooltip>
+            </template>
+          </v-text-field>
+
+          <v-divider />
+
+          <fieldset class="hx-group hx-group--stack">
+            <legend class="hx-group__legend">
+              New game
+            </legend>
+            <v-btn
+              v-for="entry in GAME_KINDS"
+              :key="entry.id"
+              block
+              :disabled="!entry.available"
+              class="hx-option"
+              @click="chooseKind(entry.id)"
             >
-              <template #activator="{ props: tip }">
-                <v-btn
-                  v-bind="tip"
-                  variant="text"
-                  icon
-                  rounded="md"
-                  size="x-small"
-                  aria-label="Suggest another name"
-                  @click="reroll"
-                >
-                  <v-icon
-                    :icon="mdiDiceMultiple"
-                    size="32"
-                  />
-                </v-btn>
-              </template>
-            </v-tooltip>
-          </template>
-        </v-text-field>
+              <span class="hx-option__label">{{ entry.label }}</span>
+              <v-spacer />
+              <v-chip
+                v-if="!entry.available"
+                size="small"
+                variant="text"
+                class="hx-option__note"
+              >
+                Soon
+              </v-chip>
+            </v-btn>
+          </fieldset>
 
-        <v-divider />
-
-        <fieldset class="hx-group hx-group--stack">
-          <legend class="hx-group__legend">
-            New game
-          </legend>
-          <v-btn
-            v-for="entry in GAME_KINDS"
-            :key="entry.id"
-            block
-            :disabled="!entry.available"
-            class="hx-option"
-            @click="chooseKind(entry.id)"
-          >
-            <span class="hx-option__label">{{ entry.label }}</span>
-            <v-spacer />
-            <v-chip
-              v-if="!entry.available"
-              size="small"
-              variant="text"
-              class="hx-option__note"
-            >
-              Soon
-            </v-chip>
-          </v-btn>
-        </fieldset>
-
-        <!--
+          <!--
           Below the kinds and quieter than them: it starts nothing, and somebody who came here to
           play should not have to read past it.
         -->
-        <v-btn
-          ref="rulesButton"
-          :border="false"
-          color="muted"
-          class="hx-panel__rules"
-          @click="rulesOpen = true"
-        >
-          Game rules
-        </v-btn>
-      </template>
+          <v-btn
+            ref="rulesButton"
+            :border="false"
+            color="muted"
+            class="hx-panel__rules"
+            @click="rulesOpen = true"
+          >
+            Game rules
+          </v-btn>
+        </template>
 
-      <!-- Step 2 -->
-      <template v-else>
-        <!--
+        <!-- Step 2 -->
+        <template v-else>
+          <!--
           First, because it is the biggest thing about a table and everything below reads differently
           once it is set. Absent for a solo game rather than shown as a fixed 1, which would be a
           control that cannot be used.
         -->
-        <fieldset
-          v-if="kind === 'multiplayer'"
-          class="hx-group"
-        >
-          <legend class="hx-group__legend">
-            Players
-          </legend>
-          <v-btn-toggle
-            v-model="playerCount"
-            color="success"
-            base-color="on-surface"
-            variant="text"
-            mandatory
-            class="hx-choices"
+          <fieldset
+            v-if="kind === 'multiplayer'"
+            class="hx-group"
           >
-            <v-btn
-              v-for="count in PLAYER_COUNT_CHOICES"
-              :key="count"
-              :value="count"
+            <legend class="hx-group__legend">
+              Players
+            </legend>
+            <v-btn-toggle
+              v-model="playerCount"
+              color="success"
+              base-color="on-surface"
+              variant="text"
+              mandatory
+              class="hx-choices"
             >
-              {{ count }}
-            </v-btn>
-          </v-btn-toggle>
-        </fieldset>
+              <v-btn
+                v-for="count in PLAYER_COUNT_CHOICES"
+                :key="count"
+                :value="count"
+              >
+                {{ count }}
+              </v-btn>
+            </v-btn-toggle>
+          </fieldset>
 
-        <fieldset class="hx-group">
-          <legend class="hx-group__legend">
-            Mode
-          </legend>
-          <v-btn-toggle
-            v-model="mode"
-            color="success"
-            base-color="on-surface"
-            variant="text"
-            mandatory
-            class="hx-choices hx-choices--stacked"
-          >
-            <v-btn
-              v-for="entry in SINGLEPLAYER_MODES"
-              :key="entry.id"
-              :value="entry.id"
-              class="hx-option"
+          <fieldset class="hx-group">
+            <legend class="hx-group__legend">
+              Mode
+            </legend>
+            <v-btn-toggle
+              v-model="mode"
+              color="success"
+              base-color="on-surface"
+              variant="text"
+              mandatory
+              class="hx-choices hx-choices--stacked"
             >
-              <span class="hx-option__label">{{ entry.label }}</span>
-              <v-spacer />
-              <span class="hx-option__note">{{ entry.rounds }} rounds</span>
-            </v-btn>
-          </v-btn-toggle>
-          <p
-            v-if="selectedMode?.description"
-            class="hx-group__hint"
-          >
-            {{ selectedMode.description }}
-          </p>
-        </fieldset>
-
-        <fieldset class="hx-group">
-          <legend class="hx-group__legend">
-            Placement
-          </legend>
-          <v-btn-toggle
-            v-model="placementRule"
-            color="success"
-            base-color="on-surface"
-            variant="text"
-            mandatory
-            class="hx-choices hx-choices--stacked"
-          >
-            <v-btn
-              v-for="rule in PLACEMENT_RULES"
-              :key="rule"
-              :value="rule"
-              class="hx-option"
+              <v-btn
+                v-for="entry in SINGLEPLAYER_MODES"
+                :key="entry.id"
+                :value="entry.id"
+                class="hx-option"
+              >
+                <span class="hx-option__label">{{ entry.label }}</span>
+                <v-spacer />
+                <span class="hx-option__note">{{ entry.rounds }} rounds</span>
+              </v-btn>
+            </v-btn-toggle>
+            <p
+              v-if="selectedMode?.description"
+              class="hx-group__hint"
             >
-              <span class="hx-option__label">{{ PLACEMENT_RULE_LABELS[rule] }}</span>
-              <v-spacer />
-              <span class="hx-option__note">{{ PLACEMENT_RULE_HINTS[rule] }}</span>
-            </v-btn>
-          </v-btn-toggle>
-          <p class="hx-group__hint">
-            A tile with nothing beside it may go anywhere. Once it touches something, this decides how
-            much of what it touches has to share its colour or its symbol.
-          </p>
-        </fieldset>
+              {{ selectedMode.description }}
+            </p>
+          </fieldset>
 
-        <!--
+          <fieldset class="hx-group">
+            <legend class="hx-group__legend">
+              Placement
+            </legend>
+            <v-btn-toggle
+              v-model="placementRule"
+              color="success"
+              base-color="on-surface"
+              variant="text"
+              mandatory
+              class="hx-choices hx-choices--stacked"
+            >
+              <v-btn
+                v-for="rule in PLACEMENT_RULES"
+                :key="rule"
+                :value="rule"
+                class="hx-option"
+              >
+                <span class="hx-option__label">{{ PLACEMENT_RULE_LABELS[rule] }}</span>
+                <v-spacer />
+                <span class="hx-option__note">{{ PLACEMENT_RULE_HINTS[rule] }}</span>
+              </v-btn>
+            </v-btn-toggle>
+            <p class="hx-group__hint">
+              A tile with nothing beside it may go anywhere. Once it touches something, this decides how
+              much of what it touches has to share its colour or its symbol.
+            </p>
+          </fieldset>
+
+          <!--
           The rest of the dials, as a readout you can open.
 
           It states the values rather than saying "Advanced settings", so the common case — glancing to
@@ -824,66 +834,84 @@ const selectedMode = computed(() => modeInfo(mode.value))
           is the button: the gear says what it does, but a thin icon is a poor target for a row that is
           already the right shape to press.
         -->
-        <v-btn
-          ref="gear"
-          block
-          :append-icon="mdiCog"
-          :aria-expanded="settingsOpen"
-          aria-label="Game settings"
-          class="hx-summary"
-          @click="settingsOpen = true"
-        >
-          <span class="hx-summary__values">
-            <span
-              v-for="dial in summaryDials"
-              :key="dial.key"
-              class="hx-summary__pill"
-            >
-              <span class="hx-summary__label">{{ dial.short }}</span>
-              <span class="hx-summary__value">{{ pillValue(dial) }}</span>
+          <v-btn
+            ref="gear"
+            block
+            :append-icon="mdiCog"
+            :aria-expanded="settingsOpen"
+            aria-label="Game settings"
+            class="hx-summary"
+            @click="settingsOpen = true"
+          >
+            <span class="hx-summary__values">
+              <span
+                v-for="dial in summaryDials"
+                :key="dial.key"
+                class="hx-summary__pill"
+              >
+                <span class="hx-summary__label">{{ dial.short }}</span>
+                <span class="hx-summary__value">{{ pillValue(dial) }}</span>
+              </span>
+              <span
+                v-if="bonusSummary"
+                class="hx-summary__pill"
+              >
+                <span class="hx-summary__label">group bonus</span>
+                <span class="hx-summary__value">{{ bonusSummary }}</span>
+              </span>
             </span>
-            <span
-              v-if="bonusSummary"
-              class="hx-summary__pill"
-            >
-              <span class="hx-summary__label">group bonus</span>
-              <span class="hx-summary__value">{{ bonusSummary }}</span>
-            </span>
-          </span>
-        </v-btn>
+          </v-btn>
+
+          <v-btn
+            block
+            color="primary"
+            :loading="starting"
+            class="hx-panel__start"
+            @click="startGame"
+          >
+            {{ starting ? 'Opening…' : 'Start game' }}
+          </v-btn>
+
+          <!-- The one failure this screen can have of its own: the table would not open. -->
+          <v-alert
+            v-if="startProblem"
+            type="error"
+            variant="tonal"
+            density="compact"
+            role="alert"
+          >
+            {{ startProblem }}
+          </v-alert>
+        </template>
 
         <v-btn
-          block
-          color="primary"
-          :loading="starting"
-          class="hx-panel__start"
-          @click="startGame"
+          v-if="step !== 'title'"
+          :border="false"
+          color="muted"
+          class="hx-panel__back"
+          @click="back"
         >
-          {{ starting ? 'Opening…' : 'Start game' }}
+          Back
         </v-btn>
+      </v-card>
 
-        <!-- The one failure this screen can have of its own: the table would not open. -->
-        <v-alert
-          v-if="startProblem"
-          type="error"
-          variant="tonal"
-          density="compact"
-          role="alert"
-        >
-          {{ startProblem }}
-        </v-alert>
-      </template>
+      <!--
+        A way back into a game already in progress.
 
+        Its own thing below the panel, not another entry inside it: everything in there starts
+        something, and this resumes. It appears only when there is a table to return to — the id is
+        dropped the moment that game ends (composables/currentGame.ts).
+      -->
       <v-btn
-        v-if="step !== 'title'"
-        :border="false"
-        color="muted"
-        class="hx-panel__back"
-        @click="back"
+        v-if="unfinished && step === 'title'"
+        block
+        color="primary"
+        class="hx-resume"
+        :to="{ path: '/game', query: { id: unfinished } }"
       >
-        Back
+        Continue playing
       </v-btn>
-    </v-card>
+    </div>
 
     <RulesPanel
       :open="rulesOpen"
@@ -1033,6 +1061,14 @@ const selectedMode = computed(() => modeInfo(mode.value))
     flex-direction: column;
     gap: 12px;
     padding: 16px;
+  }
+
+  /* The panel and whatever sits under it, as one column of the menu's grid. */
+  .hx-menu__column {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
   }
 
   .hx-panel__rules {
