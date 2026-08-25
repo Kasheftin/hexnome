@@ -53,7 +53,8 @@ const retryable = computed(() => store.loadingError !== null
   place-items: center;
   height: 100%;
   color: #6b7382;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }

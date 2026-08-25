@@ -933,7 +933,8 @@ const selectedMode = computed(() => modeInfo(mode.value))
   background: transparent;
   color: #79808f;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.08em;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -964,7 +965,8 @@ const selectedMode = computed(() => modeInfo(mode.value))
   background: transparent;
   color: #79808f;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
@@ -1013,7 +1015,15 @@ h1 {
   margin: 0;
   color: #e8c878;
   font-weight: 600;
+  /*
+   * The game lockup: display type, outside the text scale in styles/main.css.
+   *
+   * It has to opt out of the base **line height** as well as the size. That line height is absolute
+   * (1.5rem), so it does not grow with the font — inheriting it put 52px capitals in a 24px box and
+   * pulled the tagline up under them. An exception is only an exception if it declines both.
+   */
   font-size: clamp(34px, 6vw, 52px);
+  line-height: normal;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -1021,7 +1031,8 @@ h1 {
 .tagline {
   margin: 6px 0 0;
   color: #6b7382;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.34em;
   text-transform: uppercase;
 }
@@ -1052,7 +1063,8 @@ h1 {
 legend {
   padding: 0 0 8px;
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-line);
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
@@ -1079,7 +1091,8 @@ legend {
 }
 
 .option-label {
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1107,8 +1120,8 @@ legend {
 .problem {
   margin: 8px 0 0;
   color: #d98b74;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .option.start {
@@ -1125,7 +1138,8 @@ legend {
 .rounds,
 .soon {
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1134,8 +1148,8 @@ legend {
 .description {
   margin: 10px 0 0;
   color: #79808f;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 /*
@@ -1180,7 +1194,8 @@ legend {
   padding-top: 16px;
   border-top: 1px solid #3a3222;
   color: #e8c878;
-  font-size: 11px;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-line);
   font-weight: 600;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -1243,14 +1258,16 @@ legend {
 
 .pill-label {
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-line);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .pill-value {
   color: #cfd4de;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1278,7 +1295,8 @@ legend {
 
 .who-label {
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-line);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1293,7 +1311,8 @@ legend {
   background: #1b1e24;
   color: #cfd4de;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .who input::placeholder {
@@ -1353,7 +1372,8 @@ legend {
   background: none;
   color: #6b7382;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;

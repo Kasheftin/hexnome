@@ -301,7 +301,8 @@ const draftSummary = computed(() => {
 .turn {
   margin: 0;
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -315,7 +316,8 @@ const draftSummary = computed(() => {
   background: transparent;
   color: #e8c878;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
@@ -391,14 +393,16 @@ const draftSummary = computed(() => {
 
 .verb {
   color: #cfd4de;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .hint {
   color: #79808f;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   white-space: nowrap;
 }
 

@@ -2611,7 +2611,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 }
 
 .back {
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.1em;
   text-decoration: none;
 }
@@ -2635,7 +2636,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .game-id {
   margin: 0;
   color: #79808f;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.06em;
 }
 
@@ -2652,7 +2654,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
 .counters dt {
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -2660,7 +2663,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .counters dd {
   margin: 0 6px 0 0;
   color: #e8c878;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   /* Tabular, so the header does not shift as the turn ticks past 9. */
   font-variant-numeric: tabular-nums;
 }
@@ -2687,7 +2691,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
    * height — hence 24px controls in both. It was a pixel out before, from 9px against 10px.
    */
   padding: 8px 16px;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 /* The title and its close control on one line, so the control reads as belonging to the panel. */
@@ -2769,7 +2774,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   background: transparent;
   color: #e8c878;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   cursor: pointer;
   transition: background-color 140ms;
 }
@@ -2816,8 +2822,13 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #e8c878;
 }
 
+/*
+ * `min-width`, not `width`: this column is only here to keep the rows aligned, and a fixed 20px was
+ * sized for the 11px text it used to inherit — at the base size "R1" needs 24 and was being clipped.
+ * A minimum aligns them without deciding how wide the label is allowed to be.
+ */
 .round-no {
-  width: 20px;
+  min-width: 24px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
 }
@@ -2849,14 +2860,16 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   padding-top: 7px;
   border-top: 1px solid #2a2c33;
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .so-far strong {
   color: #e8c878;
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -2944,7 +2957,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   z-index: 30;
   background: rgb(12 14 18 / 88%);
   color: #cfd4de;
-  font-size: 14px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.08em;
   text-align: center;
 }
@@ -2952,12 +2966,12 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .table-state p {
   max-width: 34ch;
   margin: 0;
-  line-height: 1.6;
 }
 
 .table-back {
   color: #e8c878;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -2973,7 +2987,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
 .viewing-label {
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -2981,7 +2996,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 .viewing strong {
   color: #cfd4de;
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 /* Amber while you are reading somebody else's board, so it never passes for your own. */
@@ -2991,7 +3007,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
 .viewing-note {
   color: #7d6a41;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -3014,7 +3031,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   background: transparent;
   color: #79808f;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   text-align: left;
   cursor: pointer;
 }
@@ -3102,11 +3120,12 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
  * *moves* — the round, the turn, the round's targets — stays.
  */
 @media (max-width: 720px) {
+  /* Same 4px grid as the desktop header — this block was missed when that rule went in. */
   .top {
-    right: 14px;
+    right: 16px;
     flex-wrap: wrap;
-    gap: 6px 12px;
-    padding: 7px 10px;
+    gap: 8px 12px;
+    padding: 8px 12px;
   }
 
   .top .game-id {
@@ -3164,14 +3183,16 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
  */
 .seat-you {
   color: #e8c878;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .seat-note {
   color: #6b7382;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }

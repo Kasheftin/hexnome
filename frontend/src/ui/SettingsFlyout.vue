@@ -145,7 +145,8 @@ watch(() => props.open, async (open) => {
 h2 {
   margin: 0;
   color: #e8c878;
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   font-weight: 600;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -212,7 +213,8 @@ h2 {
   background: transparent;
   color: #e8c878;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;

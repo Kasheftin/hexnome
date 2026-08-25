@@ -169,8 +169,8 @@ watch(() => props.open, async (open) => {
   margin: 0;
   padding: 0 20px 12px;
   color: #79808f;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .body {
@@ -200,22 +200,24 @@ watch(() => props.open, async (open) => {
 .name {
   display: block;
   color: #cfd4de;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .hint {
   display: block;
   margin-top: 2px;
   color: #6b7382;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .value {
   padding: 8px 0;
   border-top: 1px solid #22252b;
   color: #e8c878;
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   font-variant-numeric: tabular-nums;
   text-align: right;
   vertical-align: top;

@@ -539,7 +539,8 @@ const doubleCounted = computed(() =>
 .bonus {
   margin-right: 3px;
   color: #8fe6c0;
-  font-size: 10px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .none {
@@ -579,7 +580,8 @@ const doubleCounted = computed(() =>
 
 .total strong {
   color: #e8c878;
-  font-size: 18px;
+  font-size: var(--text-lg);
+  line-height: var(--text-lg-line);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -587,7 +589,8 @@ const doubleCounted = computed(() =>
 .note {
   margin: 8px 0 0;
   color: #6b7382;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .sr-only {

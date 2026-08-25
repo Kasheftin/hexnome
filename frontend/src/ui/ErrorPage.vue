@@ -81,7 +81,15 @@ h1 {
   margin: 0;
   color: #e8c878;
   font-weight: 600;
+  /*
+   * The game lockup: display type, outside the text scale in styles/main.css.
+   *
+   * It has to opt out of the base **line height** as well as the size. That line height is absolute
+   * (1.5rem), so it does not grow with the font — inheriting it put 52px capitals in a 24px box and
+   * pulled the tagline up under them. An exception is only an exception if it declines both.
+   */
   font-size: clamp(34px, 6vw, 52px);
+  line-height: normal;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
@@ -89,7 +97,8 @@ h1 {
 .tagline {
   margin: 6px 0 0;
   color: #6b7382;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.34em;
   text-transform: uppercase;
 }
@@ -108,8 +117,8 @@ h1 {
 .what {
   margin: 0;
   color: #cfd4de;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .ways {
@@ -140,7 +149,8 @@ h1 {
 }
 
 .option-label {
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }

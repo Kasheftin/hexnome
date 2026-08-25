@@ -241,7 +241,8 @@ onBeforeUnmount(() => watching?.disconnect())
   margin: 0;
   color: #e8c878;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -295,7 +296,8 @@ onBeforeUnmount(() => watching?.disconnect())
   background: transparent;
   color: #79808f;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   text-align: left;
   cursor: pointer;
   transition: color 140ms, background-color 140ms;
@@ -328,14 +330,15 @@ onBeforeUnmount(() => watching?.disconnect())
 .prose {
   /* A measure, not a width: prose past about 80 characters a line is hard to track back. */
   max-width: 62ch;
-  font-size: 13px;
-  line-height: 1.65;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .prose :deep(h1) {
   margin: 18px 0 6px;
   color: #e8c878;
-  font-size: 20px;
+  font-size: var(--text-lg);
+  line-height: var(--text-lg-line);
 }
 
 .prose :deep(h2) {
@@ -344,14 +347,16 @@ onBeforeUnmount(() => watching?.disconnect())
   padding-top: 14px;
   border-top: 1px solid #2a2c33;
   color: #e8c878;
-  font-size: 15px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   scroll-margin-top: 6px;
 }
 
 .prose :deep(h3) {
   margin: 20px 0 6px;
   color: #cfd4de;
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.04em;
 }
 
@@ -379,12 +384,20 @@ onBeforeUnmount(() => watching?.disconnect())
   color: #cfd4de;
 }
 
+/*
+ * Dense material, deliberately one step down.
+ *
+ * A three-column rules table is 334px wide at the base size against a 278px column on a phone — it
+ * overflowed. Tables and inline code are what the small tier is *for*: they are scanned rather than
+ * read, and they are the one place where fitting the width matters more than matching the body.
+ */
 .prose :deep(code) {
   padding: 1px 4px;
   border-radius: 2px;
   background: rgb(255 255 255 / 6%);
   color: #e8c878;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-line);
 }
 
 .prose :deep(a) {
@@ -434,7 +447,8 @@ onBeforeUnmount(() => watching?.disconnect())
   width: 100%;
   margin: 0 0 14px;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-line);
 }
 
 .prose :deep(th),

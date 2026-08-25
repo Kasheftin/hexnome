@@ -11,6 +11,33 @@ body,
   margin: 0;
 }
 
+/*
+ * The type scale. Three sizes, and everything that is text uses one of them.
+ *
+ * There used to be five tiers — 10, 11, 12, 13 and 14/15px — arrived at one component at a time, and
+ * **not one declaration anywhere was 16px**. The base size was never actually used: `body` set no size
+ * at all, so every panel inherited the browser's 16px and then immediately overrode it downward.
+ *
+ * Sizes are in `rem` so they follow the reader's own browser setting; the root is left alone at its
+ * default 16px rather than pinned, because pinning it is what breaks that.
+ *
+ * **Line heights are absolute, not ratios**, and all three are multiples of 8 — 16 / 24 / 32. That is
+ * the same 4px grid the padding and gaps use, so a line of text occupies a whole number of grid steps
+ * and rows line up with the things beside them. A ratio would give 12px text an 18px line and put it
+ * permanently off the grid.
+ *
+ * Two deliberate exceptions, both display type rather than text: the `h1` game lockup
+ * (`clamp(34px, 6vw, 52px)`) and `TurnAnnounce`'s full-screen numeral. Both are marked where they sit.
+ */
+:root {
+  --text-sm: 0.75rem;
+  --text-sm-line: 1rem;
+  --text-base: 1rem;
+  --text-base-line: 1.5rem;
+  --text-lg: 1.25rem;
+  --text-lg-line: 2rem;
+}
+
 body {
   background: #0d0f13;
   color: #cfd4de;
@@ -20,6 +47,9 @@ body {
     -apple-system,
     'Segoe UI',
     sans-serif;
+  /* The base every component now inherits instead of restating. */
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
 }
@@ -122,11 +152,16 @@ a {
   pointer-events: none;
 }
 
+/*
+ * Every panel title on screen — the header lockup, SCORING, GAME RULES. On the scale like everything
+ * else; the uppercase and the tracking are what set it apart, not a size of its own.
+ */
 .chrome-title {
   margin: 0;
   color: #e8c878;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }

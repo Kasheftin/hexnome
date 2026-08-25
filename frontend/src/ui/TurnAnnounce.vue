@@ -129,9 +129,16 @@ const emit = defineEmits<{ shown: [] }>()
   margin: 0;
 }
 
+/*
+ * Display type, deliberately outside the 12/16/20 text scale in styles/main.css — as the `h1` game
+ * lockup is. This is a full-screen announcement whose whole job is to be unmissable for a moment; at
+ * 20px it would read as a caption and stop announcing anything.
+ */
 .label {
   color: #9aa2b1;
   font-size: 32px;
+  /* Opts out of the base line height too, which is absolute — see the `h1` lockup. Matches `.number`. */
+  line-height: 1;
   font-weight: 500;
   letter-spacing: 0.34em;
   text-transform: uppercase;
@@ -159,7 +166,8 @@ const emit = defineEmits<{ shown: [] }>()
 .whose {
   margin: 0;
   color: #d8bd8b;
-  font-size: 22px;
+  font-size: var(--text-lg);
+  line-height: var(--text-lg-line);
   font-weight: 500;
   text-shadow: 0 2px 20px rgb(0 0 0 / 90%), 0 0 4px rgb(0 0 0 / 95%);
 }

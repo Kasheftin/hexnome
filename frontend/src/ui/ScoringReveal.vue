@@ -493,7 +493,8 @@ const doubleCounted = computed(() =>
 
 .total strong {
   color: #e8c878;
-  font-size: 18px;
+  font-size: var(--text-lg);
+  line-height: var(--text-lg-line);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -508,7 +509,8 @@ const doubleCounted = computed(() =>
 }
 
 .aside strong {
-  font-size: 15px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 /* A deduction should not look like another way of earning. */
@@ -519,7 +521,8 @@ const doubleCounted = computed(() =>
 .note {
   margin: 8px 0 0;
   color: #6b7382;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .sr-only {

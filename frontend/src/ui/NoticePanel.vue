@@ -92,9 +92,9 @@ watch(() => props.notice, async (text) => {
 .said {
   margin: 0 0 16px;
   color: #cfd4de;
-  font-size: 13px;
+  font-size: var(--text-base);
   /* Roomier than the panels that hold numbers: this is a sentence, and sentences are read. */
-  line-height: 1.5;
+  line-height: var(--text-base-line);
 }
 
 /* The same affordance the results panel advances on, so a dismissal reads as a dismissal. */

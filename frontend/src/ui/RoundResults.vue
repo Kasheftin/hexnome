@@ -403,7 +403,8 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
   max-height: 90vh;
   padding: 18px 20px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 /* ── the accordion ─────────────────────────────────────────────────────────── */
@@ -517,7 +518,8 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 
 .grand strong {
   color: #8fe6c0;
-  font-size: 22px;
+  font-size: var(--text-lg);
+  line-height: var(--text-lg-line);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -525,7 +527,8 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 .note {
   margin: 8px 0 0;
   color: #6b7382;
-  font-size: 11px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
 }
 
 .action {
@@ -599,7 +602,8 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
   background: transparent;
   color: #79808f;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-base);
+  line-height: var(--text-base-line);
   cursor: pointer;
   transition: border-color 140ms, color 140ms, background-color 140ms;
 }
