@@ -665,12 +665,18 @@ const selectedMode = computed(() => modeInfo(mode.value))
               <template #activator="{ props: tip }">
                 <v-btn
                   v-bind="tip"
-                  :icon="mdiDiceMultiple"
                   variant="text"
+                  icon
+                  rounded="md"
                   size="x-small"
                   aria-label="Suggest another name"
                   @click="reroll"
-                />
+                >
+                  <v-icon
+                    :icon="mdiDiceMultiple"
+                    size="32"
+                  />
+                </v-btn>
               </template>
             </v-tooltip>
           </template>

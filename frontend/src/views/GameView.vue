@@ -2403,7 +2403,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
             <span class="per">{{ target.points }}</span>
           </span>
         </span>
-        <span class="earned live">{{ scoreOf(count.round - 1) }}</span>
       </v-btn>
     </header>
 

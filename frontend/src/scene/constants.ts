@@ -244,9 +244,20 @@ export const PLATE_SLOT_FILL = 0.92
  * what it is — a stack you work down, newest on top.
  */
 
-export const SOURCE_LEFT_PX = 14
-/** Clear of the title panel, which is 14px down and about 40px tall. */
-export const SOURCE_TOP_PX = 66
+/** Flush with the header, which `.top` also puts 16px from the left edge. */
+export const SOURCE_LEFT_PX = 16
+/**
+ * Clear of the header at its **tallest**, not its shortest.
+ *
+ * The header sits 16px down and is 56px tall on a wide screen, but it wraps on a narrow one — and the
+ * column's top is a constant, so a value chosen for the unwrapped case put the header straight over
+ * lot 0 on a phone. That overlap has been growing all along: 18px when it was first measured, then
+ * 54px after the type scale, then 70px once the header's icons went from 24 to 40.
+ *
+ * 104 = 16 above the header + 88 for a header of two rows + 16 of gap below it. A single-row header
+ * simply leaves more air above the column, which costs nothing.
+ */
+export const SOURCE_TOP_PX = 104
 export const SOURCE_PADDING_PX = 9
 /** Between lots. Small: they read as one stack, not a set of unrelated panels. */
 export const SOURCE_LOT_GAP_PX = 5
