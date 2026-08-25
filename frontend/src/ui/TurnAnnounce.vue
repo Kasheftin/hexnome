@@ -130,7 +130,7 @@ const emit = defineEmits<{ shown: [] }>()
 }
 
 /*
- * Display type, deliberately outside the 12/16/20 text scale in styles/main.css — as the `h1` game
+ * Display type, deliberately outside the 12/16/20 text scale in styles/main.scss — as the `h1` game
  * lockup is. This is a full-screen announcement whose whole job is to be unmissable for a moment; at
  * 20px it would read as a caption and stop announcing anything.
  */

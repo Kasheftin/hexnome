@@ -1,6 +1,7 @@
 import { fileURLToPath, URL } from 'node:url'
 import templateCompilerOptions from '@tresjs/core/template-compiler-options'
 import vue from '@vitejs/plugin-vue'
+import vuetify from 'vite-plugin-vuetify'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
@@ -13,6 +14,20 @@ export default defineConfig({
     // wrong fails silently — Vue cannot resolve <primitive>, so the element renders
     // nothing at all and only a console warning says why.
     vue(templateCompilerOptions),
+    /*
+     * `autoImport` registers components on use, so nothing has to be imported per file and only what
+     * is used is bundled.
+     *
+     * `configFile` is the important half. The plugin intercepts every Vuetify style import and
+     * rewrites it as `@use "<configFile>"` then `@use "<the real file>"`, so our settings are in
+     * scope *before* the framework's SCSS compiles — see src/styles/vuetify-settings.scss. Without
+     * it, changing something like `$border-radius-root` would mean overriding compiled CSS instead
+     * of configuring it.
+     */
+    vuetify({
+      autoImport: true,
+      styles: { configFile: 'src/styles/vuetify-settings.scss' },
+    }),
   ],
   resolve: {
     alias: {

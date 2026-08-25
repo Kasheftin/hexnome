@@ -1,0 +1,48 @@
+// Vuetify's SCSS settings — the single place the framework's own build is configured.
+//
+// `vite-plugin-vuetify` is pointed at this file (`styles: { configFile }` in vite.config.ts), and it
+// rewrites every Vuetify style import as `@use "<this file>"` followed by `@use "<the real one>"`.
+// So these land *before* Vuetify compiles, which is what makes them settings rather than overrides —
+// no specificity fight, no `!important`, nothing to undo later.
+//
+// `@forward`, not `@use`: forwarding re-exposes the configured values so our own SCSS can read them
+// through `mixins.import.scss` and stay in step with whatever the framework was built with.
+//
+// **Vuetify 4 path note:** the entry point is `vuetify/styles/settings`, not `vuetify/settings` —
+// the package's `exports` map only publishes `./styles/*`, so the shorter form does not resolve.
+//
+// Most of the look follows from `$border-radius-root` and the typography below, because Vuetify
+// derives per-component values from them: `$button-border-radius`, `$card-border-radius` and the rest
+// are all `settings.$border-radius-root !default`. Set the root, and the framework follows.
+@forward 'vuetify/styles/settings' with (
+  // 4px, the same grid the spacing uses. Vuetify's default is 4px too, but it is stated here because
+  // the whole chrome depends on it and a framework default is not a decision.
+  $border-radius-root: 4px,
+
+  // The type scale, moved out of `main.css` and made the framework's own.
+  //
+  // 1rem base with a 1.5 line height, matching what the app already settled on. Vuetify multiplies
+  // `$font-size-root` through its components, so this is what makes a `v-btn` 16px without touching
+  // a single component.
+  $font-size-root: 16px,
+  $line-height-root: 1.5,
+  $body-font-family: ('Inter', system-ui, -apple-system, 'Segoe UI', sans-serif),
+
+  // Hairline borders. `$border-color-root` is what `v-btn`, `v-card` and `v-field` all reach for, so
+  // one value carries the whole chrome.
+  $border-width-root: 1px
+);
+
+// **Only global settings can go above, and that is a Vuetify 4 constraint worth knowing.**
+//
+// `vuetify/styles/settings` forwards `variables`, `colors`, `elevations` and `utilities` — the
+// framework-wide values. Per-component variables like `$button-height` live in each component's own
+// `_variables.scss` (`vuetify/lib/components/VBtn/_variables.scss`), which this `@forward` does not
+// reach and the package's `exports` map does not publish. Setting one here fails the build with
+// "This variable was not declared with !default in the @used module".
+//
+// Vuetify 3 shipped a `_component-variables.sass` that made them discoverable; version 4 dropped it.
+//
+// So per-component sizing and typography are set at **runtime** instead, through `defaults` in
+// plugins/vuetify.ts, and anything that genuinely needs CSS goes in the `components` layer. That is
+// no worse: `defaults` are per-instance overridable, which SCSS variables are not.

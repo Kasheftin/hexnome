@@ -1145,7 +1145,7 @@ owns layout; the renderer follows.
 #### Borders are drawn over a box, never by it
 
 The house rule for panels and controls in the chrome: no `border` on the element, a `::before` at
-`inset: 0` carrying it instead (`.chrome-panel::before` in `styles/main.css`, and the same shape on
+`inset: 0` carrying it instead (`.chrome-panel::before` in `styles/main.scss`, and the same shape on
 each button).
 
 A real border is part of the box, so a 1px edge makes a control 2px taller and the row it sits in 2px
@@ -1649,7 +1649,7 @@ deliberately **not** `tonemapping_fragment`. Alpha then blends in the sRGB frame
 does for a DOM element.
 
 The one unavoidable duplication: `CHROME_PANEL` in `scene/constants.ts` restates the border colour,
-radius and fill from `.chrome-panel` in `src/styles/main.css`, because GL cannot read CSS. They sit
+radius and fill from `.chrome-panel` in `src/styles/main.scss`, because GL cannot read CSS. They sit
 side by side on screen, so a shade of drift would be obvious — both carry a comment saying so.
 
 **The panel border is also where a container reports whether it is live.** A turn makes exactly one

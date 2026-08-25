@@ -1,0 +1,34 @@
+/*
+ * The cascade order for the whole app, and nothing else.
+ *
+ * **This file must be imported before Vuetify's stylesheet** — see main.ts, where it is the first
+ * import in the file. A layer's position is fixed the moment its name is first seen, so a declaration
+ * that arrives after Vuetify's CSS is a no-op: the names already have positions, and re-stating them
+ * changes nothing. That is not theoretical — with this order living at the bottom of `main.scss` the
+ * minifier pruned it to a bare `@layer components;`, having correctly worked out the rest was
+ * redundant. The order still came out right, but by accident of bundle order rather than by design.
+ *
+ * It lives alone rather than at the top of `main.scss` because `main.scss` is imported *after* the
+ * Vuetify plugin (it needs the theme's custom properties to exist), and this has to come before it.
+ *
+ * **Later layer beats earlier layer, whatever the specificity.** That is the whole point: Vuetify
+ * writes selectors like `.v-slider.v-input--horizontal > .v-input__control` (0,3,0), and a plain
+ * `.hx-card` (0,1,0) in a later layer still wins. No `!important`, no `:deep()`, no nesting to
+ * out-specify anything.
+ *
+ * The five `vuetify-*` names are Vuetify 4's own, verified against its compiled CSS.
+ *
+ * Two of ours at the end:
+ *
+ *   `legacy`     the hand-written CSS this migration is replacing, kept working while it shrinks.
+ *                Nothing new goes here. When it is empty, the layer goes too.
+ *   `components` our own component styles, written in BEM with the `hx-` prefix.
+ *
+ * `legacy` sits before `components` so a converted component always beats the old rule it replaces,
+ * and the two can overlap during the migration without a fight.
+ *
+ * One caveat, from the article this follows: for `!important` declarations layer order **reverses** —
+ * earlier layers win. Nothing here relies on that, and nothing here should need `!important` at all.
+ */
+@layer vuetify-core, vuetify-components, vuetify-overrides, vuetify-utilities, vuetify-final, legacy,
+  components;

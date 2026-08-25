@@ -1,0 +1,128 @@
+@use '@/styles/mixins.import' as *;
+
+/* The cascade layer order is declared in styles/layers.scss, which main.ts imports first. */
+
+/*
+ * Unlayered on purpose — these are document-level facts, not styling opinions, and an unlayered rule
+ * beats every layer. The app is a full-viewport canvas with chrome over it; if `#app` is not the full
+ * height the scene has nothing to size itself against.
+ */
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* Vuetify's theme paints the background and text colour; this only stops rubber-banding. */
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer legacy {
+  /*
+   * Everything below is on its way out. It is the old `main.css`, moved here unchanged apart from
+   * losing the type scale and the body colours, which the Vuetify settings and theme now own.
+   *
+   * Kept in a layer so that a converted component beats it without either being edited.
+   */
+
+  /*
+   * Scrollbars, in the panels' own palette.
+   *
+   * Set on the root because `scrollbar-color` inherits, so every scrolling panel picks it up. A
+   * transparent track rather than a coloured one: the panels are translucent with a blurred backdrop,
+   * and a filled channel would be a hard-edged rectangle sitting on top of that.
+   *
+   * Both spellings are here on purpose. Chrome 121+ and Firefox use the standard properties; older
+   * WebKit only understands the pseudo-elements, and where both are supported the standard ones win.
+   */
+  :root {
+    scrollbar-color: rgb(var(--v-theme-border)) transparent;
+  }
+
+  /* `scrollbar-width` is not inherited, unlike `scrollbar-color`, so it has to be said for everything. */
+  * {
+    scrollbar-width: thin;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 5px;
+    /* Painted into the padding box, so the border above becomes breathing room around the thumb. */
+    background-clip: padding-box;
+    background-color: rgb(var(--v-theme-border));
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--v-theme-brass-dim));
+  }
+
+  /* The steppers are chrome from another era and there is nowhere sensible to put them. */
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  /*
+   * The type scale, still here because 77 declarations across the app read these.
+   *
+   * They are now **derived from the Vuetify settings** rather than stated independently, so there is
+   * one source of truth while the two systems overlap. Each retires as its component converts.
+   */
+  :root {
+    --text-sm: 0.875rem;
+    --text-sm-line: 1rem;
+    --text-base: #{$v-font-size-root};
+    --text-base-line: 1.5rem;
+    --text-lg: 1.25rem;
+    --text-lg-line: 2rem;
+  }
+
+  /*
+   * Board chrome drawn as DOM over the canvas.
+   *
+   * **This one cannot simply become a `v-card`.** The drawer tray and plate bays sit *under* live 3D
+   * tiles, so they are quads in the scene rather than DOM, and they reproduce this look in a shader
+   * (scene/chromePanel.ts). The two sit side by side on screen. Their copy of these values is
+   * `CHROME_PANEL` in scene/constants.ts, which now reads the theme — see plugins/vuetify.ts.
+   */
+  .chrome-panel {
+    position: relative;
+    border-radius: $v-border-radius-root;
+    background: rgb(var(--v-theme-surface) / 82%);
+    box-shadow: 0 2px 16px rgb(0 0 0 / 45%);
+    backdrop-filter: blur(2px);
+  }
+
+  .chrome-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: $v-border-width-root solid rgb(var(--v-theme-border-brass));
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .chrome-title {
+    margin: 0;
+    color: rgb(var(--v-theme-primary));
+    font-weight: 600;
+    font-size: var(--text-base);
+    line-height: var(--text-base-line);
+    text-transform: uppercase;
+  }
+
+  .chrome-title--offset {
+    margin: 0 0 16px 0;
+  }
+}

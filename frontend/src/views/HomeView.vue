@@ -1013,7 +1013,7 @@ h1 {
   color: #e8c878;
   font-weight: 600;
   /*
-   * The game lockup: display type, outside the text scale in styles/main.css.
+   * The game lockup: display type, outside the text scale in styles/main.scss.
    *
    * It has to opt out of the base **line height** as well as the size. That line height is absolute
    * (1.5rem), so it does not grow with the font — inheriting it put 52px capitals in a 24px box and

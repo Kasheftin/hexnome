@@ -537,7 +537,7 @@ export const HIGHLIGHT_COLORS = {
 /**
  * The `.chrome-panel` look, for the panels drawn in the canvas.
  *
- * **Kept in step with `.chrome-panel` in src/styles/main.css by hand.** The drawer tray and plate
+ * **Kept in step with `.chrome-panel` in src/styles/main.scss by hand.** The drawer tray and plate
  * bays are quads in the scene rather than DOM (see scene/chromePanel.ts for why), so they cannot
  * inherit the CSS — but they sit right next to the header and help card, and a border a shade off
  * would be obvious. If you change one, change the other.

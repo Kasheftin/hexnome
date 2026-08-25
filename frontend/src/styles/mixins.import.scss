@@ -1,0 +1,18 @@
+// The authoring API: the one file every stylesheet of ours imports.
+//
+//     @use '@/styles/mixins.import' as *;
+//
+// It brings two things into scope under a `v-` prefix:
+//
+//   - `$v-border-radius-root`, `$v-button-height`, … — the settings **as configured**, not Vuetify's
+//     defaults. Reading them from here is what stops our CSS drifting from the framework's build.
+//   - `v-theme-color()`, `v-elevation()`, the density and breakpoint mixins — Vuetify's own tools.
+//
+// The prefix is deliberate. Without it, `$border-radius-root` in one of our files could be either
+// ours or Vuetify's depending on import order; with it, `$v-` always means "the framework's value"
+// and anything unprefixed is ours.
+//
+// This file must stay free of anything that emits CSS — it is imported by every component, and a
+// single declaration here would be duplicated into every one of them.
+@forward './vuetify-settings' as v-*;
+@forward 'vuetify/styles/tools' as v-*;
