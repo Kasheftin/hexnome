@@ -1346,6 +1346,41 @@ function finalFor(seat: number): FinalTally {
 }
 
 /**
+ * Does this game score its rounds?
+ *
+ * False only for quick mode, whose agenda is a single empty round — so there are no targets, nothing
+ * banks until the end, and the header has no round to count. Asked of the agenda rather than of the
+ * mode name, so a later mode with the same shape needs no edit here.
+ */
+const scoresRounds = computed(() => agenda.some(round => round.length > 0))
+
+/**
+ * What the board on screen is worth **right now**, for a game that banks nothing until it ends.
+ *
+ * Quick mode's counter cannot be literally-banked points: with no round targets those stay zero for
+ * the whole game and then jump, which is nothing to play against. So it is the same reckoning the
+ * final panel does — groups, the stem reward, the unplaced fine — applied to the board as it stands.
+ *
+ * **`finalTally`, not a projection of it.** A second implementation would eventually disagree with
+ * the panel that settles the game, and a counter that lies is worse than no counter.
+ *
+ * **Plus `roundPoints`, which is not zero even here.** A quick round scores no targets, but it still
+ * banks the board's anchors less the first-pass fine — the same `scored + anchors - fined` the end
+ * panel adds above the final tally to reach the grand total. Reading the board alone left this
+ * counter one point light against the score the game actually ended on, which is precisely the lie
+ * the paragraph above says not to tell.
+ */
+const liveScore = computed(() => {
+  void revision.value
+  const board = boardOf(viewedSeat.value)
+  return roundPoints.value + finalTally(
+    describeBoard(board, HEX_SIZE).tiles,
+    scoringRules.value,
+    describeLeftovers(board),
+  ).total
+})
+
+/**
  * The finished board's connected groups.
  *
  * Read off the last round's board, so the sheet and the picture beside it cannot disagree about what
@@ -2288,6 +2323,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <ActionBar
         v-if="announcing === null && !showResults && !gameOver && !settling"
         :watching-label="watchingLabel"
+        :pass-label="scoresRounds ? 'Pass' : 'Finish'"
         :phase="phase"
         :options="options"
         :selection="selection"
@@ -2405,7 +2441,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         v-if="settings"
         class="game-id"
       >
-        {{ modeLabel }} · {{ settings.platesPerRound }} plates/round
+        {{ modeLabel }} · {{ settings.platesPerRound }} {{ scoresRounds ? 'plates/round' : 'plates' }}
       </p>
       <!--
         Whose board this is. Only worth saying at a table: with one seat it is always yours, and a
@@ -2427,16 +2463,26 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         class="rule"
         aria-hidden="true"
       />
+      <!--
+        `Round 1 / 1` is furniture: in a one-round game there is nowhere else to be, and the term only
+        earns its place once it can change. The turn still counts.
+      -->
       <dl class="counters">
-        <dt>Round</dt>
-        <dd>
-          {{ count.round }}<span
-            v-if="totalRounds"
-            class="of"
-          > / {{ totalRounds }}</span>
-        </dd>
+        <template v-if="scoresRounds">
+          <dt>Round</dt>
+          <dd>
+            {{ count.round }}<span
+              v-if="totalRounds"
+              class="of"
+            > / {{ totalRounds }}</span>
+          </dd>
+        </template>
         <dt>Turn</dt>
         <dd>{{ count.turn }}</dd>
+        <template v-if="!scoresRounds">
+          <dt>Banked</dt>
+          <dd>{{ liveScore }}</dd>
+        </template>
       </dl>
 
       <!--
@@ -2482,8 +2528,13 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       the shared source is a column down the left edge starting just below the header, and a panel
       there would sit on the one part of the screen you draft from.
     -->
+    <!--
+      Nothing to plan against in a one-round game with no agenda: the panel would be an empty list
+      above an empty list of finished rounds. The Banked figure in the header is the whole score, and
+      the final reckoning arrives when the round does.
+    -->
     <section
-      v-if="scoringOpen"
+      v-if="scoringOpen && scoresRounds"
       class="chrome-panel agenda"
     >
       <div class="agenda-head">

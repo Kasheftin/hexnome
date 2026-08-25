@@ -18,6 +18,15 @@ const ID_B = '00000000-0000-4000-8000-000000000000'
 
 const MODES = SINGLEPLAYER_MODES.map(m => m.id)
 
+/**
+ * The modes that score rounds at all.
+ *
+ * `quick` deliberately spends nothing: its agenda is one empty round, and the board is scored only at
+ * the end. Coverage is a property of a *scoring* agenda, so the tests that assert it say which modes
+ * they mean rather than looping over every mode there is.
+ */
+const SCORING_MODES = MODES.filter(mode => mode !== 'quick')
+
 /** Compact rendering, so a golden pin reads as a plan rather than as a wall of objects. */
 const sketch = (agenda: Agenda) => agenda.map(round => round.map(target =>
   target.kind === 'value' ? `v${target.value}/${target.points}` : `c${target.color}/${target.points}`))
@@ -93,7 +102,7 @@ describe('every mode covers everything exactly once', () => {
   const ids = Array.from({ length: 120 }, (_, i) => `seed-${i}-${i * 7919}`)
 
   it('spends all six values and all six colours', () => {
-    for (const mode of MODES) {
+    for (const mode of SCORING_MODES) {
       for (const id of ids) {
         const agenda = createAgenda(id, mode)
         expect(valuesOf(agenda).map(t => t.value).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6])
@@ -211,5 +220,36 @@ describe('showing the working', () => {
     const targets = createAgenda(ID_A, 'classic')[0]!
     const tiles = [tile(BLUE, 1), tile(RED, 2), tile(BLUE, 2)]
     expect(tallyRound(targets, tiles).total).toBe(scoreTargets(targets, tiles))
+  })
+})
+
+/*
+ * Quick mode is one empty round, and everything downstream has to treat that as *inert* rather than
+ * merely not crash: the round scores nothing, the tally has no rows, and the game is one round long.
+ */
+describe('quick mode scores nothing per round', () => {
+  it('is exactly one round with no targets', () => {
+    expect(createAgenda(ID_A, 'quick')).toEqual([[]])
+    expect(createAgenda(ID_B, 'quick')).toEqual([[]])
+  })
+
+  /** No seed anywhere in it: two games differ in their deck, never in what the round is worth. */
+  it('is the same whatever the game id', () => {
+    expect(createAgenda(ID_A, 'quick')).toEqual(createAgenda(ID_B, 'quick'))
+  })
+
+  it('runs for one round, as the mode says', () => {
+    expect(roundsOf('quick')).toBe(1)
+    expect(createAgenda(ID_A, 'quick')).toHaveLength(1)
+  })
+
+  it('scores nothing however full the board is', () => {
+    const board = [
+      { color: 0, value: 1 }, { color: 1, value: 2 }, { color: 2, value: 3 },
+      { color: 3, value: 4 }, { color: 4, value: 5 }, { color: 5, value: 6 },
+    ]
+    const round = createAgenda(ID_A, 'quick')[0] ?? []
+    expect(scoreTargets(round, board)).toBe(0)
+    expect(tallyRound(round, board)).toEqual({ rows: [], total: 0 })
   })
 })

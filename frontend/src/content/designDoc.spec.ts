@@ -13,7 +13,8 @@ import {
   DEFAULT_TILE_SLOTS,
   MAX_GROUP_SIZE,
   MIN_GROUP_SIZE_CHOICES,
-  PLATES_PER_ROUND_CHOICES,
+  platesPerRoundChoices,
+  defaultPlatesPerRound,
   PLATE_SLOT_CHOICES,
   TILE_SLOT_CHOICES,
   ANCHOR_POINT_CHOICES,
@@ -75,8 +76,14 @@ describe('what the design doc says the numbers are', () => {
     states('distinct tiles', `${DISTINCT_TILES} distinct tiles`)
   })
 
+  /*
+   * Against the *mode's* choices, not `PLATES_PER_ROUND_CHOICES`. That constant is the union of every
+   * mode's range and exists only so the parser knows what to tolerate; the doc describes the game, and
+   * a player choosing a classic game is offered four numbers, not eight.
+   */
   it('describes the round budget', () => {
-    states('plates per round', `${list(PLATES_PER_ROUND_CHOICES)}, default **${DEFAULT_PLATES_PER_ROUND}**`)
+    states('plates per round', `${list(platesPerRoundChoices('classic'))}, default **${DEFAULT_PLATES_PER_ROUND}**`)
+    states('quick plates', `${list(platesPerRoundChoices('quick'))}, default\n**${defaultPlatesPerRound('quick')}**`)
   })
 
   it('describes what a round pays for anchors', () => {

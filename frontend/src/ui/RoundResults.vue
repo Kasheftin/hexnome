@@ -17,7 +17,7 @@
  * land on a round the player had not seen yet.
  */
 import { mdiChevronDown, mdiChevronRight } from '@mdi/js'
-import { computed, shallowRef, watch } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import type { FinalTally } from '@hexnome/rules/groups'
 import FinalScore from './FinalScore.vue'
 import type { RoundRecord } from './roundRecord'
@@ -107,7 +107,18 @@ type Section = number | 'final'
  * opens where they left it. Reading a prop into a local is normally how the two drift apart; here it
  * is deliberate, because after mount this is the player's to move and no longer the caller's.
  */
-const open = shallowRef<Section>(props.over ? 'final' : (props.rounds.at(-1)?.round ?? 1))
+/**
+ * Whether any round here scored targets.
+ *
+ * False in a one-round game with no agenda: every round fold would be an empty accounting of nothing,
+ * and the only reckoning worth opening is the final one. Asked of the records rather than of the mode,
+ * so this component still knows nothing about which modes exist.
+ */
+const scoresRounds = computed(() => props.rounds.some(record => record.tally.rows.length > 0))
+
+const open = shallowRef<Section>(
+  props.over || !scoresRounds.value ? 'final' : (props.rounds.at(-1)?.round ?? 1),
+)
 
 /**
  * Whether the count has had its one showing.
@@ -181,6 +192,20 @@ function advance(): void {
  */
 const showingFinal = shallowRef(props.over)
 const finalDone = shallowRef(false)
+
+/**
+ * A round that scored nothing needs no acknowledging, so skip straight to the reckoning.
+ *
+ * Normally the game ends on a button: a player has just watched a round counted out, and following it
+ * with a second, larger reckoning would bury it. In a one-round game there is no first count — the
+ * fold would be an empty accounting of nothing, and the button would ask them to press past it.
+ *
+ * `advance()` rather than setting `showingFinal` directly, because that emit is also how the owner
+ * learns the game is over. Skipping the press must not skip the ending.
+ */
+onMounted(() => {
+  if (!scoresRounds.value && !showingFinal.value) advance()
+})
 
 /**
  * What a round actually banked: its targets, plus anchors, less the first-pass fine.
@@ -266,7 +291,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
         so the sheet reads as a running account without anything being opened.
       -->
       <section
-        v-for="record in props.rounds"
+        v-for="record in (scoresRounds ? props.rounds : [])"
         :key="record.round"
         class="fold"
         :class="{ open: open === record.round }"

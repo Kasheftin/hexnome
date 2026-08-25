@@ -317,13 +317,17 @@ draft, it is an impossible one, and the action bar says **"out of space"** rathe
 
 ### How many plates a round deals
 
-**Plates per round** — 3, 4, 5 or 6, default **4**. It is the round's whole budget of new material,
+**Plates per round** — 3, 4, 5 or 6, default **4**, in the modes that score rounds. It is the round's whole budget of new material,
 and it is also the height of the source column: the column has exactly as many slots as the round has
 plates, so a round's worth can never be pushed off the bottom before anyone has had a chance at it.
 
 One number doing both jobs is deliberate. A column shorter than the budget would strand lots; a column
 longer than it would stand permanently half empty. Tying them together means the only question a
 player is being asked is how much material a round should offer.
+
+**Quick mode asks the same question about a whole game**, and so offers 8, 12, 16 or 20, default
+**12**. With one round the budget is the game's length rather than a round's width, which is why the
+numbers are so much larger — and why the column, still one slot per plate, scrolls.
 
 ### When the source restocks
 
@@ -604,6 +608,7 @@ which is what makes the round shapes work out: 3 to a round over four rounds, or
 | **Classic** | 4 | values `1,2` + 1 colour · `3` + 2 colours · `4,5` + 1 colour · `6` + 2 colours |
 | **Classic reversed** | 4 | the same four rounds, largest values first |
 | **Random** | 6 | one value and one colour per round |
+| **Quick** | 1 | nothing — the board alone scores, at the end |
 
 **Which colour belongs to which round is dealt from the game id**, in every mode; Random shuffles the
 values too. So Classic keeps a recognisable rhythm — small values first, the 6 last — while each game's

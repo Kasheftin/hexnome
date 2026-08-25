@@ -87,6 +87,38 @@ describe('starting below the header', () => {
   })
 })
 
+/*
+ * Quick mode deals up to twenty plates, and the column has a slot for each. Sizing for all of them
+ * would put every lot on the floor even when two are showing.
+ */
+describe('a very long round', () => {
+  it('sizes the same at twenty lots as at the cap', () => {
+    const six = createSourceLayout(1600, 950, 6, DEFAULT)
+    const twenty = createSourceLayout(1600, 950, 20, DEFAULT)
+    expect(twenty.lotWidth).toBeCloseTo(six.lotWidth, 6)
+    expect(twenty.lotHeight).toBeCloseTo(six.lotHeight, 6)
+  })
+
+  it('grows downward instead, and scrolls', () => {
+    const six = createSourceLayout(1600, 950, 6, DEFAULT, 0, undefined, 6)
+    const twenty = createSourceLayout(1600, 950, 20, DEFAULT, 0, undefined, 20)
+    expect(twenty.contentHeight).toBeGreaterThan(six.contentHeight)
+    expect(twenty.maxScroll).toBeGreaterThan(0)
+  })
+
+  /* Every mode that existed before quick deals six or fewer, so none of them can have moved. */
+  it('leaves the scoring modes\u2019 sizes untouched', () => {
+    for (const lots of [3, 4, 5, 6]) {
+      const capped = createSourceLayout(1600, 950, lots, DEFAULT)
+      expect(capped.lotWidth).toBeGreaterThanOrEqual(SOURCE_LOT_MIN_PX)
+      expect(capped.lotWidth).toBeLessThanOrEqual(SOURCE_LOT_MAX_PX)
+    }
+    // 4 lots still sizes larger than 6, which only holds while the cap is above both.
+    expect(createSourceLayout(1600, 950, 4, DEFAULT).lotWidth)
+      .toBeGreaterThan(createSourceLayout(1600, 950, 6, DEFAULT).lotWidth)
+  })
+})
+
 describe('scrolling', () => {
   /** A phone held sideways: the case the floor exists for. Six lots at 104px cannot all be shown. */
   const cramped = () => createSourceLayout(844, 390, 6, DEFAULT)

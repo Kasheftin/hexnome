@@ -7,6 +7,7 @@ import {
   SOURCE_LOT_MAX_PX,
   SOURCE_LOT_MIN_PX,
   SOURCE_PADDING_PX,
+  SOURCE_SIZING_CAP,
   SOURCE_PLATE_FILL,
   SOURCE_TOP_PX,
 } from './constants'
@@ -112,8 +113,18 @@ export function createSourceLayout(
    */
   rows = lots,
 ): SourceLayout {
-  /** The round's capacity: what a lot is sized against, whether or not it is filled. */
-  const capacity = Math.max(1, Math.floor(lots))
+  /**
+   * What a lot is sized against — the round's capacity, but **capped**.
+   *
+   * Sizing for every slot is right while a round deals a handful. Quick mode deals up to twenty, and
+   * dividing the column twenty ways puts every lot on the floor (`SOURCE_LOT_MIN_PX`) even when two
+   * are on screen — a quick game's plates would be permanently smaller than a classic game's, for a
+   * column that is nearly empty most of the time.
+   *
+   * So size for as many as comfortably fit and let the rest scroll, which is what the scrollbar is
+   * for. Above the cap the column grows downward instead of shrinking its contents.
+   */
+  const capacity = Math.min(SOURCE_SIZING_CAP, Math.max(1, Math.floor(lots)))
   /** What is drawn. One even when nothing is left, so the placeholder has a bay to sit in. */
   const lotCount = Math.max(1, Math.floor(rows))
   /**

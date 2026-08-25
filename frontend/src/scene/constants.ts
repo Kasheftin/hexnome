@@ -256,6 +256,15 @@ export const SOURCE_LEFT_PX = 16
  * time the header gained anything — 18px, then 54px after the type scale, then 70px when its icons
  * went from 24 to 40.
  */
+/**
+ * The most lots the column sizes itself to fit at once.
+ *
+ * Beyond this it scrolls rather than shrinking. Six is the largest a scoring round deals, so every
+ * mode that existed before quick is unaffected — this only stops a twenty-plate game from pinning
+ * every lot to `SOURCE_LOT_MIN_PX` for a column that is rarely more than a few rows long.
+ */
+export const SOURCE_SIZING_CAP = 6
+
 export const SOURCE_HEADER_GAP_PX = 16
 /**
  * Where the column starts before the header has been measured, which is one frame at most.

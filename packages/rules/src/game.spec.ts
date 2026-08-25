@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createAgenda } from './agenda'
+import { createAgenda, scoreTargets } from './agenda'
 import {
   applyCommand,
   canUndo,
@@ -10,6 +10,7 @@ import {
   paymentPurse,
   planUndo,
   replayGame,
+  scoreAnchors,
   type Command,
   type GameOptions,
   type GameState,
@@ -1340,5 +1341,63 @@ describe('taking a turn back', () => {
       expect(planUndo(opts, log).withinRound).toBe(false)
       expect(canUndo(opts, log)).toBe(false)
     })
+  })
+})
+
+/*
+ * Quick mode, at the level that decides whether it is a mode at all.
+ *
+ * Its agenda is one empty round, and the whole point is that everything downstream treats that as
+ * inert: the round closes, banks nothing, and the game ends — rather than looping, throwing, or
+ * quietly scoring something.
+ */
+describe('quick mode', () => {
+  function quick(overrides: Partial<GameSettings> = {}): GameOptions {
+    return options({ mode: 'quick', players: 1, platesPerRound: 8, ...overrides })
+  }
+
+  it('runs for exactly one round', () => {
+    const state = createGame(quick())
+    expect(state.options.agenda).toEqual([[]])
+    expect(state.round).toBe(1)
+    expect(state.finished).toBe(false)
+  })
+
+  /* A solo pass closes the round, and the only round there is closing means the game is over. */
+  it('is over as soon as the single seat passes', () => {
+    const state = createGame(quick())
+    play(state, { kind: 'pass', seat: 0 })
+    expect(state.finished).toBe(true)
+    expect(state.round).toBe(1)
+  })
+
+  /*
+   * **No *target* points — anchors still pay.** `closeRound` banks `scored + anchors - fine`, and only
+   * the first term comes from the agenda. In a four-round game that distinction matters because
+   * anchors pay every round; here there is one round, so whatever they pay lands at the end with
+   * everything else. What quick mode removes is the agenda, not the board\u2019s own value.
+   */
+  it('banks no target points, only what the board\u2019s anchors pay', () => {
+    const state = createGame(quick())
+    const seat = state.seats[0]
+    expect(seat?.tableau.tilesOnBoard().length).toBeGreaterThan(0)
+
+    const anchors = scoreAnchors(seat!.tableau, state.options.settings)
+    play(state, { kind: 'pass', seat: 0 })
+
+    expect(scoreTargets([], seat!.tableau.tilesOnBoard())).toBe(0)
+    expect(seat?.banked).toEqual([anchors])
+    expect(seat?.anchored).toEqual([anchors])
+  })
+
+  it('refuses to play on once it is over', () => {
+    const state = createGame(quick())
+    play(state, { kind: 'pass', seat: 0 })
+    expect(applyCommand(state, { kind: 'pass', seat: 0 })).toMatchObject({ ok: false })
+  })
+
+  /* The dial means the length of the game here, so the source is opened for all of it. */
+  it('opens a source slot for every plate the round will deal', () => {
+    expect(createGame(quick({ platesPerRound: 12 })).source.sourceLots).toBe(12)
   })
 })

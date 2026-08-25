@@ -137,6 +137,17 @@ function dealColors(plan: readonly RoundPlan[], colors: readonly number[]): Agen
  * backwards" true of the colours too, and not merely of the running order.
  */
 export function createAgenda(gameId: string, mode: SingleplayerMode): Agenda {
+  /*
+   * One round, no targets — and that single empty list is the whole of quick mode in the model.
+   *
+   * The number of rounds *is* the agenda's length (`closeRound` in game.ts), and a round's score is
+   * `scoreTargets(targets, …)`, which is 0 for no targets. So an agenda of `[[]]` means one round that
+   * banks nothing, and the only score left is the board's own at the end — which is exactly the mode.
+   *
+   * Before the colours are dealt, because it needs none of them.
+   */
+  if (mode === 'quick') return [[]]
+
   const colors = shuffleInPlace(range(TILE_COLOR_COUNT), createRandom(`${gameId}:agenda:colors`))
 
   if (mode === 'random') {

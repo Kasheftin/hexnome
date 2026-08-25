@@ -15,7 +15,7 @@
  * is already running (stores/game.ts).
  */
 import { mdiCog, mdiDiceMultiple } from '@mdi/js'
-import { computed, nextTick, ref, type ComponentPublicInstance, type Ref } from 'vue'
+import { computed, nextTick, ref, watch, type ComponentPublicInstance, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   DEFAULT_PLATES_PER_ROUND,
@@ -24,7 +24,8 @@ import {
   GAME_KINDS,
   PLAYER_COUNT_CHOICES,
   SOLO,
-  PLATES_PER_ROUND_CHOICES,
+  platesPerRoundChoices,
+  nearestPlatesPerRound,
   TILE_COPIES_CHOICES,
   PLATE_COPIES_CHOICES,
   TILE_BAG_LABELS,
@@ -192,7 +193,8 @@ const SUPPLY_DIALS: readonly Dial[] = [
   {
     key: 'platesPerRound',
     ...textOf('platesPerRound'),
-    choices: PLATES_PER_ROUND_CHOICES,
+    // Replaced per mode in `visibleSections` — see there for why it cannot be stated here.
+    choices: platesPerRoundChoices(DEFAULT_SINGLEPLAYER_MODE),
     model: platesPerRound,
   },
 ]
@@ -495,10 +497,36 @@ function resetToDefaults(): void {
 
 restoreSetup()
 
-/** Bands with anything left to show, their hidden dials already dropped. */
+/**
+ * Bands with anything left to show, their hidden dials already dropped.
+ *
+ * **Plates per round takes its choices from the mode**, which is why they cannot be stated on the dial
+ * itself: `SECTIONS` is a module constant, built once, and the mode is chosen afterwards. Over four
+ * rounds the dial is one round\u2019s width and offers 3-6; in a one-round game it is the whole
+ * game\u2019s length and offers 8-20.
+ */
 const visibleSections = computed(() => SECTIONS
-  .map(section => ({ ...section, dials: section.dials.filter(dial => dial.applies?.() ?? true) }))
+  .map(section => ({
+    ...section,
+    dials: section.dials
+      .filter(dial => dial.applies?.() ?? true)
+      .map(dial => (dial.key === 'platesPerRound'
+        ? { ...dial, choices: platesPerRoundChoices(mode.value) }
+        : dial)),
+  }))
   .filter(section => section.dials.length > 0))
+
+/**
+ * Move the plate count onto the new mode\u2019s range when the mode changes.
+ *
+ * Without it a classic game\u2019s 4 stays selected against a dial that starts at 8 — a choice the
+ * player appears to have made and cannot see, and one the parser would then repair to something else
+ * again. The nearest offered value keeps "I wanted few" or "I wanted many" across the switch.
+ */
+watch(mode, (next, previous) => {
+  if (next === previous) return
+  platesPerRound.value = nearestPlatesPerRound(next, platesPerRound.value)
+})
 
 const visibleDials = computed(() => visibleSections.value.flatMap(section => section.dials))
 

@@ -46,6 +46,10 @@ interface Table {
   readonly players?: number
   readonly tileCopies?: number
   readonly plateCopies?: number
+  /* Quick mode is a solo mode, so a table for it sets both of these together. */
+  readonly kind?: GameSettings['kind']
+  readonly mode?: GameSettings['mode']
+  readonly platesPerRound?: number
 }
 
 /**
@@ -54,13 +58,23 @@ interface Table {
  * The desks are the real ones, driven in process rather than over HTTP — what a server adds is
  * storage and validation, and the arithmetic under test is the same either way.
  */
-function table({ players = 3, tileCopies = 3, plateCopies = 1 }: Table = {}) {
+function table({
+  players = 3,
+  tileCopies = 3,
+  plateCopies = 1,
+  kind = 'multiplayer',
+  mode,
+  platesPerRound,
+}: Table = {}) {
+  const base = defaultGameSettings(0)
   const settings: GameSettings = {
-    ...defaultGameSettings(0),
-    kind: 'multiplayer',
+    ...base,
+    kind,
     players,
     tileCopies,
     plateCopies,
+    mode: mode ?? base.mode,
+    platesPerRound: platesPerRound ?? base.platesPerRound,
   }
   const options: GameOptions = {
     settings,
@@ -227,6 +241,26 @@ describe('conservation', () => {
       expect(game.census()).toEqual(game.whole)
     }
     expect(game.state.finished).toBe(true)
+  })
+
+  /*
+   * A quick game, which is a different *shape* of game rather than a different set of targets: one
+   * round, no agenda, and four times the plates. It is here because conservation is the property most
+   * likely to break on a shape change — the round-end sweep runs once instead of four times, and it
+   * runs against a source dealt far wider than any classic round deals.
+   */
+  it('holds over a whole quick game, which is one long round', () => {
+    const game = table({ kind: 'singleplayer', players: 1, mode: 'quick', platesPerRound: 12 })
+
+    let guard = 0
+    while (!game.state.finished && guard++ < 400) {
+      game.deal()
+      if (!sweepOneValue(game)) game.play({ kind: 'pass', seat: game.state.activeSeat })
+      expect(game.census()).toEqual(game.whole)
+    }
+    expect(game.state.finished).toBe(true)
+    // The point of the mode: it ended, and it ended without ever reaching a second round.
+    expect(game.state.round).toBe(1)
   })
 
   /*

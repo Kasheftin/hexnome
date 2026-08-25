@@ -25,7 +25,10 @@ import {
   SINGLEPLAYER_MODES,
   effectiveGroupBonuses,
   defaultGameSettings,
+  defaultPlatesPerRound,
+  nearestPlatesPerRound,
   parseGameSettings,
+  platesPerRoundChoices,
   roundsOf,
 } from './gameSettings'
 import { STANDARD_PLATE_COPIES, STANDARD_TILE_COPIES } from './deck'
@@ -516,5 +519,54 @@ describe('how much material the game is dealt from', () => {
   it('takes its defaults from the deck itself', () => {
     expect([DEFAULT_TILE_COPIES, DEFAULT_PLATE_COPIES])
       .toEqual([STANDARD_TILE_COPIES, STANDARD_PLATE_COPIES])
+  })
+})
+
+/*
+ * The dial means different things in different modes: over four rounds it is one round's width, in a
+ * one-round game it is the whole game's length. So the menu asks the mode, and the parser only
+ * refuses what no mode allows — keeping those apart is what stops a dial from becoming a rule.
+ */
+describe('plates per round, by mode', () => {
+  it('offers a handful for the scoring modes and a game\u2019s worth for quick', () => {
+    expect(platesPerRoundChoices('classic')).toEqual([3, 4, 5, 6])
+    expect(platesPerRoundChoices('random')).toEqual([3, 4, 5, 6])
+    expect(platesPerRoundChoices('quick')).toEqual([8, 12, 16, 20])
+  })
+
+  it('starts each mode on its own default', () => {
+    expect(defaultPlatesPerRound('classic')).toBe(DEFAULT_PLATES_PER_ROUND)
+    expect(defaultPlatesPerRound('quick')).toBe(12)
+  })
+
+  /* Every offered value has to survive the parser, or the menu can propose a game the server refuses. */
+  it('accepts every value any mode offers', () => {
+    for (const mode of SINGLEPLAYER_MODES.map(m => m.id)) {
+      for (const choice of platesPerRoundChoices(mode)) {
+        expect(parseGameSettings({ ...valid, mode, platesPerRound: choice })?.platesPerRound)
+          .toBe(choice)
+      }
+    }
+  })
+
+  it('still refuses a number no mode offers', () => {
+    expect(parseGameSettings({ ...valid, platesPerRound: 7 })?.platesPerRound)
+      .toBe(DEFAULT_PLATES_PER_ROUND)
+  })
+
+  /*
+   * Switching mode must re-seat the value. A classic game's 4 left selected against a dial starting at
+   * 8 reads as a choice the player made and cannot see.
+   */
+  it('moves a chosen value onto the new mode\u2019s range', () => {
+    expect(nearestPlatesPerRound('quick', 4)).toBe(8)
+    expect(nearestPlatesPerRound('quick', 6)).toBe(8)
+    expect(nearestPlatesPerRound('classic', 12)).toBe(6)
+    expect(nearestPlatesPerRound('classic', 8)).toBe(6)
+  })
+
+  it('leaves a value the mode already offers alone', () => {
+    expect(nearestPlatesPerRound('quick', 16)).toBe(16)
+    expect(nearestPlatesPerRound('classic', 3)).toBe(3)
   })
 })

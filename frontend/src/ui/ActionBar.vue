@@ -29,6 +29,14 @@ import TileChip from './TileChip.vue'
 import { TILE_COLORS } from '@/scene/constants'
 
 const props = defineProps<{
+  /**
+   * What passing is called here.
+   *
+   * Passing takes you out of the *round*, and in a game of four rounds that is what it means. In a
+   * one-round game the round is the game, so "Pass" understates it — the word is the only thing that
+   * changes, and the action stays `'pass'`, because the rules and the log are the same either way.
+   */
+  passLabel?: string
   phase: TurnPhase
   options: TurnOptions
   /** Items picked so far, in click order. A plate shows its own token. */
@@ -175,7 +183,7 @@ const draftSummary = computed(() => {
         :disabled="!options.pass"
         @click="$emit('choose', 'pass')"
       >
-        Pass
+        {{ props.passLabel ?? 'Pass' }}
       </v-btn>
       <span
         v-if="offersUndo"

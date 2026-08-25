@@ -15,7 +15,7 @@ import { DEFAULT_PLACEMENT_RULE, isPlacementRule, type PlacementRule } from './p
 
 export type GameKind = 'singleplayer' | 'multiplayer' | 'quiz'
 
-export type SingleplayerMode = 'classic' | 'classicReversed' | 'random'
+export type SingleplayerMode = 'classic' | 'classicReversed' | 'random' | 'quick'
 
 export interface GameKindInfo {
   readonly id: GameKind
@@ -73,10 +73,64 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
     rounds: 6,
     description: 'Six rounds, one value and one colour each, both shuffled.',
   },
+  {
+    id: 'quick',
+    label: 'Quick',
+    rounds: 1,
+    description: 'One round, and nothing scores until it ends — then the whole board does.',
+  },
 ]
 
-export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6]
+/**
+ * How many plates a round deals — and therefore how many slots the source column has
+ * (`sourceLots: settings.platesPerRound` in game.ts).
+ *
+ * **The offered range depends on the mode**, because the dial means different things in each. Over
+ * four rounds it is the width of one round's offering; in a one-round game it is the length of the
+ * whole game, so the numbers are much larger. `platesPerRoundChoices` is what the menu asks.
+ *
+ * This list is the **union**, and exists only for the validator. Keeping the two apart is what stops
+ * a settings dial from becoming a rule: the menu decides what is sensible to offer, and the parser
+ * only refuses what no mode allows at all.
+ */
+export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6, 8, 12, 16, 20]
+
+/** Rounds deal a handful; quick deals the whole game at once. */
+const PLATES_PER_ROUND_BY_MODE: Readonly<Record<SingleplayerMode, readonly number[]>> = {
+  classic: [3, 4, 5, 6],
+  classicReversed: [3, 4, 5, 6],
+  random: [3, 4, 5, 6],
+  quick: [8, 12, 16, 20],
+}
+
 export const DEFAULT_PLATES_PER_ROUND = 4
+const DEFAULT_PLATES_PER_ROUND_QUICK = 12
+
+/** What the menu offers for this mode. */
+export function platesPerRoundChoices(mode: SingleplayerMode): readonly number[] {
+  return PLATES_PER_ROUND_BY_MODE[mode] ?? PLATES_PER_ROUND_BY_MODE.classic
+}
+
+/** What the menu starts on for this mode. */
+export function defaultPlatesPerRound(mode: SingleplayerMode): number {
+  return mode === 'quick' ? DEFAULT_PLATES_PER_ROUND_QUICK : DEFAULT_PLATES_PER_ROUND
+}
+
+/**
+ * Move a chosen value onto a mode's own range.
+ *
+ * Switching from classic to quick leaves 4 selected against a dial that starts at 8, which reads as a
+ * choice the player made and cannot see. The nearest offered value is the least surprising answer —
+ * it keeps "I wanted few" or "I wanted many" across the switch.
+ */
+export function nearestPlatesPerRound(mode: SingleplayerMode, value: number): number {
+  const choices = platesPerRoundChoices(mode)
+  if (choices.includes(value)) return value
+  return choices.reduce(
+    (best, choice) => (Math.abs(choice - value) < Math.abs(best - value) ? choice : best),
+    choices[0] ?? DEFAULT_PLATES_PER_ROUND,
+  )
+}
 
 /**
  * How much material the game is dealt from, as copies of each of the 36 distinct kinds.
