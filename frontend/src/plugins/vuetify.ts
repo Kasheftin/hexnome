@@ -1,4 +1,5 @@
 import { createVuetify, type ThemeDefinition } from 'vuetify'
+import { aliases, mdi } from 'vuetify/iconsets/mdi-svg'
 import 'vuetify/styles'
 
 /**
@@ -76,6 +77,18 @@ const hexnome: ThemeDefinition = {
 }
 
 export const vuetify = createVuetify({
+  /*
+   * `mdi-svg`, because the app already imports its icons as path data from `@mdi/js` and has done
+   * since before Vuetify. Nothing needs a font or a network request: `<v-icon :icon="mdiCog" />` takes
+   * the same string the hand-rolled `<svg><path :d="mdiCog"></svg>` did, and only the icons actually
+   * imported are bundled.
+   */
+  /*
+   * `defaultSet` names a key in `sets`, and `vuetify/iconsets/mdi-svg` exports its set as `mdi` — so
+   * this is 'mdi' even though the module is the svg one. Naming it 'mdi-svg' here looks right and
+   * fails at runtime with "Cannot read properties of undefined (reading 'component')".
+   */
+  icons: { defaultSet: 'mdi', aliases, sets: { mdi } },
   theme: {
     defaultTheme: 'hexnome',
     themes: { hexnome },
@@ -88,10 +101,22 @@ export const vuetify = createVuetify({
      * a hairline edge on a dark surface, no fill, no shadow. Ripple is off for the same reason the
      * scene has no bounce — the table is meant to feel like objects on felt, not like a phone app.
      */
+    /*
+     * `text` plus the `border` prop, not `outlined`.
+     *
+     * They look like the same thing and are not: `outlined` draws its edge from **`currentColor`**,
+     * so a button's border is whatever colour its text is — which gave every control a bright edge
+     * instead of the slate hairline the chrome is built from. The `border` prop uses
+     * `--v-border-color` / `--v-border-opacity`, which the theme owns, so one value carries the whole
+     * app and `color="primary"` tints the label without repainting the frame.
+     *
+     * Ripple off for the same reason the scene has no bounce: the table is meant to feel like objects
+     * on felt, not like a phone app.
+     */
     VBtn: {
-      variant: 'outlined',
+      variant: 'text',
+      border: true,
       ripple: false,
-      rounded: 0,
     },
     VCard: {
       flat: true,

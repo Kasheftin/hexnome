@@ -15,8 +15,7 @@
  * is already running (stores/game.ts).
  */
 import { mdiCog, mdiDiceMultiple } from '@mdi/js'
-import HintTip from '@/ui/HintTip.vue'
-import { computed, nextTick, ref, type Ref } from 'vue'
+import { computed, nextTick, ref, type ComponentPublicInstance, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   DEFAULT_PLATES_PER_ROUND,
@@ -507,21 +506,31 @@ const pillValue = (dial: Dial): string =>
   dial.labels?.[dial.choices.indexOf(dial.model.value)] ?? String(dial.model.value)
 
 const settingsOpen = ref(false)
-const gear = ref<HTMLButtonElement | null>(null)
+const gear = ref<ComponentPublicInstance | null>(null)
 
 const rulesOpen = ref(false)
-const rulesButton = ref<HTMLButtonElement | null>(null)
+const rulesButton = ref<ComponentPublicInstance | null>(null)
+
+/**
+ * Focus the underlying element of a `v-btn`.
+ *
+ * A ref on a component gives the instance, not the DOM node, so `.focus()` has to go through `$el` —
+ * the one thing that changes when a native `<button>` becomes a Vuetify one.
+ */
+function focusButton(button: ComponentPublicInstance | null): void {
+  ;(button?.$el as HTMLElement | undefined)?.focus()
+}
 
 /** Focus goes back to the button that opened it, as the settings flyout does. */
 function closeRules(): void {
   rulesOpen.value = false
-  void nextTick(() => rulesButton.value?.focus())
+  void nextTick(() => focusButton(rulesButton.value))
 }
 
 /** Focus goes back where it came from, so closing the panel does not strand a keyboard at the top. */
 function closeSettings(): void {
   settingsOpen.value = false
-  void nextTick(() => gear.value?.focus())
+  void nextTick(() => focusButton(gear.value))
 }
 
 function chooseKind(id: GameKind): void {
@@ -611,16 +620,18 @@ const selectedMode = computed(() => modeInfo(mode.value))
 </script>
 
 <template>
-  <main class="menu">
-    <div class="lockup">
-      <h1>hexnome</h1>
-      <p class="tagline">
+  <main class="hx-menu">
+    <div class="hx-menu__lockup">
+      <h1 class="hx-lockup__name">
+        hexnome
+      </h1>
+      <p class="hx-lockup__tagline">
         Build · Adapt · Evolve
       </p>
     </div>
 
-    <section
-      class="panel"
+    <v-card
+      class="hx-panel"
       :aria-label="step === 'title' ? 'Main menu' : 'Game setup'"
     >
       <!-- Step 1 -->
@@ -633,71 +644,80 @@ const selectedMode = computed(() => modeInfo(mode.value))
           Stored on `change` rather than on every keystroke, so a half-typed name is not what gets
           remembered if the tab is closed mid-word.
         -->
-        <div class="who">
-          <label
-            class="who-label"
-            for="player-name"
-          >Your name</label>
-          <input
-            id="player-name"
-            v-model="name"
-            type="text"
-            maxlength="40"
-            placeholder="Player"
-            @change="rememberName(name)"
-          >
+        <v-text-field
+          id="player-name"
+          v-model="name"
+          label="Your name"
+          placeholder="Player"
+          maxlength="40"
+          @change="rememberName(name)"
+        >
           <!--
-            Deliberately outside the label: a button nested in one is also a click on the label, so
-            every reroll would drag focus into the field it just filled.
+            In the field's own slot rather than beside it. A button nested in a `<label>` is also a
+            click on the label, which used to drag focus into the field it had just filled; the slot
+            is inside the control but outside the label, so it does not.
           -->
-          <HintTip text="Suggest another name">
-            <button
-              type="button"
-              class="reroll"
-              aria-label="Suggest another name"
-              @click="reroll"
+          <template #append-inner>
+            <v-tooltip
+              text="Suggest another name"
+              location="top"
             >
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path :d="mdiDiceMultiple" />
-              </svg>
-            </button>
-          </HintTip>
-        </div>
+              <template #activator="{ props: tip }">
+                <v-btn
+                  v-bind="tip"
+                  :icon="mdiDiceMultiple"
+                  variant="text"
+                  size="small"
+                  density="comfortable"
+                  aria-label="Suggest another name"
+                  class="hx-panel__reroll"
+                  @click="reroll"
+                />
+              </template>
+            </v-tooltip>
+          </template>
+        </v-text-field>
 
-        <fieldset class="group kinds">
-          <legend>New game</legend>
-          <button
+        <v-divider />
+
+        <fieldset class="hx-group hx-group--stack">
+          <legend class="hx-group__legend">
+            New game
+          </legend>
+          <v-btn
             v-for="entry in GAME_KINDS"
             :key="entry.id"
-            type="button"
-            class="option"
+            block
             :disabled="!entry.available"
+            class="hx-option"
             @click="chooseKind(entry.id)"
           >
-            <span class="option-label">{{ entry.label }}</span>
-            <span
+            <span class="hx-option__label">{{ entry.label }}</span>
+            <v-spacer />
+            <v-chip
               v-if="!entry.available"
-              class="soon"
-            >Soon</span>
-          </button>
+              size="small"
+              variant="text"
+              class="hx-option__note"
+            >
+              Soon
+            </v-chip>
+          </v-btn>
         </fieldset>
 
         <!--
           Below the kinds and quieter than them: it starts nothing, and somebody who came here to
           play should not have to read past it.
         -->
-        <button
+        <v-btn
           ref="rulesButton"
-          type="button"
-          class="rules-link"
+          :border="false"
+          color="muted"
+          class="hx-panel__rules"
           @click="rulesOpen = true"
         >
           Game rules
-        </button>
+        </v-btn>
       </template>
 
       <!-- Step 2 -->
@@ -709,61 +729,84 @@ const selectedMode = computed(() => modeInfo(mode.value))
         -->
         <fieldset
           v-if="kind === 'multiplayer'"
-          class="group"
+          class="hx-group"
         >
-          <legend>Players</legend>
-          <div class="counts">
-            <button
+          <legend class="hx-group__legend">
+            Players
+          </legend>
+          <v-btn-toggle
+            v-model="playerCount"
+            color="success"
+            base-color="on-surface"
+            variant="text"
+            mandatory
+            class="hx-choices"
+          >
+            <v-btn
               v-for="count in PLAYER_COUNT_CHOICES"
               :key="count"
-              type="button"
-              class="count"
-              :class="{ chosen: playerCount === count }"
-              :aria-pressed="playerCount === count"
-              @click="playerCount = count"
+              :value="count"
             >
               {{ count }}
-            </button>
-          </div>
+            </v-btn>
+          </v-btn-toggle>
         </fieldset>
 
-        <fieldset class="group">
-          <legend>Mode</legend>
-          <button
-            v-for="entry in SINGLEPLAYER_MODES"
-            :key="entry.id"
-            type="button"
-            class="option"
-            :class="{ chosen: mode === entry.id }"
-            :aria-pressed="mode === entry.id"
-            @click="mode = entry.id"
+        <fieldset class="hx-group">
+          <legend class="hx-group__legend">
+            Mode
+          </legend>
+          <v-btn-toggle
+            v-model="mode"
+            color="success"
+            base-color="on-surface"
+            variant="text"
+            mandatory
+            class="hx-choices hx-choices--stacked"
           >
-            <span class="option-label">{{ entry.label }}</span>
-            <span class="rounds">{{ entry.rounds }} rounds</span>
-          </button>
+            <v-btn
+              v-for="entry in SINGLEPLAYER_MODES"
+              :key="entry.id"
+              :value="entry.id"
+              class="hx-option"
+            >
+              <span class="hx-option__label">{{ entry.label }}</span>
+              <v-spacer />
+              <span class="hx-option__note">{{ entry.rounds }} rounds</span>
+            </v-btn>
+          </v-btn-toggle>
           <p
             v-if="selectedMode?.description"
-            class="description"
+            class="hx-group__hint"
           >
             {{ selectedMode.description }}
           </p>
         </fieldset>
 
-        <fieldset class="group">
-          <legend>Placement</legend>
-          <button
-            v-for="rule in PLACEMENT_RULES"
-            :key="rule"
-            type="button"
-            class="option"
-            :class="{ chosen: placementRule === rule }"
-            :aria-pressed="placementRule === rule"
-            @click="placementRule = rule"
+        <fieldset class="hx-group">
+          <legend class="hx-group__legend">
+            Placement
+          </legend>
+          <v-btn-toggle
+            v-model="placementRule"
+            color="success"
+            base-color="on-surface"
+            variant="text"
+            mandatory
+            class="hx-choices hx-choices--stacked"
           >
-            <span class="option-label">{{ PLACEMENT_RULE_LABELS[rule] }}</span>
-            <span class="rounds">{{ PLACEMENT_RULE_HINTS[rule] }}</span>
-          </button>
-          <p class="description">
+            <v-btn
+              v-for="rule in PLACEMENT_RULES"
+              :key="rule"
+              :value="rule"
+              class="hx-option"
+            >
+              <span class="hx-option__label">{{ PLACEMENT_RULE_LABELS[rule] }}</span>
+              <v-spacer />
+              <span class="hx-option__note">{{ PLACEMENT_RULE_HINTS[rule] }}</span>
+            </v-btn>
+          </v-btn-toggle>
+          <p class="hx-group__hint">
             A tile with nothing beside it may go anywhere. Once it touches something, this decides how
             much of what it touches has to share its colour or its symbol.
           </p>
@@ -777,68 +820,66 @@ const selectedMode = computed(() => modeInfo(mode.value))
           is the button: the gear says what it does, but a thin icon is a poor target for a row that is
           already the right shape to press.
         -->
-        <button
+        <v-btn
           ref="gear"
-          type="button"
-          class="settings"
+          block
+          :append-icon="mdiCog"
           :aria-expanded="settingsOpen"
           aria-label="Game settings"
+          class="hx-summary"
           @click="settingsOpen = true"
         >
-          <span class="settings-values">
+          <span class="hx-summary__values">
             <span
               v-for="dial in summaryDials"
               :key="dial.key"
-              class="pill"
+              class="hx-summary__pill"
             >
-              <span class="pill-label">{{ dial.short }}</span>
-              <span class="pill-value">{{ pillValue(dial) }}</span>
+              <span class="hx-summary__label">{{ dial.short }}</span>
+              <span class="hx-summary__value">{{ pillValue(dial) }}</span>
             </span>
             <span
               v-if="bonusSummary"
-              class="pill"
+              class="hx-summary__pill"
             >
-              <span class="pill-label">group bonus</span>
-              <span class="pill-value">{{ bonusSummary }}</span>
+              <span class="hx-summary__label">group bonus</span>
+              <span class="hx-summary__value">{{ bonusSummary }}</span>
             </span>
           </span>
-          <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <path :d="mdiCog" />
-          </svg>
-        </button>
+        </v-btn>
 
-        <button
-          type="button"
-          class="option start"
-          :disabled="starting"
+        <v-btn
+          block
+          color="primary"
+          :loading="starting"
+          class="hx-panel__start"
           @click="startGame"
         >
-          <span class="option-label">{{ starting ? 'Opening…' : 'Start game' }}</span>
-        </button>
+          {{ starting ? 'Opening…' : 'Start game' }}
+        </v-btn>
 
         <!-- The one failure this screen can have of its own: the table would not open. -->
-        <p
+        <v-alert
           v-if="startProblem"
-          class="problem"
+          type="error"
+          variant="tonal"
+          density="compact"
           role="alert"
         >
           {{ startProblem }}
-        </p>
+        </v-alert>
       </template>
 
-      <button
+      <v-btn
         v-if="step !== 'title'"
-        type="button"
-        class="back"
+        :border="false"
+        color="muted"
+        class="hx-panel__back"
         @click="back"
       >
         Back
-      </button>
-    </section>
+      </v-btn>
+    </v-card>
 
     <RulesPanel
       :open="rulesOpen"
@@ -856,36 +897,39 @@ const selectedMode = computed(() => modeInfo(mode.value))
       >
         <h3
           v-if="section.title"
-          class="section"
+          class="hx-section"
         >
           {{ section.title }}
         </h3>
-        <div class="dials">
+        <div class="hx-dials">
           <fieldset
             v-for="dial in section.dials"
             :key="dial.key"
-            class="group"
+            class="hx-group"
           >
-            <legend>{{ dial.legend }}</legend>
-            <div
-              class="counts"
-              :class="{ wide: dial.choices.length > 4 }"
+            <legend class="hx-group__legend">
+              {{ dial.legend }}
+            </legend>
+            <v-btn-toggle
+              v-model="dial.model.value"
+              color="success"
+              base-color="on-surface"
+              variant="text"
+              mandatory
+              class="hx-choices"
+              :class="{ 'hx-choices--wide': dial.choices.length > 4 }"
             >
-              <button
+              <v-btn
                 v-for="(count, index) in dial.choices"
                 :key="count"
-                type="button"
-                class="count"
-                :class="{ chosen: dial.model.value === count }"
-                :aria-pressed="dial.model.value === count"
-                @click="dial.model.value = count"
+                :value="count"
               >
                 {{ dial.labels?.[index] ?? count }}
-              </button>
-            </div>
+              </v-btn>
+            </v-btn-toggle>
             <p
               v-if="dial.hint"
-              class="description"
+              class="hx-group__hint"
             >
               {{ dial.hint }}
             </p>
@@ -893,7 +937,7 @@ const selectedMode = computed(() => modeInfo(mode.value))
         </div>
         <p
           v-if="section.note"
-          class="description"
+          class="hx-group__hint"
         >
           {{ section.note }}
         </p>
@@ -909,482 +953,262 @@ const selectedMode = computed(() => modeInfo(mode.value))
         sections of dials where a signal nobody scrolls to is no signal.
       -->
       <template #aside>
-        <button
+        <v-btn
           v-if="changedFromDefaults"
-          type="button"
-          class="reset"
+          size="small"
+          color="muted"
           @click="resetToDefaults"
         >
           Reset to defaults
-        </button>
+        </v-btn>
       </template>
     </SettingsFlyout>
   </main>
 </template>
 
-<style scoped>
-/* Quieter than anything that starts a game: undoing is allowed, not encouraged. */
-/* A way out of the menu, not another way in: underlined text rather than another framed option. */
-.rules-link {
-  justify-self: center;
-  margin-top: 4px;
-  padding: 6px 10px;
-  border: 0;
-  background: transparent;
-  color: #79808f;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-  transition: color 140ms;
-}
+<!--
+  Not `scoped`, on purpose. A scoped style adds a `[data-v-…]` attribute to every selector, which
+  raises its specificity — and specificity is the thing cascade layers exist to stop mattering. In
+  the `components` layer a plain `.hx-option` already beats Vuetify's `.v-btn.v-btn--density-default`
+  without help. See styles/layers.scss.
 
-.rules-link:hover {
-  color: #e8c878;
-}
+  What is left here is layout and the two pieces of typography that carry the game's identity: the
+  display lockup, and the uppercase tracking on legends and option labels. Colour, borders, radius,
+  elevation and control sizing all come from the theme and the component defaults now.
+-->
+<style lang="scss">
+@use '@/styles/mixins.import' as *;
 
-.rules-link:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rules-link {
-    transition: none;
-  }
-}
-
-.reset {
-  flex: 0 0 auto;
-  padding: 9px 14px;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #79808f;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: border-color 140ms, color 140ms;
-}
-
-.reset:hover {
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-.reset:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .reset {
-    transition: none;
-  }
-}
-
-.menu {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 32px;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  max-width: 952px;
-  margin: 0 auto;
-}
-
-@media (width <= 760px) {
-  .menu {
-    grid-template-columns: minmax(0, 1fr);
+@layer components {
+  .hx-menu {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 32px;
-    align-content: center;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    max-width: 952px;
+    /* 32px of breathing room, the same inset the other full-page screens use. */
+    padding: 32px;
+    margin: 0 auto;
   }
-}
 
-/* ── title lockup ──────────────────────────────────────────────────────────── */
+  @media (width <= 760px) {
+    .hx-menu {
+      grid-template-columns: minmax(0, 1fr);
+      align-content: center;
+    }
+  }
 
-h1 {
-  margin: 0;
-  color: #e8c878;
-  font-weight: 600;
   /*
-   * The game lockup: display type, outside the text scale in styles/main.scss.
+   * The game lockup: display type, and the one place that opts out of the type scale.
    *
-   * It has to opt out of the base **line height** as well as the size. That line height is absolute
-   * (1.5rem), so it does not grow with the font — inheriting it put 52px capitals in a 24px box and
-   * pulled the tagline up under them. An exception is only an exception if it declines both.
+   * It declines the base **line height** as well as the size. That line height is absolute (1.5rem)
+   * so it does not grow with the font — inheriting it put 52px capitals in a 24px box and pulled the
+   * tagline up under them. An exception is only an exception if it declines both.
    */
-  font-size: clamp(34px, 6vw, 52px);
-  line-height: normal;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.tagline {
-  margin: 6px 0 0;
-  color: #6b7382;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-}
-
-/* ── the current step ──────────────────────────────────────────────────────── */
-
-.panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 22px;
-  border: 1px solid #3a3222;
-  border-radius: 4px;
-  background: rgb(21 23 28 / 82%);
-  box-shadow: 0 2px 24px rgb(0 0 0 / 45%);
-}
-
-.group {
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.group + .group {
-  margin-top: 10px;
-}
-
-legend {
-  padding: 0 0 8px;
-  color: #6b7382;
-  font-size: var(--text-sm);
-  line-height: var(--text-sm-line);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.option {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #cfd4de;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 140ms, background-color 140ms, color 140ms;
-}
-
-.group .option + .option {
-  margin-top: 8px;
-}
-
-.option-label {
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.option:hover:not(:disabled) {
-  border-color: #7d6a41;
-  background: rgb(232 200 120 / 7%);
-  color: #e8c878;
-}
-
-.option:disabled {
-  border-color: #24272d;
-  color: #575d68;
-  cursor: not-allowed;
-}
-
-/* Reuses the mint the board already uses to mean "this is the target". */
-.option.chosen,
-.count.chosen {
-  border-color: #8fe6c0;
-  background: rgb(143 230 192 / 8%);
-  color: #8fe6c0;
-}
-
-.problem {
-  margin: 8px 0 0;
-  color: #d98b74;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-}
-
-.option.start {
-  margin-top: 14px;
-  justify-content: center;
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-.option.start:hover {
-  background: rgb(232 200 120 / 14%);
-}
-
-.rounds,
-.soon {
-  color: #6b7382;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.description {
-  margin: 10px 0 0;
-  color: #79808f;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-}
-
-/*
- * A fixed four-column grid, not a flex row.
- *
- * Flex made every dial's buttons fill the width, so the two-choice strict bonus rendered as two slabs
- * twice the size of the four-choice dials above it — the smallest decision on the panel drawn as the
- * biggest control. On a grid a choice is the same size everywhere, a short row simply stops early, and
- * a dial with more than four choices wraps onto a second line at that same size.
- */
-.counts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-/* Ten choices sit as two rows of five; at four columns they would come out 4 + 4 + 2. */
-.counts.wide {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.count {
-  padding: 11px 0;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #cfd4de;
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: border-color 140ms, background-color 140ms, color 140ms;
-}
-
-.count:hover:not(.chosen) {
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-/* A rule across the flyout, so the second half reads as a different question rather than more dials. */
-.section {
-  margin: 22px 0 14px;
-  padding-top: 16px;
-  border-top: 1px solid #3a3222;
-  color: #e8c878;
-  font-size: var(--text-sm);
-  line-height: var(--text-sm-line);
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-/* Dials sit closer together than the menu's own groups, being a list of one kind of thing. */
-.dials .group + .group {
-  margin-top: 16px;
-}
-
-/* ── the settings readout ──────────────────────────────────────────────────── */
-
-/*
- * Quieter than an `.option`: it is not one of the choices, it is a report on the ones already made.
- * Dashed, so it reads as a summary that can be opened rather than a button that does something.
- */
-.settings {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  margin-top: 14px;
-  padding: 10px 12px;
-  border: 1px dashed #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #79808f;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 140ms, color 140ms;
-}
-
-.settings:hover {
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-.settings svg {
-  flex: none;
-  width: 17px;
-  height: 17px;
-  fill: currentcolor;
-}
-
-.settings-values {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-}
-
-/* Label then value, so the column of numbers stays scannable however the row wraps. */
-.pill {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.pill-label {
-  color: #6b7382;
-  font-size: var(--text-sm);
-  line-height: var(--text-sm-line);
-  text-transform: uppercase;
-}
-
-.pill-value {
-  color: #cfd4de;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  font-variant-numeric: tabular-nums;
-}
-
-.settings:hover .pill-value {
-  color: #e8c878;
-}
-
-/* ── who you are ───────────────────────────────────────────────────────────── */
-
-/*
- * The rule sits under the name row rather than over the kinds below it, which is a fieldset: a
- * legend cuts its own border, so the same line drawn there would start halfway across the panel.
- */
-.who {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #22252b;
-}
-
-.kinds {
-  margin-top: 14px;
-}
-
-.who-label {
-  color: #6b7382;
-  font-size: var(--text-sm);
-  line-height: var(--text-sm-line);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.who input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: #1b1e24;
-  color: #cfd4de;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-}
-
-.who input::placeholder {
-  color: #575d68;
-}
-
-.who input:focus-visible {
-  border-color: #7d6a41;
-  outline: none;
-}
-
-/* Square, and the same height as the field, so the row reads as one control with a handle on it. */
-.reroll {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 33px;
-  height: 33px;
-  padding: 0;
-  border: 1px solid #33383f;
-  border-radius: 3px;
-  background: transparent;
-  color: #6b7382;
-  cursor: pointer;
-  transition: border-color 140ms, color 140ms;
-}
-
-.reroll:hover {
-  border-color: #7d6a41;
-  color: #e8c878;
-}
-
-.reroll svg {
-  width: 16px;
-  height: 16px;
-  fill: currentcolor;
-  /* The die tumbles a sixth of a turn on press — the shortest way to say "that did something". */
-  transition: transform 220ms ease-out;
-}
-
-.reroll:active svg {
-  transform: rotate(60deg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .reroll svg {
-    transition: none;
+  .hx-lockup__name {
+    margin: 0;
+    color: rgb(var(--v-theme-primary));
+    font-weight: 600;
+    font-size: clamp(34px, 6vw, 52px);
+    line-height: normal;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
   }
-}
 
-.back {
-  align-self: flex-start;
-  margin-top: 6px;
-  padding: 6px 0;
-  border: 0;
-  background: none;
-  color: #6b7382;
-  font: inherit;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-transform: uppercase;
-  cursor: pointer;
-}
+  .hx-lockup__tagline {
+    margin: 6px 0 0;
+    color: rgb(var(--v-theme-muted-dim));
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+  }
 
-.back:hover {
-  color: #e8c878;
-}
+  /* The step's card. Only the stacking is ours; the surface, edge and radius are the `v-card`. */
+  .hx-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+  }
 
-:is(.option, .count, .back, .settings, .reroll):focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 2px;
-}
+  .hx-panel__rules {
+    align-self: center;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 
-@media (prefers-reduced-motion: reduce) {
-  :is(.option, .count, .settings) {
-    transition: none;
+  .hx-panel__back {
+    align-self: flex-start;
+  }
+
+  .hx-panel__start {
+    margin-top: 4px;
+  }
+
+  /* Nudged in so the die sits on the field's edge rather than floating inside it. */
+  .hx-panel__reroll {
+    margin-inline-end: -4px;
+  }
+
+  .hx-group {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .hx-group + .hx-group {
+    margin-top: 4px;
+  }
+
+  /* A column of full-width options, rather than buttons sitting edge to edge. */
+  .hx-group--stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /*
+   * Legends and option labels carry the uppercase tracking the whole game is set in. This is the
+   * signature, not decoration — it is why a panel reads as this game and not as a settings dialog.
+   */
+  .hx-group__legend {
+    padding: 0 0 8px;
+    color: rgb(var(--v-theme-muted-dim));
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .hx-group__hint {
+    margin: 8px 0 0;
+    color: rgb(var(--v-theme-muted));
+  }
+
+  .hx-option__label {
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .hx-option__note {
+    color: rgb(var(--v-theme-muted-dim));
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /*
+   * A fixed grid, not the toggle's own flex row.
+   *
+   * `v-btn-toggle` lays its buttons out in a row and lets them size to their content, which is what
+   * the hand-written version did too — and it was wrong for the same reason: the two-choice dials
+   * rendered as two slabs twice the size of the four-choice dials above them, drawing the smallest
+   * decision on the panel as the biggest control. On a grid a choice is the same size everywhere, a
+   * short row simply stops early, and a long one wraps at that same size.
+   *
+   * This is the layer architecture earning its keep: `.hx-choices` is one class (0,1,0) and it beats
+   * `.v-btn-group` outright, with no `:deep()` and no `!important`.
+   */
+  .hx-choices {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    height: auto;
+    border: 0;
+
+    /* The toggle rounds only its end buttons and hides the seams between them; on a grid there are
+       no seams, and every cell is its own control. */
+    .v-btn {
+      height: auto;
+      min-height: 40px;
+      border-radius: $v-border-radius-root;
+      border-width: $v-border-width-root;
+      font-variant-numeric: tabular-nums;
+      opacity: 1;
+    }
+  }
+
+  /* Ten choices sit as two rows of five; at four columns they would come out 4 + 4 + 2. */
+  .hx-choices--wide {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  /* Full-width options, one per row, rather than side by side. */
+  .hx-choices--stacked {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /*
+   * Options are read left to right — label, then what it costs you — so they fill the row.
+   *
+   * `.v-btn__content` needs the width said out loud: it is an inline-flex that shrinks to its text,
+   * so a `v-spacer` inside it has nothing to grow into and the label and its note end up jammed
+   * together ("CLASSIC4 ROUNDS"). Giving the content the full width is what lets the spacer work.
+   */
+  .hx-option {
+    justify-content: flex-start;
+    min-height: 44px;
+    padding-inline: 14px;
+    text-align: left;
+
+    .v-btn__content {
+      width: 100%;
+    }
+  }
+
+  /*
+   * Quieter than an option: it is not one of the choices, it is a report on the ones already made.
+   * Dashed, so it reads as a summary that can be opened rather than a button that does something.
+   */
+  .hx-summary {
+    height: auto;
+    min-height: 44px;
+    padding-block: 10px;
+    border-style: dashed;
+    text-align: left;
+  }
+
+  .hx-summary__values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+  }
+
+  /* Label then value, so the column of numbers stays scannable however the row wraps. */
+  .hx-summary__pill {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .hx-summary__label {
+    color: rgb(var(--v-theme-muted-dim));
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
+    text-transform: uppercase;
+  }
+
+  .hx-summary__value {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A rule across the flyout, so the second half reads as a different question rather than more dials. */
+  .hx-section {
+    margin: 22px 0 14px;
+    padding-top: 16px;
+    border-top: $v-border-width-root solid rgb(var(--v-theme-border-brass));
+    color: rgb(var(--v-theme-primary));
+    font-size: var(--text-sm);
+    line-height: var(--text-sm-line);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  /* Dials sit closer together than the menu's own groups, being a list of one kind of thing. */
+  .hx-dials .hx-group + .hx-group {
+    margin-top: 16px;
   }
 }
 </style>
