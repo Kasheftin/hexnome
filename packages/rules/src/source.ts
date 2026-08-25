@@ -73,6 +73,31 @@ export function sourceContents(tableau: Tableau): {
   return { tiles, plates }
 }
 
+/**
+ * The lots that hold anything, newest first.
+ *
+ * **A rendering question, answered here.** The column has `sourceLots` slots and they are what the
+ * model shifts within, but a slot picked clean is not something a player should see — an empty bay
+ * says "something goes here" when nothing ever will again. So the renderer draws one row per occupied
+ * lot and this is what tells it which, and in what order.
+ *
+ * The indices are the model's, not row numbers: a caller wanting the row a lot is drawn on takes its
+ * position in this list. Keeping them apart is what lets the model go on shifting lots without the
+ * renderer having to agree about which slot is which.
+ *
+ * **Tiles count, not just plates.** A lot's plate can be drafted away while its heap remains, and a
+ * heap with no plate under it is still something to offer.
+ */
+export function occupiedLots(tableau: Tableau): readonly number[] {
+  const lots: number[] = []
+  for (let lot = 0; lot < tableau.sourceLots; lot++) {
+    const filled = tableau.plateInSourceLot(lot) !== undefined
+      || tableau.tilesInSourceLot(lot).length > 0
+    if (filled) lots.push(lot)
+  }
+  return lots
+}
+
 /** Has the newest lot been drafted from? */
 export function topLotIsShort(tableau: Tableau): boolean {
   if (tableau.sourceLots === 0) return false

@@ -52,14 +52,24 @@ import { useSourceLayout } from './useSourceLayout'
 const props = defineProps<{
   /** The drawer's seats: the source column stops above the panel, whose width follows them. */
   drawer: DrawerShape
+  /** The round's capacity — what sizes a lot, whether or not it is filled. */
   lots: number
+  /**
+   * The lots holding something, newest first, as model indices.
+   *
+   * One bay is drawn per entry, in this order, so a lot picked clean simply stops being drawn and the
+   * ones below it close the gap. The indices themselves are not used here — only how many there are —
+   * but the array is what `TableauView` positions its pieces against, and passing the same value to
+   * both is what keeps the bays and their contents on the same rows.
+   */
+  rows: readonly number[]
   /** Is the source draftable right now? Only during a `taking` turn. */
   live: boolean
 }>()
 
 const { scene, camera, sizes, renderer } = useTresContext()
 const { onBeforeRender } = useLoop()
-const layout = useSourceLayout(() => props.lots, () => props.drawer)
+const layout = useSourceLayout(() => props.lots, () => props.drawer, () => props.rows.length)
 
 /*
  * Publish the column's rectangle for the DOM scrollbar to match itself to (scene/sourceScroll.ts).
@@ -158,14 +168,31 @@ onMounted(() => {
   // The column swallows presses: pressing an empty lot must not pan the board behind it.
   unregister = registerGrabbable(panel)
 
-  for (let lot = 0; lot < layout.value.lotCount; lot++) {
+  syncBays()
+})
+
+/**
+ * One bay per drawn row, created and removed as the column grows and empties.
+ *
+ * They used to be built once on mount, which was fine while the column always showed a full set of
+ * slots. Now it shows only what is filled, so the count changes with play.
+ */
+function syncBays(): void {
+  const want = layout.value.lotCount
+  while (bays.length > want) {
+    const bay = bays.pop()
+    if (bay) scene.value?.remove(bay)
+  }
+  while (bays.length < want) {
     const bay = new Mesh(bayGeometry, bayMaterial)
     bay.rotation.copy(FLAT)
     bay.renderOrder = 11
     bays.push(bay)
-    scene.value.add(bay)
+    scene.value?.add(bay)
   }
-})
+}
+
+watch(() => layout.value.lotCount, syncBays)
 
 onBeforeRender(() => {
   const cam = camera.activeCamera.value as OrthographicCamera | undefined

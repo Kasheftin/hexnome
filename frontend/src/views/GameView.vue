@@ -55,7 +55,7 @@ import {
   type DraftItem,
 } from '@hexnome/rules/draft'
 import { boardCells } from '@hexnome/rules/board'
-import { SOURCE_TILES_PER_LOT } from '@hexnome/rules/source'
+import { occupiedLots, SOURCE_TILES_PER_LOT } from '@hexnome/rules/source'
 import {
   canAffordPlacement,
   canConfirmPayment,
@@ -118,6 +118,7 @@ import RoundResults from '@/ui/RoundResults.vue'
 import GameSettingsPanel from '@/ui/GameSettingsPanel.vue'
 import RulesPanel from '@/ui/RulesPanel.vue'
 import NoticePanel from '@/ui/NoticePanel.vue'
+import SourceEmpty from '@/ui/SourceEmpty.vue'
 import SourceScroll from '@/ui/SourceScroll.vue'
 import PresenceMark from '@/ui/PresenceMark.vue'
 import TileChip from '@/ui/TileChip.vue'
@@ -1295,6 +1296,20 @@ function setScoringOpen(open: boolean): void {
  * Empty past the last round, which is what hides the strip on a finished game — there is no round in
  * progress to be collecting for, and the final score has a panel of its own.
  */
+/**
+ * The source lots holding something, newest first.
+ *
+ * **Computed once here and given to both halves of the column** — the chrome that draws the bays and
+ * the view that puts plates and tiles in them. Two lists worked out separately would be two answers,
+ * and the first time they disagreed a plate would sit on a row with no bay under it.
+ *
+ * `revision` because the state is folded rather than reactive; see `board()`.
+ */
+const sourceRows = computed<readonly number[]>(() => {
+  void revision.value
+  return occupiedLots(source())
+})
+
 const roundTargets = computed<RoundAgenda>(() => {
   void revision.value
   return roundAgenda(agenda, count.value.round) ?? []
@@ -2138,6 +2153,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <SourceChrome
         :drawer="drawerShape"
         :lots="platesPerRound"
+        :rows="sourceRows"
         :live="phase.kind === 'taking' || canStartTake"
       />
       <DrawerChrome
@@ -2152,6 +2168,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         :spending="spending"
         :arriving="arriving"
         :source="source()"
+        :source-rows="sourceRows"
         :drawer="drawerShape"
         :game-id="gameId"
         :yours="yours"
@@ -2194,6 +2211,9 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       and on an upright phone is never — see ui/SourceScroll.vue.
     -->
     <SourceScroll />
+
+    <!-- Said in the column's one remaining bay, once there is nothing left to draft from it. -->
+    <SourceEmpty :empty="sourceRows.length === 0" />
 
     <!--
       Positioned over the plate bay these belong to: the hovered one where there is a pointer,

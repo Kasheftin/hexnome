@@ -3,6 +3,7 @@ import { createBag } from './bag'
 import { hexRectangle } from './hex'
 import {
   hasRoomToShift,
+  occupiedLots,
   platesToReveal,
   pushLot,
   shiftLotsDown,
@@ -263,5 +264,49 @@ describe('what the source is holding', () => {
 
     expect(hasRoomToShift(t)).toBe(true)
     expect(shouldRefill(t, supply)).toBe(true)
+  })
+})
+
+/*
+ * What the column actually draws. The model keeps `sourceLots` slots and shifts within them; a slot
+ * picked clean is not something a player should be shown, so the renderer asks which lots hold
+ * anything and draws one row each.
+ */
+describe('which lots are worth drawing', () => {
+  it('has nothing to draw before the first deal', () => {
+    expect(occupiedLots(table())).toEqual([])
+  })
+
+  it('counts a lot from the moment it is pushed', () => {
+    const t = table()
+    pushLot(t, heap(1))
+    expect(occupiedLots(t)).toEqual([0])
+    pushLot(t, heap(2))
+    expect(occupiedLots(t)).toEqual([0, 1])
+  })
+
+  /* The hole is the whole point: the model leaves the slot, and the renderer must not draw it. */
+  it('skips a lot picked clean in the middle', () => {
+    const t = table()
+    pushLot(t, heap(1))
+    pushLot(t, heap(2))
+    pushLot(t, heap(3))
+    expect(occupiedLots(t)).toEqual([0, 1, 2])
+
+    const plate = t.plateInSourceLot(1)
+    if (plate) t.discard(plate.id)
+    for (const tile of t.tilesInSourceLot(1)) t.discard(tile.id)
+
+    expect(occupiedLots(t)).toEqual([0, 2])
+  })
+
+  /* A plate can go while its heap stays, and a heap with nothing under it is still worth offering. */
+  it('still counts a lot whose plate has gone but whose tiles remain', () => {
+    const t = table()
+    pushLot(t, heap(1))
+    const plate = t.plateInSourceLot(0)
+    if (plate) t.discard(plate.id)
+    expect(t.tilesInSourceLot(0).length).toBeGreaterThan(0)
+    expect(occupiedLots(t)).toEqual([0])
   })
 })

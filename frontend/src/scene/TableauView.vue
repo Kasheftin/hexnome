@@ -114,6 +114,15 @@ import { useSourceLayout } from './useSourceLayout'
 
 const props = defineProps<{
   tableau: Tableau
+  /**
+   * The source lots holding something, newest first — the same list `SourceChrome` draws bays for.
+   *
+   * A lot's **row** is its position in here, not its model index. The model leaves a hole where a lot
+   * was picked clean and goes on shifting within its slots; the column closes the gap instead, and
+   * this is the one place the two are reconciled. Both halves take the same array, so a plate can
+   * never land on a row that has no bay under it.
+   */
+  sourceRows?: readonly number[]
   /** How many seats the drawer has — a game setting, so the panel's size follows it. */
   drawer: DrawerShape
   /** Seeds the loose-tile scatter, so a lot looks the same after a refresh. */
@@ -267,7 +276,26 @@ const emit = defineEmits<{
 const { scene, camera, renderer, sizes } = useTresContext()
 const { onBeforeRender } = useLoop()
 const layout = useDrawerLayout(() => props.drawer)
-const sourceLayout = useSourceLayout(() => sourceOf().sourceLots, () => props.drawer)
+const sourceLayout = useSourceLayout(
+  () => sourceOf().sourceLots,
+  () => props.drawer,
+  () => rowsOfSource().length,
+)
+
+/** Falls back to every lot, so the view still renders if it is used without the list. */
+function rowsOfSource(): readonly number[] {
+  return props.sourceRows ?? Array.from({ length: sourceOf().sourceLots }, (_, lot) => lot)
+}
+
+/**
+ * The row a lot is drawn on, or -1 if it is not drawn at all.
+ *
+ * -1 rather than a fallback, because a piece in a lot nobody is drawing has nowhere honest to go —
+ * the caller leaves it where it was rather than stacking it on row zero.
+ */
+function rowOfLot(lot: number): number {
+  return rowsOfSource().indexOf(lot)
+}
 
 const tileGeometry: BufferGeometry = createTileGeometry({
   circumradius: TILE_SIZE,
@@ -1372,7 +1400,10 @@ onBeforeRender(({ delta }) => {
       approachScale(view, drawerPlateScale(upp), ease)
     } else if (plate.location.kind === 'source') {
       setRegime(view, 'source')
-      const c = src.lotCentre(plate.location.lot)
+      // The row it is drawn on, not the slot it lives in — see `rowOfLot`.
+      const row = rowOfLot(plate.location.lot)
+      if (row < 0) continue
+      const c = src.lotCentre(row)
       easeScreen(view, c.x, c.y, ease)
       /*
        * The scroll lands **after** the ease, and that order is the whole trick.
@@ -1508,7 +1539,10 @@ onBeforeRender(({ delta }) => {
       // The heap's identity is its plate, so its arrangement survives the stack shifting down. Falls
       // back to the slot only if the lot somehow has no plate, which nothing can currently cause.
       const heapKey = props.tableau.plateInSourceLot(lot)?.id ?? `lot${lot}`
-      const c = src.lotCentre(lot)
+      // The row it is drawn on, not the slot it lives in — see `rowOfLot`.
+      const row = rowOfLot(lot)
+      if (row < 0) continue
+      const c = src.lotCentre(row)
       easeScreen(view, c.x, c.y, ease)
       // Scroll after the ease, for the reason given on the plate branch above.
       const p = screenToBoard(cam, w, h, view.screenX, view.screenY - src.scrollTop)

@@ -99,8 +99,23 @@ export function createSourceLayout(
    * still have an answer.
    */
   top = SOURCE_TOP_PX,
+  /**
+   * How many rows the column actually draws — the lots that hold something.
+   *
+   * **Separate from `lots`, and that separation is the point.** `lots` is the round's capacity and is
+   * what sizes a lot; `rows` is how many are worth showing. Sizing from `rows` instead would make
+   * every plate grow as the column emptied, which is a size change nobody asked for in the middle of
+   * a turn.
+   *
+   * Never below one: an empty column still draws a single bay, which is where the "nothing left"
+   * placeholder sits.
+   */
+  rows = lots,
 ): SourceLayout {
-  const lotCount = Math.max(1, Math.floor(lots))
+  /** The round's capacity: what a lot is sized against, whether or not it is filled. */
+  const capacity = Math.max(1, Math.floor(lots))
+  /** What is drawn. One even when nothing is left, so the placeholder has a bay to sit in. */
+  const lotCount = Math.max(1, Math.floor(rows))
   /**
    * How far down the column may run.
    *
@@ -120,7 +135,7 @@ export function createSourceLayout(
 
   // Fit the lots to what is left, then let the panel hug them.
   const available = Math.max(0, bottomLimit - top)
-  const forLots = available - SOURCE_PADDING_PX * 2 - SOURCE_LOT_GAP_PX * (lotCount - 1)
+  const forLots = available - SOURCE_PADDING_PX * 2 - SOURCE_LOT_GAP_PX * (capacity - 1)
   /*
    * Clamp the *width* and re-derive the height from it, so clamping never distorts the aspect.
    *
@@ -133,7 +148,7 @@ export function createSourceLayout(
    * A floor was never the wrong idea, it was homeless. Now the column scrolls, so the overflow has a
    * home and the panel itself still stops dead above the drawer — see `height` below.
    */
-  const lotWidth = Math.min(SOURCE_LOT_MAX_PX, Math.max(SOURCE_LOT_MIN_PX, forLots / lotCount / LOT_ASPECT))
+  const lotWidth = Math.min(SOURCE_LOT_MAX_PX, Math.max(SOURCE_LOT_MIN_PX, forLots / capacity / LOT_ASPECT))
   const lotHeight = lotWidth * LOT_ASPECT
 
   const width = lotWidth + SOURCE_PADDING_PX * 2

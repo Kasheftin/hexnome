@@ -17,6 +17,8 @@ import { scrollTop } from './sourceScroll'
 export function useSourceLayout(
   lots: MaybeRefOrGetter<number>,
   drawer: () => DrawerShape,
+  /** How many lots hold anything. Defaults to the capacity, which is every lot. */
+  rows: MaybeRefOrGetter<number> = lots,
 ): ComputedRef<SourceLayout> {
   const { sizes } = useTresContext()
   return computed(() => createSourceLayout(
@@ -26,5 +28,6 @@ export function useSourceLayout(
     drawer(),
     scrollTop.value,
     headerBottom.value + SOURCE_HEADER_GAP_PX,
+    toValue(rows),
   ))
 }
