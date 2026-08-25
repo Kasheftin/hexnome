@@ -137,6 +137,10 @@ const draftSummary = computed(() => {
     <p class="turn">
       {{ watchingLabel ?? turnLabel }}
     </p>
+    <span
+      class="rule"
+      aria-hidden="true"
+    />
 
     <!-- Watching: no actions, and the turn moves over into their place. -->
     <p
@@ -148,159 +152,154 @@ const draftSummary = computed(() => {
 
     <!-- Choosing -->
     <template v-else-if="phase.kind === 'idle'">
-      <div class="actions">
-        <button
-          type="button"
-          class="action"
-          :disabled="!options.take"
-          @click="$emit('choose', 'take')"
-        >
-          Take
-        </button>
-        <button
-          type="button"
-          class="action"
-          :disabled="!options.put"
-          @click="$emit('choose', 'put')"
-        >
-          Put
-        </button>
-        <button
-          type="button"
-          class="action quiet"
-          :disabled="!options.pass"
-          @click="$emit('choose', 'pass')"
-        >
-          Pass
-        </button>
-        <button
-          v-if="offersUndo"
-          type="button"
-          class="action quiet"
-          :disabled="!canUndo"
-          :title="canUndo ? 'Take the last turn back' : 'Nothing to take back this round'"
-          @click="$emit('choose', 'undo')"
-        >
-          Undo
-        </button>
-      </div>
+      <button
+        type="button"
+        class="action"
+        :disabled="!options.take"
+        @click="$emit('choose', 'take')"
+      >
+        Take
+      </button>
+      <button
+        type="button"
+        class="action"
+        :disabled="!options.put"
+        @click="$emit('choose', 'put')"
+      >
+        Put
+      </button>
+      <button
+        type="button"
+        class="action quiet"
+        :disabled="!options.pass"
+        @click="$emit('choose', 'pass')"
+      >
+        Pass
+      </button>
+      <span
+        v-if="offersUndo"
+        class="rule"
+        aria-hidden="true"
+      />
+      <button
+        v-if="offersUndo"
+        type="button"
+        class="action quiet"
+        :disabled="!canUndo"
+        :title="canUndo ? 'Take the last turn back' : 'Nothing to take back this round'"
+        @click="$emit('choose', 'undo')"
+      >
+        Undo
+      </button>
     </template>
 
     <!-- Drafting -->
     <template v-else-if="phase.kind === 'taking'">
-      <div class="doing">
-        <span class="verb">Take</span>
-        <span
-          v-if="selection.length"
-          class="chips"
-        >
-          <TileChip
-            v-for="(spec, i) in selection"
-            :key="i"
-            :color="spec.color"
-            :value="spec.value"
-            :plate="spec.plate"
-          />
-        </span>
-        <span class="hint">{{ draftSummary }}</span>
-      </div>
-      <div class="actions">
-        <button
-          type="button"
-          class="action"
-          :disabled="!canConfirm"
-          @click="$emit('confirm')"
-        >
-          Take
-        </button>
-        <button
-          type="button"
-          class="action quiet"
-          @click="$emit('cancel')"
-        >
-          Cancel
-        </button>
-      </div>
+      <span class="verb">Take</span>
+      <span
+        v-if="selection.length"
+        class="chips"
+      >
+        <TileChip
+          v-for="(spec, i) in selection"
+          :key="i"
+          :color="spec.color"
+          :value="spec.value"
+          :plate="spec.plate"
+        />
+      </span>
+      <span class="hint">{{ draftSummary }}</span>
+      <button
+        type="button"
+        class="action"
+        :disabled="!canConfirm"
+        @click="$emit('confirm')"
+      >
+        Take
+      </button>
+      <button
+        type="button"
+        class="action quiet"
+        @click="$emit('cancel')"
+      >
+        Cancel
+      </button>
     </template>
 
     <!-- Placing -->
     <template v-else-if="phase.kind === 'putting'">
-      <div class="doing">
-        <span class="verb">Put</span>
-        <span class="hint">drag a plate or tile onto the board</span>
-      </div>
-      <div class="actions">
-        <button
-          type="button"
-          class="action quiet"
-          @click="$emit('cancel')"
-        >
-          Cancel
-        </button>
-      </div>
+      <span class="verb">Put</span>
+      <span class="hint">drag a plate or tile onto the board</span>
+      <button
+        type="button"
+        class="action quiet"
+        @click="$emit('cancel')"
+      >
+        Cancel
+      </button>
     </template>
 
     <!-- Paying -->
     <template v-else>
-      <div class="doing">
-        <span class="verb">Pay</span>
-        <span
-          v-if="paySelection.length"
-          class="chips"
-        >
-          <TileChip
-            v-for="(spec, i) in paySelection"
-            :key="i"
-            :color="spec.stem ? undefined : spec.color"
-            :value="spec.stem ? undefined : spec.value"
-            :plate="spec.plate"
-            :stem="spec.stem"
-          />
-        </span>
-        <span class="hint">{{ paySummary }}</span>
-      </div>
-      <div class="actions">
-        <button
-          type="button"
-          class="action"
-          :disabled="!canApply"
-          @click="$emit('apply')"
-        >
-          Apply
-        </button>
-        <button
-          type="button"
-          class="action quiet"
-          @click="$emit('cancel')"
-        >
-          Cancel
-        </button>
-      </div>
+      <span class="verb">Pay</span>
+      <span
+        v-if="paySelection.length"
+        class="chips"
+      >
+        <TileChip
+          v-for="(spec, i) in paySelection"
+          :key="i"
+          :color="spec.stem ? undefined : spec.color"
+          :value="spec.stem ? undefined : spec.value"
+          :plate="spec.plate"
+          :stem="spec.stem"
+        />
+      </span>
+      <span class="hint">{{ paySummary }}</span>
+      <button
+        type="button"
+        class="action"
+        :disabled="!canApply"
+        @click="$emit('apply')"
+      >
+        Apply
+      </button>
+      <button
+        type="button"
+        class="action quiet"
+        @click="$emit('cancel')"
+      >
+        Cancel
+      </button>
     </template>
   </div>
 </template>
 
 <style scoped>
+/*
+ * **Everything in the bar is a direct child of it, on one rhythm.**
+ *
+ * It used to be three nested flex boxes — the label, a `.doing` group at 10px, an `.actions` group at
+ * 8px, all inside the bar at 18px. Nothing looked evenly spaced because nothing was: the rule after
+ * the turn label sat in the bar's 18px while the rule before Undo sat in `.actions`' 8px plus its own
+ * margin, so two dividers doing the same job stood at two different distances from what they divided.
+ *
+ * One container and one gap means every item is spaced the same, and a divider needs no offset of its
+ * own — the gap already puts 8px on each side of it. `.chips` stays a group because a run of tiles is
+ * one item, not several, and reads as a cluster rather than at arm's length.
+ */
 .bar {
   position: absolute;
   /* Anchored by its bottom-centre on the drawer's top edge. */
   display: flex;
-  gap: 18px;
+  gap: 8px;
   align-items: center;
   padding: 8px 12px;
   transform: translate(-50%, calc(-100% - 10px));
 }
 
-/* The divider belongs *between* things, so the last one does not draw one against thin air. */
-.turn:last-child {
-  padding-right: 0;
-  border-right: none;
-}
-
 .turn {
   margin: 0;
-  padding-right: 14px;
-  border-right: 1px solid #2a2c33;
   color: #6b7382;
   font-size: 10px;
   letter-spacing: 0.16em;
@@ -308,15 +307,11 @@ const draftSummary = computed(() => {
   white-space: nowrap;
 }
 
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
 .action {
-  padding: 7px 16px;
-  border: 1px solid #7d6a41;
-  border-radius: 3px;
+  position: relative;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 4px;
   background: transparent;
   color: #e8c878;
   font: inherit;
@@ -324,7 +319,23 @@ const draftSummary = computed(() => {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   cursor: pointer;
-  transition: border-color 140ms, background-color 140ms, color 140ms;
+  transition: background-color 140ms, color 140ms;
+}
+
+/*
+ * The ring, drawn over the button rather than by it — the house rule, see `.chrome-panel::before`.
+ *
+ * It matters more here than anywhere: these sit in a row whose height the bar is sized to, so an edge
+ * counted as content is an edge that moves the bar.
+ */
+.action::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid #7d6a41;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: border-color 140ms;
 }
 
 .action:hover:not(:disabled) {
@@ -333,8 +344,11 @@ const draftSummary = computed(() => {
 
 /* Reuses the mint the board already uses to mean "this is the committing move". */
 .action:not(.quiet):not(:disabled) {
-  border-color: #8fe6c0;
   color: #8fe6c0;
+}
+
+.action:not(.quiet):not(:disabled)::before {
+  border-color: #8fe6c0;
 }
 
 .action:not(.quiet):hover:not(:disabled) {
@@ -342,20 +356,37 @@ const draftSummary = computed(() => {
 }
 
 .action.quiet {
-  border-color: #33383f;
   color: #cfd4de;
 }
 
+.action.quiet::before {
+  border-color: #33383f;
+}
+
 .action:disabled {
-  border-color: #24272d;
   color: #575d68;
   cursor: not-allowed;
 }
 
-.doing {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+.action:disabled::before {
+  border-color: #24272d;
+}
+
+/*
+ * The divider between two groups of items, used twice: after the turn label, and before Undo.
+ *
+ * Undo is the one that has to be argued for. Take, Put and Pass are the turn — one of them is what you
+ * are here to choose — while Undo is about the turn *before*, so sitting in the same run of buttons
+ * invites it to be read as a fourth way to play. The rule says: these three, and then something else.
+ *
+ * No margin of its own. The bar's gap already puts 8px on each side, and an extra margin here is
+ * exactly what made the two rules sit at different distances when they lived in different containers.
+ */
+.rule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: #33383f;
 }
 
 .verb {

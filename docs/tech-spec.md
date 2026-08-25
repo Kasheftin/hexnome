@@ -768,9 +768,17 @@ Consequences, all of them deliberate:
   every pixel dimension. Capped at 1, because the constants are the intended size rather than a
   minimum; no lower cap, because a panel that always fits is worth more than tiles that never shrink.
 
-  Scrollbars were the obvious alternative and are not available: the drawer is *in the canvas*, so
-  there is no element to scroll. Building one would mean a custom gesture, clipping, and offsetting
-  every hit-test — and a slot you cannot see is a slot you cannot drop on.
+  Scrollbars were the obvious alternative and were ruled out here on the grounds that the drawer is
+  *in the canvas*, so there is nothing to scroll. **Half of that turned out to be wrong**, and the
+  source column now has a real one: an empty DOM element over the canvas gives you the browser's own
+  bar and its own touch momentum, and only `scrollTop` has to cross back (see "The shared source
+  column"). No custom gesture is involved.
+
+  What was right is the rest of it — clipping, and offsetting every hit-test. Both were real work.
+  They are worth it for the column, whose height varies with `platesPerRound` and which is a *stack*
+  you work down; they are not obviously worth it for the drawer, where a slot you cannot see is a slot
+  you cannot drop on, and where the scroll would have to fight the drag that starts in it. The drawer
+  still scales to fit.
 
   Anything sizing drawer contents must read `layout.slotSize` / `layout.plateSlotWidth` rather than the
   raw constants, or the tiles keep their full size inside shrunken sockets. Four places did exactly
@@ -830,8 +838,11 @@ clamped against the cell bounds inset by two cells, so the ragged outer ring nev
 Zoom has to be clamped as well as pan — a viewport larger than the board could not be kept inside it
 by clamping pan alone.
 
-**No scrollbars.** The canvas fills the window and never overflows; scrolling is dragging.
-Left-drag on empty board pans; left-drag on a tile moves the tile; middle- and right-drag always pan.
+**No scrollbars on the board.** The canvas fills the window and never overflows; scrolling the board is
+dragging. Left-drag pans **anywhere on the board**, over placed pieces included; left-drag on something
+you can actually pick up moves that instead; middle- and right-drag always pan. (The source column is
+the one exception, and it is a panel rather than the board — it gets a real DOM scrollbar when its lots
+overflow; see "The shared source column".)
 **No free orbit** — the board has a canonical up and symbols must stay readable. A hand-rolled
 controller rather than cientos' `MapControls`, because the clamping and the left-button split both
 need direct control.
@@ -840,7 +851,18 @@ That left-button split needs an arbiter, and it cannot be whoever receives the e
 own raycast and the camera's canvas listener both fire for the same `pointerdown`, in an order neither
 controls. So `scene/grabbables.ts` holds a registry of objects that claim a press, the camera raycasts
 it and pans only on a miss. Both sides use the same camera and pointer position, so they always agree.
-Board plates are deliberately not registered — pressing a plate is how you grab empty board.
+
+**A registration is a question, not a fact.** Whether an object wants the press depends on where it has
+since moved and what the turn is doing — the same mesh is a thing to pick up while it is in your drawer
+and scenery once it is placed and paid for. So callers register a predicate, consulted at press time,
+and items pass `canDrag` — the very function `pick()` already used to decide whether a drag may start.
+
+Registering "yes, always" was what made a played-in board draggable only by its gaps: every plate and
+tile went on claiming presses long after the rules had stopped letting anyone move them, so the press
+was swallowed and *nothing happened*. The registry and `pick()` disagreed, and the disagreement was the
+bug. Panels register with no predicate and are always live — a tray is furniture, and pressing furniture
+is never a pan, which is also what keeps the drawer and the source column claiming their own presses
+even though the items inside them have fallen out of the registry.
 
 ### Board backdrop
 
@@ -1119,6 +1141,53 @@ supply right; drawer bottom-centre; cost legend and end-turn bottom corners.
 The contract between CSS and WebGL is one-way and narrow: chrome elements declare empty placeholder
 divs for the three 3D regions, and `scene/layout.ts` reads their bounding rects to set viewports. CSS
 owns layout; the renderer follows.
+
+#### Borders are drawn over a box, never by it
+
+The house rule for panels and controls in the chrome: no `border` on the element, a `::before` at
+`inset: 0` carrying it instead (`.chrome-panel::before` in `styles/main.css`, and the same shape on
+each button).
+
+A real border is part of the box, so a 1px edge makes a control 2px taller and the row it sits in 2px
+taller again. That is not theoretical — all of these were the same cause: the header measured 46px for
+a 44px design; it grew to 51px whenever the scoring strip appeared, moving the board's top edge for a
+control the player had just pressed; and its title sat a pixel above the one in the panel beside it.
+
+An overlay contributes no size, which leaves padding and gaps as the only things setting a height — and
+that is what lets a **4px grid** hold rather than nearly hold. Panels are `8px 16px`, controls are 24px
+square, gaps are 8px or 16px. `min-height: 40px` on the header (8 + 24 + 8) states the floor outright,
+so a control appearing inside it can never resize it.
+
+Hover and disabled states move to the pseudo-element with the border (`.action:disabled::before`), and
+`pointer-events: none` keeps the ring from swallowing a click.
+
+The rules *between* header groups are elements (`.rule`), not `border-left` on whichever group follows.
+A border would be one more edge counted into a row whose height is the thing being held steady, and it
+would have to be undone again on whichever group starts a wrapped line — a question about the viewport
+that CSS cannot answer. An element simply is not rendered when it is not wanted.
+
+#### The scoring panel shrinks rather than hides
+
+The plan has to be read every round, but it is 247px down the right-hand edge — which a laptop can
+spare and a phone cannot, where it covers the board it is describing. Closing it moves the current
+round's row into the header as a strip: the same chips and the same live figure, from the same
+`roundAgenda` call, so it is a shrink rather than a summary written twice. What the control trades is
+the *other* rounds and the seat list — read between rounds, not during one.
+
+**The preference is three states, not a boolean** (`composables/scoringPanel.ts`). `null` means never
+chosen, which is not the same as closed: with no preference the default follows the screen — shut below
+`NARROW_SCREEN`, open above it. A boolean would force a default at the moment of writing and then
+remember it forever, so a player who opened the game once on a laptop would find it open on their phone
+having never asked for that. Once they press the control, the choice is theirs everywhere.
+
+It is one value for the player rather than one per game, unlike a read sheet or a seat: it says nothing
+about any particular table.
+
+**The header is bounded and wraps below 720px.** It is absolutely positioned with a left edge and no
+right one, so it grew straight off the side of a phone — taking the scoring strip with it, which is the
+control that exists for that screen. The settings line goes with the wrap, being reference rather than
+news; everything that moves stays. The dividing rules go too, because which group starts the second
+line depends on the width and a rule at the start of a line points at nothing.
 
 ### Turns and drafting
 
@@ -1465,11 +1534,41 @@ column, one nested bay per lot. Six lots down the left, under the title.
 
 Two things about it are not obvious:
 
-**Lots are sized to fit the height, not fixed.** Six plates stacked is a *vertical* constraint, and at
+**Lots are sized to fit the height, then stop.** Six plates stacked is a *vertical* constraint, and at
 a fixed 152px bay (the drawer's size) the column would be 900px tall and overflow most viewports. So
-the lot width is derived from the space available and clamped to `[54, 124]`. Height follows from the
+the lot width is derived from the space available and clamped to `[104, 176]`. Height follows from the
 real plate aspect — a flower is 5 tall by 5.196 wide in `HEX_SIZE` units, verified numerically — because
 using 1:1 leaves the plate visibly off-centre in its lot.
+
+**The floor is only affordable because the column scrolls.** It was tried once without one and reverted:
+the lots held a readable size, the column ran past the drawer, and the two panels fought over the same
+pixels. Fitting won outright instead, and the column then degraded smoothly to unreadable — 59px lots on
+a 1024x700 laptop, 21px on a phone held sideways. A floor was never the wrong idea, it was *homeless*.
+
+So `SourceLayout` separates two heights that used to be one: `height` is what the panel occupies on
+screen and still stops dead above the drawer, and `contentHeight` is the lots stacked, free to exceed
+it. The difference is `maxScroll`.
+
+**The scrollbar is a real DOM element, not a drawn one.** `ui/SourceScroll.vue` is an empty transparent
+div laid over the column with `overflow-y: auto`, containing a spacer of `contentHeight`. The browser
+supplies the bar, the touch momentum, the rubber-banding and the keyboard support; we read `scrollTop`.
+It mounts only when the lots overflow, so a desktop — and a phone held upright, which fits six lots at
+107px — sees nothing at all.
+
+Three consequences worth knowing, because each is a place this could have gone wrong:
+
+- **`lotCentre` stays in content space.** Views *ease* toward their target, so folding the scroll into
+  it would make every piece chase a moving mark and trail behind the gesture. Callers subtract
+  `scrollTop` after easing, which makes scrolling a rigid translation.
+- **The container receives the presses.** It covers the column, so `TableauView` binds its picker to
+  the element as well as to the canvas, and drafting moved from `pointerdown` to release-within-slop —
+  otherwise a scroll would draft whatever it started on. `touch-action: pan-y` lets the browser settle
+  scroll-versus-tap before any handler runs.
+- **Clipping is per-material and raycasts ignore it.** Scrolled-out lots are cut by
+  `sourceClipPlanes` (`scene/sourceScroll.ts`), attached and cleared in `setRegime` so a plate is not
+  still sliced once it reaches the board. Pieces get *cloned* materials, because the plate's slab and
+  socket are module-level singletons shared with the board. `pickSourceItem` guards on `contains()`,
+  since a clipped-away tile is still sitting there as far as a ray is concerned.
 
 **The column yields to the drawer, but only when it has to.** The drawer is bottom-centre and the
 column is on the left, so on a wide viewport they never meet and the column can run to the bottom

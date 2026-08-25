@@ -42,6 +42,7 @@ import {
   type Material,
   type Object3D,
   type OrthographicCamera,
+  type Plane,
   type Texture,
 } from 'three'
 import { onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
@@ -108,6 +109,7 @@ import { SOURCE_HEAP_SPAN, sourceScatter, type ScatterOffset } from './sourceSca
 import { createTileMaterial, type TileColorIndex } from './tileMaterials'
 import type { DrawerShape } from './drawerLayout'
 import { useDrawerLayout } from './useDrawerLayout'
+import { scrollElement, sourceClipPlanes } from './sourceScroll'
 import { useSourceLayout } from './useSourceLayout'
 
 const props = defineProps<{
@@ -321,6 +323,8 @@ interface View {
    * it rides. Used only to notice a change and restart the scale ease.
    */
   regime: string
+  /** Whether this piece's materials currently carry the column's clipping planes. */
+  clipped: boolean
   /**
    * True once the scale ease has finished. While settled, scale is assigned *directly*
    * from the current target rather than eased toward it.
@@ -633,6 +637,53 @@ function setRegime(view: View, regime: string): void {
   if (view.regime === 'source' && regime === 'drawer') view.arriving = ARRIVE_SECONDS
   view.regime = regime
   view.settled = false
+  // The one place a piece enters or leaves the column, so the one place clipping has to change.
+  setSourceClip(view, regime === 'source')
+}
+
+/**
+ * Clip a piece to the source column, or stop.
+ *
+ * Only pieces *in* the column are clipped, and that is why this is tied to the regime rather than set
+ * once: a plate spends its life going source → drawer → board, and a plate still clipped to the column
+ * would be sliced in half on the board.
+ *
+ * ## Why it clones materials
+ *
+ * `clippingPlanes` is a property of a material, and several of the plate's materials are module-level
+ * singletons shared with every plate on the board (`plateVisual.ts`, `plateBackVisual.ts`). Setting the
+ * planes on those would clip the whole tableau to the column. So a piece that enters the column gets
+ * private copies — a handful of them, and a clone shares its shader program and textures with the
+ * original, so this costs almost nothing.
+ *
+ * The clone is kept afterwards rather than swapped back. It is already private, so clearing its planes
+ * is enough, and holding on to it means a piece that returns to the column does not clone twice.
+ */
+function setSourceClip(view: View, on: boolean): void {
+  if (view.clipped === on) return
+  view.clipped = on
+  view.object.traverse(node => {
+    const mesh = node as Partial<Mesh>
+    const material = mesh.material
+    if (!material) return
+    mesh.material = Array.isArray(material)
+      ? material.map(one => clipMaterial(one, on))
+      : clipMaterial(material, on)
+  })
+}
+
+/** Marks a material as this view's own, so the shared originals are never given clipping planes. */
+const PRIVATE = 'hexnomeClipOwner'
+
+function clipMaterial(material: Material, on: boolean): Material {
+  if (!on) {
+    material.clippingPlanes = null
+    return material
+  }
+  const own = material.userData[PRIVATE] === true ? material : material.clone()
+  own.userData[PRIVATE] = true
+  own.clippingPlanes = sourceClipPlanes as Plane[]
+  return own
 }
 
 /** The screen ease for this view this frame: gentle while it is arriving, brisk otherwise. */
@@ -696,6 +747,15 @@ function castTo(canvasX: number, canvasY: number): Object3D[] | null {
  * pointing at.
  */
 function pickSourceItem(canvasX: number, canvasY: number): string | null {
+  /*
+   * Outside the column, nothing in the column is on offer.
+   *
+   * Necessary because the column scrolls and its overflow is hidden by **clipping planes**, which act
+   * in the fragment shader — a raycast knows nothing about them. Without this, a lot scrolled up out of
+   * sight would still sit in the scene above the panel and answer clicks aimed at the board or header.
+   * It also skips a raycast for every press that lands elsewhere, which is most of them.
+   */
+  if (!sourceLayout.value.contains(canvasX, canvasY)) return null
   const roots = castTo(canvasX, canvasY)
   if (!roots) return null
   for (const hit of raycaster.intersectObjects(roots, true)) {
@@ -952,6 +1012,14 @@ interface PendingPress {
   readonly hit: Draggable | null
   /** What a click would select while paying, or null. */
   readonly clickTarget: string | null
+  /**
+   * What a click would draft from the source, or null.
+   *
+   * Deferred to the release for the same reason as `clickTarget`, but prompted by a different one: the
+   * column scrolls now, and a scroll begins with a press on whatever happened to be under the finger.
+   * Selecting on `pointerdown` would draft a tile every time somebody scrolled past it.
+   */
+  readonly draftTarget: string | null
   readonly startX: number
   readonly startY: number
   readonly offsetX: number
@@ -973,25 +1041,21 @@ function onPointerDown(e: PointerEvent): void {
   const c = pointerToCanvas(e)
   if (!c) return
 
-  // Drafting: a click on a source tile is a selection, never a drag.
-  if (props.draftStates) {
-    const itemId = pickSourceItem(c.x, c.y)
-    if (itemId !== null) {
-      emit('selectTile', itemId)
-      return
-    }
-  }
+  // Drafting: a press on a source tile is a selection, never a drag — but it is settled on release.
+  const draftTarget = props.draftStates ? pickSourceItem(c.x, c.y) : null
 
-  const hit = pick(c.x, c.y)
+  // A source tile is not draggable, so there is nothing else this press could have meant.
+  const hit = draftTarget === null ? pick(c.x, c.y) : null
   const draggable = hit !== null && canDrag(hit)
   // Only paying gives a click a meaning of its own, so only paying pays for the second raycast.
   const clickTarget = props.payStates ? pickDrawerItem(c.x, c.y) : null
-  if (!draggable && clickTarget === null) return
+  if (draftTarget === null && !draggable && clickTarget === null) return
 
   const view = hit === null ? undefined : viewOf(hit)
   press = {
     hit: draggable ? hit : null,
     clickTarget,
+    draftTarget,
     startX: c.x,
     startY: c.y,
     // Captured now so the piece keeps its position relative to the cursor once the drag begins.
@@ -1001,6 +1065,15 @@ function onPointerDown(e: PointerEvent): void {
 
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp, { once: true })
+  // The browser takes the gesture away when it commits to a scroll; the press dies with it.
+  window.addEventListener('pointercancel', onWindowPointerCancel, { once: true })
+}
+
+/** A gesture claimed by the platform — a committed scroll, most often. It selects nothing. */
+function onWindowPointerCancel(): void {
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  press = null
 }
 
 function viewOf(hit: Draggable): View | undefined {
@@ -1116,16 +1189,30 @@ function reportRefusedDrop(current: Draggable): void {
   emit('refused', said)
 }
 
-function onWindowPointerUp(): void {
+function onWindowPointerUp(e?: PointerEvent): void {
   window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointercancel', onWindowPointerCancel)
   document.body.style.cursor = ''
   const current = held.value
   const pending = press
   press = null
 
-  // Never moved far enough to be a drag, so it was a click. Only paying gives that a meaning.
+  // Never moved far enough to be a drag, so it was a click.
   if (!current) {
-    if (pending?.clickTarget) emit('selectPayment', pending.clickTarget)
+    if (!pending) return
+    /*
+     * Measured here rather than inferred from `held`, because a source tile never becomes held however
+     * far the pointer travels — it is not draggable. Without its own measurement, a scroll that began
+     * on a tile would still release as a click on it.
+     */
+    const end = e ? pointerToCanvas(e) : null
+    const travelled = end
+      ? Math.hypot(end.x - pending.startX, end.y - pending.startY)
+      : 0
+    if (travelled >= DRAG_SLOP_PX) return
+    if (pending.draftTarget) emit('selectTile', pending.draftTarget)
+    // Only paying gives a click a meaning of its own.
+    else if (pending.clickTarget) emit('selectPayment', pending.clickTarget)
     return
   }
 
@@ -1287,7 +1374,15 @@ onBeforeRender(({ delta }) => {
       setRegime(view, 'source')
       const c = src.lotCentre(plate.location.lot)
       easeScreen(view, c.x, c.y, ease)
-      const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
+      /*
+       * The scroll lands **after** the ease, and that order is the whole trick.
+       *
+       * `lotCentre` is content space, so a plate eases into its lot at its own pace. Folding the
+       * scroll into that target instead would make every piece chase a moving mark — the column would
+       * trail behind the finger and glide on after it stopped. Applied here it is a rigid translation:
+       * the lots track the scrollbar exactly, while still easing into place when they restock.
+       */
+      const p = screenToBoard(cam, w, h, view.screenX, view.screenY - src.scrollTop)
       view.world.set(p.x, SOURCE_PLATE_Y, p.z)
       approachScale(view, sourcePlateScale(upp, src.plateWidth), ease)
     } else {
@@ -1415,7 +1510,8 @@ onBeforeRender(({ delta }) => {
       const heapKey = props.tableau.plateInSourceLot(lot)?.id ?? `lot${lot}`
       const c = src.lotCentre(lot)
       easeScreen(view, c.x, c.y, ease)
-      const p = screenToBoard(cam, w, h, view.screenX, view.screenY)
+      // Scroll after the ease, for the reason given on the plate branch above.
+      const p = screenToBoard(cam, w, h, view.screenX, view.screenY - src.scrollTop)
       const s = sourceTileScale(upp, src.plateHeight)
       // Scatter offsets are in tile-radii, so they convert with the tile's own world radius — which
       // is what keeps the heap's shape identical whether the tiles are at drawer size or clamped.
@@ -1518,6 +1614,7 @@ function reconcileViews(): void {
       scale: 1,
       spin: -plate.rotation * (Math.PI / 3),
       regime: '',
+      clipped: false,
       settled: false,
       fresh: true,
       faceDown: plate.faceDown,
@@ -1527,7 +1624,9 @@ function reconcileViews(): void {
     group.rotation.y = -plate.rotation * (Math.PI / 3)
     owners.set(group, { kind: 'plate', id: plate.id })
     scene.value.add(group)
-    unregisters.push(registerGrabbable(group))
+    // Claims the press only while it is actually pickable — see `canDrag`. A plate sitting on the
+    // board is scenery, and pressing scenery pans.
+    unregisters.push(registerGrabbable(group, () => canDrag({ kind: 'plate', id: plate.id })))
   }
 
   for (const tile of everyTile()) {
@@ -1553,13 +1652,14 @@ function reconcileViews(): void {
       scale: 1,
       spin: 0,
       regime: '',
+      clipped: false,
       settled: false,
       fresh: true,
       decor: attachDraftDecor(mesh, faceY),
     })
     owners.set(mesh, { kind: 'tile', id: tile.id })
     scene.value.add(mesh)
-    unregisters.push(registerGrabbable(mesh))
+    unregisters.push(registerGrabbable(mesh, () => canDrag({ kind: 'tile', id: tile.id })))
   }
 
   for (const stem of props.tableau.stems()) {
@@ -1579,6 +1679,7 @@ function reconcileViews(): void {
       screenX: rewarded ? ARRIVE_FROM_X : 0,
       screenY: rewarded ? layout.value.slotCentre(stem.slot).y : 0,
       scale: 1,
+      clipped: false,
       spin: 0,
       regime: rewarded ? 'drawer' : '',
       settled: false,
@@ -1588,7 +1689,7 @@ function reconcileViews(): void {
     })
     owners.set(coin, { kind: 'stem', id: stem.id })
     scene.value.add(coin)
-    unregisters.push(registerGrabbable(coin))
+    unregisters.push(registerGrabbable(coin, () => canDrag({ kind: 'stem', id: stem.id })))
   }
 
   /*
@@ -1711,6 +1812,23 @@ watch(() => props.revision, reconcileViews)
 
 let canvas: HTMLCanvasElement | null = null
 
+/**
+ * The column's scrollbar is a DOM element laid over the canvas, so it — not the canvas — receives
+ * presses aimed at the lots. Binding the same handlers to it keeps the column pickable.
+ *
+ * Watched rather than bound at mount: it exists only while the lots overflow, so it appears and
+ * disappears as the window is resized. `pointerToCanvas` works from client coordinates and the canvas
+ * rect, so a forwarded event needs no translation.
+ */
+watch(scrollElement, (el, previous) => {
+  previous?.removeEventListener('pointerdown', onPointerDown)
+  previous?.removeEventListener('pointermove', onCanvasPointerMove)
+  previous?.removeEventListener('pointerleave', onCanvasPointerLeave)
+  el?.addEventListener('pointerdown', onPointerDown)
+  el?.addEventListener('pointermove', onCanvasPointerMove)
+  el?.addEventListener('pointerleave', onCanvasPointerLeave)
+})
+
 onMounted(() => {
   canvas = canvasEl()
   canvas?.addEventListener('pointerdown', onPointerDown)
@@ -1740,6 +1858,10 @@ onBeforeUnmount(() => {
   canvas?.removeEventListener('pointerdown', onPointerDown)
   canvas?.removeEventListener('pointermove', onCanvasPointerMove)
   canvas?.removeEventListener('pointerleave', onCanvasPointerLeave)
+  const scroller = scrollElement.value
+  scroller?.removeEventListener('pointerdown', onPointerDown)
+  scroller?.removeEventListener('pointermove', onCanvasPointerMove)
+  scroller?.removeEventListener('pointerleave', onCanvasPointerLeave)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('pointermove', onWindowPointerMove)
   document.body.style.cursor = ''

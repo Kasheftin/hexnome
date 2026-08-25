@@ -267,6 +267,15 @@ export const SOURCE_BOTTOM_GAP_PX = 12
  */
 export const SOURCE_LOT_MAX_PX = 176
 /**
+ * The floor, in screen pixels — below this the column scrolls instead of shrinking further.
+ *
+ * Chosen against the real numbers rather than by feel. A 390x844 phone held upright fits six lots at
+ * 107px naturally, so a floor just under that leaves **the commonest phone case untouched** and no
+ * scrollbar appears. What it rescues is everything narrower in the other direction: the same phone
+ * turned sideways fits six lots at 21px, and a 1024x700 laptop at 59px.
+ */
+export const SOURCE_LOT_MIN_PX = 104
+/**
  * Plate width as a fraction of its lot.
  *
  * Fuller than the drawer's bays, because here the plate has to be a surface for the heap rather than

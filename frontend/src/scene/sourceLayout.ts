@@ -5,6 +5,7 @@ import {
   SOURCE_LEFT_PX,
   SOURCE_LOT_GAP_PX,
   SOURCE_LOT_MAX_PX,
+  SOURCE_LOT_MIN_PX,
   SOURCE_PADDING_PX,
   SOURCE_PLATE_FILL,
   SOURCE_TOP_PX,
@@ -24,7 +25,21 @@ export interface SourceLayout {
   readonly left: number
   readonly top: number
   readonly width: number
+  /**
+   * What the panel occupies on screen. Never runs past the drawer.
+   *
+   * Not the same as {@link contentHeight} once the lots stop fitting — that is the whole point of the
+   * split, and mixing the two up is how a scrolling panel ends up overlapping its neighbour again.
+   */
   readonly height: number
+  /**
+   * How tall the lots are, stacked. May exceed {@link height}, and that difference is the scroll.
+   */
+  readonly contentHeight: number
+  /** How far the column can scroll. Zero when everything fits, which is the common case. */
+  readonly maxScroll: number
+  /** How far it currently is scrolled, already clamped to `[0, maxScroll]`. */
+  readonly scrollTop: number
   readonly lotCount: number
   readonly lotWidth: number
   readonly lotHeight: number
@@ -37,11 +52,22 @@ export interface SourceLayout {
    * lying *on* the plate, and the plate is the shorter of the two.
    */
   readonly plateHeight: number
-  /** Centre of a lot, in screen pixels. */
+  /**
+   * Centre of a lot, in **content pixels** — as if the column were never scrolled.
+   *
+   * Deliberately not the on-screen position, and this is the one surprising thing in here. Views
+   * *ease* toward their target (`TableauView.vue`, `easeScreen`), so a target that moved with the
+   * scrollbar would make every tile rubber-band along behind the gesture. Callers subtract
+   * {@link scrollTop} **after** easing, which turns scrolling into a rigid translation with no lag.
+   */
   lotCentre(lot: number): { x: number, y: number }
-  /** Lot under a screen point, or null if outside the lots. */
-  lotAt(x: number, y: number): number | null
-  /** Is this screen point anywhere over the column, padding included? */
+  /**
+   * Is this screen point anywhere over the column, padding included?
+   *
+   * Unscrolled, because the frame does not move — only what is behind it does. Doubles as the test for
+   * whether a lot is visible at all: a raycast ignores clipping planes, so without this a tile scrolled
+   * out of sight would still answer a click.
+   */
   contains(x: number, y: number): boolean
 }
 
@@ -60,6 +86,7 @@ export function createSourceLayout(
   canvasHeight: number,
   lots: number,
   drawerShape: DrawerShape,
+  scroll = 0,
 ): SourceLayout {
   const lotCount = Math.max(1, Math.floor(lots))
   /**
@@ -85,21 +112,32 @@ export function createSourceLayout(
   /*
    * Clamp the *width* and re-derive the height from it, so clamping never distorts the aspect.
    *
-   * There is a ceiling but **no floor**. A floor used to hold the lots at a readable size, and the
-   * column then ran on past the drawer and was overlapped by it — which is worse than small lots,
-   * because the two panels then fight over the same pixels. Fitting wins; below a certain window the
-   * lots are simply tiny.
+   * **The floor is back, and this time it has somewhere to put the overflow.** It was tried once
+   * before and reverted: the lots held a readable size, the column ran on past the drawer, and the two
+   * panels fought over the same pixels — worse than small lots. So fitting won outright, and the
+   * column degraded smoothly to unreadable instead. At 1024x700 with six lots that is a 59px lot; a
+   * phone held sideways gets 21px.
    *
-   * The `max(1, …)` is not decoration: on a very short window `forLots` goes negative, and a negative
-   * width would give inverted geometry rather than a small column.
+   * A floor was never the wrong idea, it was homeless. Now the column scrolls, so the overflow has a
+   * home and the panel itself still stops dead above the drawer — see `height` below.
    */
-  const lotWidth = Math.min(SOURCE_LOT_MAX_PX, Math.max(1, forLots / lotCount / LOT_ASPECT))
+  const lotWidth = Math.min(SOURCE_LOT_MAX_PX, Math.max(SOURCE_LOT_MIN_PX, forLots / lotCount / LOT_ASPECT))
   const lotHeight = lotWidth * LOT_ASPECT
 
   const width = lotWidth + SOURCE_PADDING_PX * 2
-  const height = lotCount * lotHeight
+  const contentHeight = lotCount * lotHeight
     + SOURCE_LOT_GAP_PX * (lotCount - 1)
     + SOURCE_PADDING_PX * 2
+  /*
+   * The panel takes what it needs or what it is allowed, whichever is less — so the old promise that
+   * it never reaches the drawer now holds *by construction* rather than by shrinking its contents.
+   *
+   * `available` is never zero at any window worth caring about (it bottoms out around 104px on a
+   * 600x300 one), so this stays positive without a guard.
+   */
+  const height = Math.min(contentHeight, available)
+  const maxScroll = Math.max(0, contentHeight - height)
+  const scrollTop = Math.min(maxScroll, Math.max(0, scroll))
   const left = SOURCE_LEFT_PX
   const top = SOURCE_TOP_PX
 
@@ -112,6 +150,9 @@ export function createSourceLayout(
     top,
     width,
     height,
+    contentHeight,
+    maxScroll,
+    scrollTop,
     lotCount,
     lotWidth,
     lotHeight,
@@ -123,15 +164,6 @@ export function createSourceLayout(
         x: lotsLeft + lotWidth / 2,
         y: lotsTop + pitch * lot + lotHeight / 2,
       }
-    },
-
-    lotAt(x, y) {
-      if (x < lotsLeft || x > lotsLeft + lotWidth) return null
-      const lot = Math.floor((y - lotsTop) / pitch)
-      if (lot < 0 || lot >= lotCount) return null
-      // Inside the gap between two lots rather than on either.
-      if ((y - lotsTop) - lot * pitch > lotHeight) return null
-      return lot
     },
 
     /**

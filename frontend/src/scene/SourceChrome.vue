@@ -23,8 +23,9 @@ import {
   MeshBasicMaterial,
   PlaneGeometry,
   type OrthographicCamera,
+  type Plane,
 } from 'three'
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, watch, watchEffect } from 'vue'
 import {
   createChromePanelMaterial,
   setChromePanelSize,
@@ -33,6 +34,7 @@ import {
 } from './chromePanel'
 import {
   SOURCE_CHROME_Y,
+  SOURCE_LOT_GAP_PX,
   SOURCE_SCRIM_COLOR,
   SOURCE_SCRIM_OPACITY,
   SOURCE_SCRIM_Y,
@@ -40,6 +42,7 @@ import {
 import { registerGrabbable } from './grabbables'
 import { screenToBoard, unitsPerPixel } from './screenProjection'
 import type { DrawerShape } from './drawerLayout'
+import { columnRect, resetSourceScroll, sourceClipPlanes, updateSourceClip } from './sourceScroll'
 import { useSourceLayout } from './useSourceLayout'
 
 /**
@@ -54,9 +57,29 @@ const props = defineProps<{
   live: boolean
 }>()
 
-const { scene, camera, sizes } = useTresContext()
+const { scene, camera, sizes, renderer } = useTresContext()
 const { onBeforeRender } = useLoop()
 const layout = useSourceLayout(() => props.lots, () => props.drawer)
+
+/*
+ * Publish the column's rectangle for the DOM scrollbar to match itself to (scene/sourceScroll.ts).
+ *
+ * From a watcher on the layout rather than from `onBeforeRender`: the layout is a computed over the
+ * canvas size, so it changes on a resize and not on a frame. Publishing per frame would write the same
+ * object sixty times a second for no one's benefit.
+ */
+watchEffect(() => {
+  const l = layout.value
+  columnRect.value = {
+    left: l.left,
+    top: l.top,
+    width: l.width,
+    height: l.height,
+    contentHeight: l.contentHeight,
+    lotCount: l.lotCount,
+    pitch: l.lotHeight + SOURCE_LOT_GAP_PX,
+  }
+})
 
 const FLAT = new Euler(-Math.PI / 2, 0, 0)
 
@@ -72,7 +95,12 @@ panel.renderOrder = 10
  */
 const bays: Mesh[] = []
 const bayGeometry = new PlaneGeometry(1, 1)
-const bayMaterial = createChromePanelMaterial()
+const bayMaterial = createChromePanelMaterial({ clipping: true })
+/*
+ * The bays scroll with the lots, so they clip with them. The panel and the scrim do not: they are the
+ * frame the lots move behind, and clipping them to themselves would do nothing.
+ */
+bayMaterial.clippingPlanes = sourceClipPlanes as Plane[]
 
 /**
  * The scrim: one quad over the whole column, drawn while the source is not draftable.
@@ -117,6 +145,14 @@ watch(() => props.live, live => {
 let unregister: (() => void) | null = null
 
 onMounted(() => {
+  /*
+   * Per-material clipping is off by default and silently ignored without this — `clippingPlanes` on a
+   * material does nothing until the renderer is told to look for them. (The renderer's *own*
+   * `clippingPlanes` work regardless, but those would clip the whole scene, board included.)
+   */
+  const gl = renderer.instance as { localClippingEnabled?: boolean } | undefined
+  if (gl) gl.localClippingEnabled = true
+
   scene.value.add(panel)
   scene.value.add(scrim)
   // The column swallows presses: pressing an empty lot must not pan the board behind it.
@@ -153,6 +189,15 @@ onBeforeRender(() => {
   scrim.position.set(centre.x, SOURCE_SCRIM_Y, centre.z)
   scrim.scale.copy(panel.scale)
 
+  /*
+   * Point the clipping planes at the column, for everything that scrolls inside it — the bays here and
+   * the plates and tiles in `TableauView`. Updated even when nothing overflows, so the band is always
+   * current the moment a resize starts one scrolling.
+   */
+  const zTop = screenToBoard(cam, w, h, l.left, l.top).z
+  const zBottom = screenToBoard(cam, w, h, l.left, l.top + l.height).z
+  updateSourceClip(zTop, zBottom)
+
   // Every bay is the same size, so they share one material and one pixel size; only the centres
   // differ, and each is snapped on its own.
   const bayWPx = Math.round(l.lotWidth)
@@ -165,7 +210,8 @@ onBeforeRender(() => {
     const bay = bays[lot]
     if (!bay) continue
     const c = l.lotCentre(lot)
-    const rect = snapPanelRect(c.x, c.y, bayWPx, bayHPx)
+    // `lotCentre` is content space; the scroll is applied here, at the moment of drawing.
+    const rect = snapPanelRect(c.x, c.y - l.scrollTop, bayWPx, bayHPx)
     const p = screenToBoard(cam, w, h, rect.x, rect.y)
     bay.position.set(p.x, SOURCE_CHROME_Y + 0.005, p.z)
     bay.scale.set(bayW, bayH, 1)
@@ -173,6 +219,8 @@ onBeforeRender(() => {
 })
 
 onBeforeUnmount(() => {
+  // Or a second game opens at the previous one's scroll position, against a stale rectangle.
+  resetSourceScroll()
   unregister?.()
   unregister = null
   for (const bay of bays) scene.value?.remove(bay)

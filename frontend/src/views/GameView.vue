@@ -27,6 +27,7 @@ import {
   mdiArrowDownLeftBold,
   mdiArrowDownRightBold,
   mdiChevronRight,
+  mdiChevronDown,
   mdiCogOutline,
   mdiHelpCircleOutline,
 } from '@mdi/js'
@@ -34,7 +35,13 @@ import { TresCanvas } from '@tresjs/core'
 import { ACESFilmicToneMapping, SRGBColorSpace, Vector3 } from 'three'
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { createAgenda, roundAgenda, scoreTargets, tallyRound } from '@hexnome/rules/agenda'
+import {
+  createAgenda,
+  roundAgenda,
+  scoreTargets,
+  tallyRound,
+  type RoundAgenda,
+} from '@hexnome/rules/agenda'
 import { createDesk as createLocalDesk } from '@hexnome/rules/desk'
 import { finalTally, NOTHING_LEFT, type FinalTally } from '@hexnome/rules/groups'
 import {
@@ -71,6 +78,11 @@ import {
 } from '@hexnome/rules/game'
 import type { CommandRow, PlayerCommand } from '@hexnome/rules/wire'
 import { useMediaQuery } from '@/composables/mediaQuery'
+import {
+  NARROW_SCREEN,
+  readScoringPanel,
+  rememberScoringPanel,
+} from '@/composables/scoringPanel'
 import { rulesHealth } from '@/composables/useDesk'
 import { useGameSync } from '@/composables/useGameSync'
 import { colorName, tileName } from '@/scene/explainRefusal'
@@ -106,6 +118,7 @@ import GameSettingsPanel from '@/ui/GameSettingsPanel.vue'
 import HintTip from '@/ui/HintTip.vue'
 import RulesPanel from '@/ui/RulesPanel.vue'
 import NoticePanel from '@/ui/NoticePanel.vue'
+import SourceScroll from '@/ui/SourceScroll.vue'
 import PresenceMark from '@/ui/PresenceMark.vue'
 import TileChip from '@/ui/TileChip.vue'
 import TurnAnnounce from '@/ui/TurnAnnounce.vue'
@@ -1251,6 +1264,40 @@ const banked = computed<readonly number[]>(() => {
 
 const totalScore = computed(() => banked.value.reduce((sum, points) => sum + points, 0))
 
+/* ── the scoring panel, open or shut ───────────────────────────────────────────
+ *
+ * The plan has to be read every round, but it is 247px down the right-hand edge — which a laptop can
+ * spare and a phone cannot, where it covers the board it is describing.
+ *
+ * Closing it does not hide the round's plan, it *shrinks* it: the header grows a strip carrying the
+ * same chips and the same live figure. So the answer to "what am I collecting this round" is on screen
+ * either way, and what the control trades is the other rounds and the seat list — the parts you read
+ * between rounds rather than during one.
+ */
+const narrowScreen = useMediaQuery(NARROW_SCREEN)
+
+/**
+ * Open unless the player said otherwise — or unless they have never said anything and the screen is
+ * too narrow to hold it. See `readScoringPanel` for why "never chosen" is not the same as "closed".
+ */
+const scoringOpen = shallowRef((readScoringPanel() ?? (narrowScreen.value ? 'closed' : 'open')) === 'open')
+
+function setScoringOpen(open: boolean): void {
+  scoringOpen.value = open
+  rememberScoringPanel(open ? 'open' : 'closed')
+}
+
+/**
+ * The current round's plan, for the strip that stands in for the panel.
+ *
+ * Empty past the last round, which is what hides the strip on a finished game — there is no round in
+ * progress to be collecting for, and the final score has a panel of its own.
+ */
+const roundTargets = computed<RoundAgenda>(() => {
+  void revision.value
+  return roundAgenda(agenda, count.value.round) ?? []
+})
+
 /**
  * The score line above the seat list, for the board on screen.
  *
@@ -2100,6 +2147,12 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     </TresCanvas>
 
     <!--
+      The source column's scrollbar. Mounts itself only when the lots overflow, which on a desktop
+      and on an upright phone is never — see ui/SourceScroll.vue.
+    -->
+    <SourceScroll />
+
+    <!--
       Positioned over the plate bay these belong to: the hovered one where there is a pointer,
       every filled one where there is not. The wrapper ignores pointer events so it never
       steals a drag from the board; only the buttons themselves accept them.
@@ -2263,6 +2316,11 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
           </button>
         </HintTip>
       </div>
+      <span
+        v-if="settings"
+        class="rule"
+        aria-hidden="true"
+      />
       <p
         v-if="settings"
         class="game-id"
@@ -2285,6 +2343,10 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
           class="viewing-note"
         >watching</span>
       </p>
+      <span
+        class="rule"
+        aria-hidden="true"
+      />
       <dl class="counters">
         <dt>Round</dt>
         <dd>
@@ -2296,6 +2358,41 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         <dt>Turn</dt>
         <dd>{{ count.turn }}</dd>
       </dl>
+
+      <!--
+        The panel in one line, while it is shut: this round's targets and what they are worth so far.
+
+        Deliberately the same chips and the same figure the panel's own row shows, rather than a
+        summary written twice. What is missing is the other rounds and the seat list — which is the
+        trade the control offers, and the reason it is a strip rather than an icon.
+      -->
+      <span
+        v-if="!scoringOpen && roundTargets.length"
+        class="rule"
+        aria-hidden="true"
+      />
+      <button
+        v-if="!scoringOpen && roundTargets.length"
+        type="button"
+        class="agenda-strip"
+        aria-label="Open the scoring panel"
+        @click="setScoringOpen(true)"
+      >
+        <span class="targets">
+          <span
+            v-for="(target, at) in roundTargets"
+            :key="at"
+            class="target"
+          >
+            <TileChip
+              :color="target.kind === 'color' ? target.color : undefined"
+              :value="target.kind === 'value' ? target.value : undefined"
+            />
+            <span class="per">{{ target.points }}</span>
+          </span>
+        </span>
+        <span class="earned live">{{ scoreOf(count.round - 1) }}</span>
+      </button>
     </header>
 
     <!--
@@ -2306,10 +2403,31 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       the shared source is a column down the left edge starting just below the header, and a panel
       there would sit on the one part of the screen you draft from.
     -->
-    <section class="chrome-panel agenda">
-      <h2 class="chrome-title">
-        Scoring
-      </h2>
+    <section
+      v-if="scoringOpen"
+      class="chrome-panel agenda"
+    >
+      <div class="agenda-head">
+        <h2 class="chrome-title">
+          Scoring
+        </h2>
+        <HintTip text="Shrink this to a strip in the header">
+          <button
+            type="button"
+            class="collapse"
+            aria-label="Close the scoring panel"
+            @click="setScoringOpen(false)"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path :d="mdiChevronDown" />
+            </svg>
+          </button>
+        </HintTip>
+      </div>
       <ol>
         <li
           v-for="(round, index) in agenda"
@@ -2476,12 +2594,20 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
 .top {
   position: absolute;
-  top: 14px;
-  left: 14px;
+  top: 16px;
+  left: 16px;
   display: flex;
-  gap: 18px;
+  gap: 16px;
   align-items: center;
-  padding: 9px 14px;
+  /*
+   * A floor, so the scoring strip appearing cannot change the header's height.
+   *
+   * 8 + 24 + 8: the padding and the tallest control in it. Every control in here is 24px for exactly
+   * this reason — the strip used to be 31px and took the header from 46 to 51 whenever it showed,
+   * which moved the whole board's top edge for a control the player had just pressed.
+   */
+  min-height: 40px;
+  padding: 8px 16px;
 }
 
 .back {
@@ -2490,10 +2616,24 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   text-decoration: none;
 }
 
+/*
+ * The rule between two groups in the header.
+ *
+ * An element rather than a `border-left` on whichever group follows it. A border would be one more
+ * edge counted into a box on a row whose height is the thing being kept steady, and it would have to
+ * be undone again on the group that happens to start a wrapped line — which is a question about the
+ * viewport that CSS cannot answer. A rule that is its own element simply is not there when it is not
+ * wanted.
+ */
+.rule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: #3a3222;
+}
+
 .game-id {
   margin: 0;
-  padding-left: 14px;
-  border-left: 1px solid #3a3222;
   color: #79808f;
   font-size: 11px;
   letter-spacing: 0.06em;
@@ -2508,8 +2648,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   gap: 8px;
   align-items: center;
   margin: 0;
-  padding-left: 14px;
-  border-left: 1px solid #3a3222;
 }
 
 .counters dt {
@@ -2540,11 +2678,123 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
  */
 .agenda {
   position: absolute;
-  top: 14px;
-  right: 14px;
-  min-width: 247px;
-  padding: 10px 12px;
+  top: 16px;
+  right: 16px;
+  min-width: 248px;
+  /*
+   * The same padding as the header, which is what puts the two titles on one line. They sit at the
+   * same y only if their panels start their content at the same y *and* their first rows are the same
+   * height — hence 24px controls in both. It was a pixel out before, from 9px against 10px.
+   */
+  padding: 8px 16px;
   font-size: 11px;
+}
+
+/* The title and its close control on one line, so the control reads as belonging to the panel. */
+.agenda-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/*
+ * Reuses the header helpers' shape and hover, being the same kind of thing: a quiet control that is
+ * there when looked for and does not compete with what it sits beside.
+ */
+.collapse {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* 24px like the header's helpers, so the two panels' first rows match and their titles line up. */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #6b7382;
+  cursor: pointer;
+  transition: color 140ms;
+}
+
+.collapse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: border-color 140ms;
+}
+
+.collapse svg {
+  width: 16px;
+  height: 16px;
+  fill: currentcolor;
+}
+
+.collapse:hover {
+  color: #e8c878;
+}
+
+.collapse:hover::before {
+  border-color: #33383f;
+}
+
+.collapse:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 1px;
+}
+
+/*
+ * The panel shrunk to a strip, sitting in the header beside the round and turn.
+ *
+ * A button rather than a bare row: pressing it is how the panel comes back, and the whole strip is the
+ * target — on a phone an icon-sized hit area beside four other controls is the thing everybody misses.
+ */
+.agenda-strip {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  /*
+   * The same 24px as every other control in the header. Its chips are 23px, so they fit with a pixel
+   * to spare and the row height stops depending on what the round happens to be collecting.
+   */
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #e8c878;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 140ms;
+}
+
+.agenda-strip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: border-color 140ms;
+}
+
+.agenda-strip:hover {
+  background: rgb(232 200 120 / 7%);
+}
+
+.agenda-strip:hover::before {
+  border-color: #33383f;
+}
+
+.agenda-strip:focus-visible {
+  outline: 2px solid #8fe6c0;
+  outline-offset: 1px;
 }
 
 .agenda ol {
@@ -2796,17 +3046,29 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 }
 
 .helper {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 3px;
+  border: 0;
+  border-radius: 4px;
   background: transparent;
   color: #79808f;
   cursor: pointer;
-  transition: border-color 140ms, color 140ms;
+  transition: color 140ms;
+}
+
+/* The ring, drawn over the button rather than by it — see `.chrome-panel::before`. */
+.helper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  pointer-events: none;
+  transition: border-color 140ms;
 }
 
 .helper svg {
@@ -2816,13 +3078,52 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 }
 
 .helper:hover {
-  border-color: #33383f;
   color: #e8c878;
+}
+
+.helper:hover::before {
+  border-color: #33383f;
 }
 
 .helper:focus-visible {
   outline: 2px solid #8fe6c0;
   outline-offset: 1px;
+}
+
+/*
+ * Phones, where the header is the thing that breaks first.
+ *
+ * It is `position: absolute` with a left edge and no right one, so on a wide screen it simply grows to
+ * fit and on a 390px phone it grows straight off the side — taking the scoring strip with it, which is
+ * exactly the control that exists for this screen. Bounding it and letting it wrap is the fix.
+ *
+ * The settings line goes: "Classic · 4 plates/round" is reference rather than news, it never changes
+ * for the whole game, and the gear beside it opens the panel that says it in full. Everything that
+ * *moves* — the round, the turn, the round's targets — stays.
+ */
+@media (max-width: 720px) {
+  .top {
+    right: 14px;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 7px 10px;
+  }
+
+  .top .game-id {
+    display: none;
+  }
+
+  /*
+   * The dividing rules go with the wrap.
+   *
+   * They separate groups sitting side by side; once the header is two lines, whichever group starts a
+   * line has a rule floating at the far left pointing at nothing. Which group that is depends on the
+   * width, so there is no telling in CSS which one to spare — and at this size the gaps separate well
+   * enough on their own.
+   */
+  .top .rule {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

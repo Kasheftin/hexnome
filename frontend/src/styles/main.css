@@ -91,11 +91,35 @@ a {
  * two sit side by side on screen — change one, change the other.
  */
 .chrome-panel {
-  border: 1px solid #3a3222;
+  position: relative;
   border-radius: 4px;
   background: rgb(21 23 28 / 82%);
   box-shadow: 0 2px 16px rgb(0 0 0 / 45%);
   backdrop-filter: blur(2px);
+}
+
+/*
+ * **The border is drawn over the box, not by it.** The house rule for every panel and button here.
+ *
+ * A real border is part of the box, so a 1px edge makes a control 2px taller and a panel 2px taller
+ * again — and those two pixels then decide the height of whatever row the control sits in. That is not
+ * theoretical: the header measured 46px for a 44px design, grew by 5px whenever the scoring strip
+ * appeared, and its title sat a pixel off the one in the panel beside it. All of it came from edges
+ * being counted as content.
+ *
+ * An overlay has no size of its own to contribute. Spacing is then padding and gaps alone, which is
+ * what makes a 4px grid hold rather than nearly hold.
+ *
+ * `pointer-events: none` so the ring never swallows a click meant for the control underneath it, and
+ * `inherit` on the radius so a rounder panel does not need a second value kept in step.
+ */
+.chrome-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid #3a3222;
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 .chrome-title {

@@ -26,12 +26,27 @@
 import { Color, DoubleSide, ShaderMaterial, Vector2 } from 'three'
 import { CHROME_PANEL, CHROME_PANEL_TONES, type ChromePanelTone } from './constants'
 
+/*
+ * Clipping is opt-in for a ShaderMaterial and does nothing without these chunks.
+ *
+ * Unlike the tone-mapping and colour-space *declarations*, which three injects into every
+ * ShaderMaterial program, the clipping varying and uniform are not supplied — three only defines
+ * `NUM_CLIPPING_PLANES` and expects the shader to have asked for the rest. So a panel with
+ * `clippingPlanes` set but no chunks clips nothing at all, silently. The source column's bays scroll,
+ * and that is what needs them; every other panel leaves `clipping` false and compiles these to nothing.
+ *
+ * `mvPosition` is named, not inlined, because `clipping_planes_vertex` reads exactly that variable.
+ */
 const vertexShader = /* glsl */ `
+#include <clipping_planes_pars_vertex>
+
 varying vec2 vPanelUv;
 
 void main() {
   vPanelUv = uv;
-  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+  vec4 mvPosition = viewMatrix * modelMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  #include <clipping_planes_vertex>
 }
 `
 
@@ -41,6 +56,8 @@ precision highp float;
 // Tone-mapping and colour-space *declarations* are injected into every ShaderMaterial program by
 // three itself. Re-declaring them here is a redefinition error that silently fails the whole
 // shader — only the statement-level includes at the end of main() belong to us.
+
+#include <clipping_planes_pars_fragment>
 
 varying vec2 vPanelUv;
 
@@ -68,6 +85,9 @@ float roundedRectDistance(vec2 p, vec2 halfSize, float r) {
 }
 
 void main() {
+  // First in main(): this chunk discards, and there is no point shading a fragment that is cut away.
+  #include <clipping_planes_fragment>
+
   vec2 halfSize = uSizePx * 0.5;
   vec2 p = (vPanelUv - 0.5) * uSizePx;
 
@@ -112,6 +132,11 @@ void main() {
 export interface ChromePanelOptions {
   /** Corner radius in CSS pixels. Defaults to the CSS panel's 4px. */
   radiusPx?: number
+  /**
+   * Let this panel be cut by `clippingPlanes`. Off unless asked for, because it costs a shader
+   * branch and only the source column's scrolling bays need it.
+   */
+  clipping?: boolean
   /** Fill colour and opacity. Defaults to the CSS panel's translucent slate. */
   fill?: string
   fillOpacity?: number
@@ -130,6 +155,7 @@ export function createChromePanelMaterial(options: ChromePanelOptions = {}): Sha
     fragmentShader,
     transparent: true,
     side: DoubleSide,
+    clipping: options.clipping ?? false,
     uniforms: {
       // Replaced on the first frame; a non-zero placeholder keeps the radius clamp sane if a
       // frame ever renders before the layout is measured.
