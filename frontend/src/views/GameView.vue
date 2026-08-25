@@ -26,6 +26,7 @@
 import {
   mdiArrowDownLeftBold,
   mdiArrowDownRightBold,
+  mdiArrowLeft,
   mdiChevronRight,
   mdiChevronDown,
   mdiCogOutline,
@@ -2270,52 +2271,71 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       <h1 class="chrome-title">
         hexnome
       </h1>
-      <RouterLink
-        to="/"
-        class="back"
-      >
-        ← menu
-      </RouterLink>
-
       <!--
-        Two things a player reaches for mid-game and cannot get to otherwise: how the game works, and
-        how *this* game was set up. Icons rather than words, because the strip above the board is the
-        one place with no room to spare, and both carry a tooltip.
+        The three things a player reaches for mid-game and cannot get to otherwise: out of the game,
+        how the game works, and how *this* game was set up.
+
+        Icons rather than words, because the strip above the board is the one place with no room to
+        spare — and all three now, rather than words for the first and icons for the rest, so they
+        read as one row of controls instead of a link with two ornaments after it. Each carries a
+        tooltip, which is what keeps an icon honest.
       -->
-      <div class="helpers">
-        <HintTip text="How the game is played">
-          <button
-            type="button"
-            class="helper"
-            aria-label="Game rules"
-            @click="rulesOpen = true"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path :d="mdiHelpCircleOutline" />
-            </svg>
-          </button>
-        </HintTip>
-        <HintTip text="What this game was set up with">
-          <button
-            type="button"
-            class="helper"
-            aria-label="This game's settings"
-            @click="gameSettingsOpen = true"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path :d="mdiCogOutline" />
-            </svg>
-          </button>
-        </HintTip>
+      <div class="hx-top__controls">
+        <v-tooltip
+          text="Back to the menu"
+          location="bottom"
+        >
+          <template #activator="{ props: tip }">
+            <v-btn
+              v-bind="tip"
+              :icon="mdiArrowLeft"
+              :border="false"
+              variant="text"
+              density="comfortable"
+              color="muted"
+              to="/"
+              aria-label="Back to the menu"
+            />
+          </template>
+        </v-tooltip>
+
+        <v-tooltip
+          text="How the game is played"
+          location="bottom"
+        >
+          <template #activator="{ props: tip }">
+            <v-btn
+              v-bind="tip"
+              :icon="mdiHelpCircleOutline"
+              :border="false"
+              variant="text"
+              density="comfortable"
+              color="muted"
+              aria-label="Game rules"
+              @click="rulesOpen = true"
+            />
+          </template>
+        </v-tooltip>
+
+        <v-tooltip
+          text="What this game was set up with"
+          location="bottom"
+        >
+          <template #activator="{ props: tip }">
+            <v-btn
+              v-bind="tip"
+              :icon="mdiCogOutline"
+              :border="false"
+              variant="text"
+              density="comfortable"
+              color="muted"
+              aria-label="This game's settings"
+              @click="gameSettingsOpen = true"
+            />
+          </template>
+        </v-tooltip>
       </div>
+
       <span
         v-if="settings"
         class="rule"
@@ -2601,12 +2621,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   align-items: center;
   min-height: 56px;
   padding: 8px 16px;
-}
-
-.back {
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-  text-decoration: none;
 }
 
 /*
@@ -3042,56 +3056,19 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
   color: #e8c878;
 }
 
-/* Beside the menu link, in the strip's own quiet register — reference, not action. */
-.helpers {
+/*
+ * The row of controls beside the logo: out of the game, the rules, this game's settings.
+ *
+ * Tighter than the header's own 16px gap, so the three read as one cluster rather than as three
+ * separate items in the strip. Everything else about them — size, shape, hover, focus ring, the
+ * hairline on hover — is the `v-btn`'s, which is why the 45 lines that used to draw a 24px button by
+ * hand are gone.
+ */
+.hx-top__controls {
   display: flex;
-  gap: 2px;
+  flex: none;
+  gap: 4px;
   align-items: center;
-}
-
-.helper {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: #79808f;
-  cursor: pointer;
-  transition: color 140ms;
-}
-
-/* The ring, drawn over the button rather than by it — see `.chrome-panel::before`. */
-.helper::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border: 1px solid transparent;
-  border-radius: inherit;
-  pointer-events: none;
-  transition: border-color 140ms;
-}
-
-.helper svg {
-  width: 16px;
-  height: 16px;
-  fill: currentcolor;
-}
-
-.helper:hover {
-  color: #e8c878;
-}
-
-.helper:hover::before {
-  border-color: #33383f;
-}
-
-.helper:focus-visible {
-  outline: 2px solid #8fe6c0;
-  outline-offset: 1px;
 }
 
 /*
@@ -3128,12 +3105,6 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
    */
   .top .rule {
     display: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .helper {
-    transition: none;
   }
 }
 

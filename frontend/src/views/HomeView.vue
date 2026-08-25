@@ -953,7 +953,6 @@ const selectedMode = computed(() => modeInfo(mode.value))
       <template #aside>
         <v-btn
           v-if="changedFromDefaults"
-          size="small"
           color="muted"
           @click="resetToDefaults"
         >
