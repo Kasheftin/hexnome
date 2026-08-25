@@ -17,7 +17,6 @@
  * land on a round the player had not seen yet.
  */
 import { computed, shallowRef, watch } from 'vue'
-import { RouterLink } from 'vue-router'
 import type { FinalTally } from '@hexnome/rules/groups'
 import FinalScore from './FinalScore.vue'
 import type { RoundRecord } from './roundRecord'
@@ -200,13 +199,25 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 </script>
 
 <template>
-  <div class="backdrop">
-    <section
-      class="chrome-panel results"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="showingFinal ? 'Final score' : `Round ${latest?.round} results`"
-    >
+  <!--
+    **`persistent`**, which is the whole reason this is not the same dialog as the others.
+    
+    A round has ended and the score is the thing that just happened; the only ways on are the buttons
+    at the foot — reveal it, skip the reveal, take the next round, leave. Dismissing it by pressing
+    Escape or clicking beside it would put the player back on a board that has already moved on, with
+    no way to read what changed.
+
+    Mounted only while it is wanted (`v-if` in GameView), so the model value is simply true: there is
+    no closed state for this panel to be in.
+  -->
+  <v-dialog
+    :model-value="true"
+    :max-width="1100"
+    persistent
+    scrollable
+    :aria-label="showingFinal ? 'Final score' : `Round ${latest?.round} results`"
+  >
+    <v-card class="results">
       <h2 class="chrome-title chrome-title--offset">
         {{ showingFinal ? 'Final score' : `Round ${latest?.round} results` }}
       </h2>
@@ -349,12 +360,14 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           <span>Total score</span>
           <strong>{{ grandTotal }}</strong>
         </p>
-        <RouterLink
+        <v-btn
           to="/"
+          color="success"
+          variant="outlined"
           class="action next"
         >
           Back to menu
-        </RouterLink>
+        </v-btn>
       </template>
 
       <v-btn
@@ -382,39 +395,31 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
       >
         Skip
       </v-btn>
-    </section>
-  </div>
+    </v-card>
+  </v-dialog>
 </template>
 
 <style scoped>
+/*
+ * The dialog and the card draw the frame, the scrim and the scrolling; what is left is the panel's
+ * own width and the working inside it.
+ *
+ * Wider than any other dialog in the app on purpose: the reveal is a board diagram beside its
+ * arithmetic, and at a normal panel width the two stop fitting side by side.
+ */
+.results {
+  padding: 18px 20px;
+}
+
 /*
  * A scrim, so the panel is legible over whatever the board happens to look like — and so it is obvious
  * that play has stopped. It takes pointer events: the round is over, and a stray click on the board
  * should land on nothing rather than on a tile.
  */
-.backdrop {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgb(4 5 8 / 55%);
-  z-index: 50;
-}
-
 /*
  * Much wider than a list of rows needs, because it now holds a board as well. At 36 plates the diagram
  * is the constraint: any narrower and the tiles stop being legible as tiles.
  */
-.results {
-  width: min(1100px, 94vw);
-  max-height: 90vh;
-  padding: 18px 20px;
-  overflow-y: auto;
-  font-size: var(--text-base);
-  line-height: var(--text-base-line);
-}
-
 /* ── the accordion ─────────────────────────────────────────────────────────── */
 
 .fold + .fold {
