@@ -49,6 +49,9 @@ describe('the values that are not stored the way they are read', () => {
   it('names the mode with the rounds it runs for', () => {
     expect(valueOf('mode', settings({ mode: 'random' }))).toContain('6 rounds')
     expect(valueOf('mode', settings({ mode: 'classic' }))).toContain('4 rounds')
+    /* The one-round mode, which read "1 rounds" until the count was allowed to be singular. */
+    expect(valueOf('mode', settings({ mode: 'quick' }))).toContain('1 round')
+    expect(valueOf('mode', settings({ mode: 'quick' }))).not.toContain('1 rounds')
   })
 })
 

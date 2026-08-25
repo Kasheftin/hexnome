@@ -26,6 +26,7 @@ import {
   SOLO,
   platesPerRoundChoices,
   nearestPlatesPerRound,
+  reconcilePlatesPerRound,
   TILE_COPIES_CHOICES,
   PLATE_COPIES_CHOICES,
   TILE_BAG_LABELS,
@@ -453,20 +454,34 @@ function currentSetup(): SavedSetup {
 }
 
 /**
+ * What a dial will accept *now*, which for one of them depends on the mode.
+ *
+ * `Dial.choices` is fixed when the module loads, before any mode is chosen, so for `platesPerRound` it
+ * holds the classic range whatever mode is showing. Reading it directly is what broke the restore
+ * below: a quick game's saved 12 failed a test against `[3, 4, 5, 6]` and was dropped on the floor.
+ */
+function choicesOf(dial: Dial): readonly number[] {
+  return dial.key === 'platesPerRound' ? platesPerRoundChoices(mode.value) : dial.choices
+}
+
+/**
  * Open on the last game's setup rather than on the defaults.
  *
- * Every value is checked against the list of choices the dial that owns it still offers, so nothing
- * here needs to know what a dial means or be kept in step when one changes. A stored value a dial no
- * longer accepts is simply not applied, and that dial keeps its default.
+ * Every value is checked against the choices the dial that owns it still offers, so nothing here needs
+ * to know what a dial means or be kept in step when one changes. A stored value a dial no longer
+ * accepts is simply not applied, and that dial keeps its default.
+ *
+ * **The mode is restored before the dials, and that order is load-bearing.** It decides what the dials
+ * below will accept, so restoring it afterwards tests every value against the wrong range — which is
+ * how a saved quick game came back holding 12 plates, failed a test against the classic `[3, 4, 5, 6]`,
+ * and opened on 4: a count its own dial does not offer, with nothing highlighted.
+ *
+ * The `watch` on the mode cannot cover for this. It is registered after this function has already run.
  */
 function restoreSetup(): void {
   const saved = savedSetup()
   if (!saved) return
 
-  for (const dial of ALL_DIALS) {
-    const value = saved.dials[dial.key]
-    if (value !== undefined && dial.choices.includes(value)) dial.model.value = value
-  }
   if (SINGLEPLAYER_MODES.some(entry => entry.id === saved.mode)) {
     mode.value = saved.mode as SingleplayerMode
   }
@@ -474,6 +489,18 @@ function restoreSetup(): void {
   if (saved.players !== undefined && PLAYER_COUNT_CHOICES.includes(saved.players)) {
     playerCount.value = saved.players
   }
+
+  for (const dial of ALL_DIALS) {
+    const value = saved.dials[dial.key]
+    if (value !== undefined && choicesOf(dial).includes(value)) dial.model.value = value
+  }
+
+  /*
+   * Whatever the stored setup could not supply falls to the mode's own default rather than to the
+   * screen's. Only this dial can be left stranded — it is the only one whose range moves with the mode
+   * — and `reconcilePlatesPerRound` is the same repair the parser makes to a stored game.
+   */
+  platesPerRound.value = reconcilePlatesPerRound(mode.value, platesPerRound.value)
 }
 
 /** Whether anything has been turned away from where it started. Drives the way back. */
@@ -500,26 +527,24 @@ restoreSetup()
 /**
  * Bands with anything left to show, their hidden dials already dropped.
  *
- * **Plates per round takes its choices from the mode**, which is why they cannot be stated on the dial
- * itself: `SECTIONS` is a module constant, built once, and the mode is chosen afterwards. Over four
- * rounds the dial is one round\u2019s width and offers 3-6; in a one-round game it is the whole
- * game\u2019s length and offers 8-20.
+ * Choices come from `choicesOf` rather than from the dial itself, because one of them moves with the
+ * mode and `SECTIONS` is a module constant built before any mode is chosen. Over four rounds the
+ * plates dial is one round's width and offers 3-6; in a one-round game it is the whole game's length
+ * and offers 8-20.
  */
 const visibleSections = computed(() => SECTIONS
   .map(section => ({
     ...section,
     dials: section.dials
       .filter(dial => dial.applies?.() ?? true)
-      .map(dial => (dial.key === 'platesPerRound'
-        ? { ...dial, choices: platesPerRoundChoices(mode.value) }
-        : dial)),
+      .map(dial => ({ ...dial, choices: choicesOf(dial) })),
   }))
   .filter(section => section.dials.length > 0))
 
 /**
- * Move the plate count onto the new mode\u2019s range when the mode changes.
+ * Move the plate count onto the new mode's range when the mode changes.
  *
- * Without it a classic game\u2019s 4 stays selected against a dial that starts at 8 — a choice the
+ * Without it a classic game's 4 stays selected against a dial that starts at 8 — a choice the
  * player appears to have made and cannot see, and one the parser would then repair to something else
  * again. The nearest offered value keeps "I wanted few" or "I wanted many" across the switch.
  */
@@ -814,7 +839,9 @@ const selectedMode = computed(() => modeInfo(mode.value))
               >
                 <span class="hx-option__label">{{ entry.label }}</span>
                 <v-spacer />
-                <span class="hx-option__note">{{ entry.rounds }} rounds</span>
+                <span class="hx-option__note">
+                  {{ entry.rounds }} {{ entry.rounds === 1 ? 'round' : 'rounds' }}
+                </span>
               </v-btn>
             </v-btn-toggle>
             <p

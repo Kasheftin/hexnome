@@ -107,7 +107,7 @@ describe('a very long round', () => {
   })
 
   /* Every mode that existed before quick deals six or fewer, so none of them can have moved. */
-  it('leaves the scoring modes\u2019 sizes untouched', () => {
+  it('leaves the sizes for the scoring modes untouched', () => {
     for (const lots of [3, 4, 5, 6]) {
       const capped = createSourceLayout(1600, 950, lots, DEFAULT)
       expect(capped.lotWidth).toBeGreaterThanOrEqual(SOURCE_LOT_MIN_PX)

@@ -92,7 +92,7 @@ function shapeRows(s: GameSettings): SettingRow[] {
     {
       key: 'mode',
       label: 'Mode',
-      value: `${modeInfo(s.mode)?.label ?? s.mode}${rounds ? ` · ${rounds} rounds` : ''}`,
+      value: `${modeInfo(s.mode)?.label ?? s.mode}${rounds ? ` · ${rounds} round${rounds === 1 ? '' : 's'}` : ''}`,
       hint: modeInfo(s.mode)?.description,
     },
     {

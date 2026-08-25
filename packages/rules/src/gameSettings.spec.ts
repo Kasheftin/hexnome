@@ -27,6 +27,8 @@ import {
   defaultGameSettings,
   defaultPlatesPerRound,
   nearestPlatesPerRound,
+  reconcilePlatesPerRound,
+  reconcileSettings,
   parseGameSettings,
   platesPerRoundChoices,
   roundsOf,
@@ -528,7 +530,7 @@ describe('how much material the game is dealt from', () => {
  * refuses what no mode allows — keeping those apart is what stops a dial from becoming a rule.
  */
 describe('plates per round, by mode', () => {
-  it('offers a handful for the scoring modes and a game\u2019s worth for quick', () => {
+  it('offers a handful for the scoring modes and a whole game for quick', () => {
     expect(platesPerRoundChoices('classic')).toEqual([3, 4, 5, 6])
     expect(platesPerRoundChoices('random')).toEqual([3, 4, 5, 6])
     expect(platesPerRoundChoices('quick')).toEqual([8, 12, 16, 20])
@@ -558,7 +560,7 @@ describe('plates per round, by mode', () => {
    * Switching mode must re-seat the value. A classic game's 4 left selected against a dial starting at
    * 8 reads as a choice the player made and cannot see.
    */
-  it('moves a chosen value onto the new mode\u2019s range', () => {
+  it('moves a chosen value onto the range the new mode offers', () => {
     expect(nearestPlatesPerRound('quick', 4)).toBe(8)
     expect(nearestPlatesPerRound('quick', 6)).toBe(8)
     expect(nearestPlatesPerRound('classic', 12)).toBe(6)
@@ -568,5 +570,65 @@ describe('plates per round, by mode', () => {
   it('leaves a value the mode already offers alone', () => {
     expect(nearestPlatesPerRound('quick', 16)).toBe(16)
     expect(nearestPlatesPerRound('classic', 3)).toBe(3)
+  })
+})
+
+/*
+ * The invariant behind the whole dial: a plate count only means anything alongside the mode it was
+ * chosen under. These are the cases that reached a player - a stored setup read back, and a game
+ * stored by a client that had never heard of quick mode.
+ */
+describe('reconciling settings with their mode', () => {
+  it('repairs a count the mode does not offer, to what the menu would have opened on', () => {
+    expect(reconcilePlatesPerRound('quick', 4)).toBe(12)
+    expect(reconcilePlatesPerRound('classic', 12)).toBe(4)
+  })
+
+  /*
+   * The default, not the nearest, and the difference is intent: a value that was never valid here is
+   * not a preference to carry over, because nobody expressed one on this scale. `nearestPlatesPerRound`
+   * is for the other case, where the player turns the mode dial themselves.
+   */
+  it('does not merely move the count to the closest offer', () => {
+    expect(reconcilePlatesPerRound('quick', 4)).not.toBe(nearestPlatesPerRound('quick', 4))
+  })
+
+  it('keeps a count the mode does offer', () => {
+    for (const mode of SINGLEPLAYER_MODES.map(m => m.id)) {
+      for (const choice of platesPerRoundChoices(mode)) {
+        expect(reconcilePlatesPerRound(mode, choice)).toBe(choice)
+      }
+    }
+  })
+
+  it('answers with the mode default for anything that is not a count at all', () => {
+    for (const junk of [undefined, null, '12', Number.NaN, 7]) {
+      expect(reconcilePlatesPerRound('quick', junk)).toBe(12)
+      expect(reconcilePlatesPerRound('classic', junk)).toBe(4)
+    }
+  })
+
+  /* Nothing to repair means nothing to copy, so it is safe to call on every read. */
+  it('hands back the very same object when there is nothing to repair', () => {
+    const settings = { mode: 'quick' as const, platesPerRound: 16 }
+    expect(reconcileSettings(settings)).toBe(settings)
+  })
+
+  it('repairs without disturbing anything else it is carrying', () => {
+    expect(reconcileSettings({ mode: 'quick' as const, platesPerRound: 4, tileCopies: 3 }))
+      .toEqual({ mode: 'quick', platesPerRound: 12, tileCopies: 3 })
+  })
+
+  /*
+   * The bug this was written for. A quick game stored its 12, and reading it back under a parser that
+   * could not see the mode gave a game 4 plates long - a count its own menu does not offer.
+   */
+  it('brings a stored quick game back with the plates it was stored with', () => {
+    const stored = { ...valid, mode: 'quick', platesPerRound: 12 }
+    expect(parseGameSettings(JSON.parse(JSON.stringify(stored)))?.platesPerRound).toBe(12)
+  })
+
+  it('repairs a game stored before its mode had its own range', () => {
+    expect(parseGameSettings({ ...valid, mode: 'quick', platesPerRound: 4 })?.platesPerRound).toBe(12)
   })
 })

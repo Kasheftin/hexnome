@@ -1375,9 +1375,9 @@ describe('quick mode', () => {
    * **No *target* points — anchors still pay.** `closeRound` banks `scored + anchors - fine`, and only
    * the first term comes from the agenda. In a four-round game that distinction matters because
    * anchors pay every round; here there is one round, so whatever they pay lands at the end with
-   * everything else. What quick mode removes is the agenda, not the board\u2019s own value.
+   * everything else. What quick mode removes is the agenda, not the board's own value.
    */
-  it('banks no target points, only what the board\u2019s anchors pay', () => {
+  it('banks no target points, only what the anchors on the board pay', () => {
     const state = createGame(quick())
     const seat = state.seats[0]
     expect(seat?.tableau.tilesOnBoard().length).toBeGreaterThan(0)

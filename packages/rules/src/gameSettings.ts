@@ -87,13 +87,13 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
  *
  * **The offered range depends on the mode**, because the dial means different things in each. Over
  * four rounds it is the width of one round's offering; in a one-round game it is the length of the
- * whole game, so the numbers are much larger. `platesPerRoundChoices` is what the menu asks.
+ * whole game, so the numbers are much larger.
  *
- * This list is the **union**, and exists only for the validator. Keeping the two apart is what stops
- * a settings dial from becoming a rule: the menu decides what is sensible to offer, and the parser
- * only refuses what no mode allows at all.
+ * There is no union of the two for validation to check against. There was, and it was the bug: a
+ * validator that cannot see the mode accepts a classic 4 into a quick game, where the menu offers
+ * 8-20 and highlights nothing. Every reading of this dial goes through the mode — see
+ * `reconcileSettings`.
  */
-export const PLATES_PER_ROUND_CHOICES: readonly number[] = [3, 4, 5, 6, 8, 12, 16, 20]
 
 /** Rounds deal a handful; quick deals the whole game at once. */
 const PLATES_PER_ROUND_BY_MODE: Readonly<Record<SingleplayerMode, readonly number[]>> = {
@@ -114,6 +114,50 @@ export function platesPerRoundChoices(mode: SingleplayerMode): readonly number[]
 /** What the menu starts on for this mode. */
 export function defaultPlatesPerRound(mode: SingleplayerMode): number {
   return mode === 'quick' ? DEFAULT_PLATES_PER_ROUND_QUICK : DEFAULT_PLATES_PER_ROUND
+}
+
+/** The part of `GameSettings` whose allowed range depends on the rest of it. */
+export interface ReconcilableSettings {
+  readonly mode: SingleplayerMode
+  readonly platesPerRound: number
+}
+
+/**
+ * Repair a plate count this mode does not offer.
+ *
+ * The distinction from `nearestPlatesPerRound` below is intent. Turning the mode dial is a deliberate
+ * act, and the nearest value carries "I wanted few" or "I wanted many" across it. This repairs a value
+ * that arrived *already* wrong — out of storage, out of a URL, out of a client older than the mode —
+ * where there is no preference to carry, because the player never expressed one on this scale. So it
+ * falls back to what the menu would have opened on.
+ */
+export function reconcilePlatesPerRound(mode: SingleplayerMode, value: unknown): number {
+  return typeof value === 'number' && platesPerRoundChoices(mode).includes(value)
+    ? value
+    : defaultPlatesPerRound(mode)
+}
+
+/**
+ * Put settings back inside what their own mode allows.
+ *
+ * This states the invariant the rest of the file leaves implicit: **some dials' ranges are a function
+ * of other dials**, and `platesPerRound` is the first of them — one round's width in a four-round
+ * game, the whole game's length in a one-round one. A value from one mode is not merely unusual in
+ * another, it is unofferable, and a menu asked to show it highlights nothing at all.
+ *
+ * Saying it in one place is what makes it hold at every entrance: the parser that every stored game
+ * comes through, and the setup screen restoring the last game's dials. The next mode-dependent dial
+ * is added here, and nowhere else.
+ *
+ * **Not the job `effectiveFirstPassFine` and its neighbours do.** Those collapse a dial that is
+ * *meaningless* in some combination, and they must not be run over a player's saved preferences — see
+ * savedSetup.ts, where sending a preset through the parser would quietly wipe the choices it holds.
+ * This repairs only the impossible, which is why it is safe to run anywhere, and it returns the
+ * settings untouched when there is nothing to repair.
+ */
+export function reconcileSettings<T extends ReconcilableSettings>(settings: T): T {
+  const platesPerRound = reconcilePlatesPerRound(settings.mode, settings.platesPerRound)
+  return platesPerRound === settings.platesPerRound ? settings : { ...settings, platesPerRound }
 }
 
 /**
@@ -379,10 +423,6 @@ export function isGameKind(value: unknown): value is GameKind {
   return GAME_KINDS.some(k => k.id === value)
 }
 
-export function isPlatesPerRound(value: unknown): boolean {
-  return typeof value === 'number' && PLATES_PER_ROUND_CHOICES.includes(value)
-}
-
 export function isPlayerCount(value: unknown): boolean {
   return value === SOLO || (typeof value === 'number' && PLAYER_COUNT_CHOICES.includes(value))
 }
@@ -583,9 +623,8 @@ export function parseGameSettings(value: unknown): GameSettings | null {
     mode: raw.mode,
     players,
     playerNames: parsePlayerNames(raw.playerNames, players),
-    platesPerRound: isPlatesPerRound(raw.platesPerRound)
-      ? (raw.platesPerRound as number)
-      : DEFAULT_PLATES_PER_ROUND,
+    // Through the mode, so a plate count from another one cannot survive being stored and read back.
+    platesPerRound: reconcilePlatesPerRound(raw.mode, raw.platesPerRound),
     tileCopies: isTileCopies(raw.tileCopies) ? (raw.tileCopies as number) : DEFAULT_TILE_COPIES,
     plateCopies: isPlateCopies(raw.plateCopies)
       ? (raw.plateCopies as number)
