@@ -966,6 +966,34 @@ const count = computed(() => {
   return { round: state.round, turn: state.turn }
 })
 
+/**
+ * Plates the round has still to deal, which is not something the column can be read for any more.
+ *
+ * It used to be: every slot the round would ever fill was drawn, so counting the empty ones counted
+ * what was coming. Now the column shows only the lots that hold something and scrolls the rest, which
+ * is right for twelve plates on a phone and leaves nothing on screen that says how many are left.
+ *
+ * `platesDealt` rather than a count of the lots, because a lot that has been emptied by drafting is
+ * indistinguishable from one never dealt — the rules keep the tally and reset it as each round opens.
+ */
+const platesLeft = computed(() => {
+  void revision.value
+  const s = settings.value
+  if (!s) return 0
+  return Math.max(0, s.platesPerRound - state.platesDealt)
+})
+
+/**
+ * The same count, worded for the room it is in.
+ *
+ * On a phone the reference half of this line is hidden and only the count remains, and "(11 left)"
+ * alone at the top of a screen does not say eleven of what. The parenthesis is an aside on a line that
+ * has already said "plates"; standing on its own it has to say so itself.
+ */
+const platesLeftLabel = computed(() => (narrowScreen.value
+  ? `${platesLeft.value} plates left`
+  : `(${platesLeft.value} left)`))
+
 const totalRounds = computed(() => {
   const s = settings.value
   return s ? roundsOf(s.mode) : 0
@@ -2441,7 +2469,9 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
         v-if="settings"
         class="game-id"
       >
-        {{ modeLabel }} · {{ settings.platesPerRound }} {{ scoresRounds ? 'plates/round' : 'plates' }}
+        <span class="game-id__fixed">{{ modeLabel }} · {{ settings.platesPerRound }}
+          {{ scoresRounds ? 'plates/round' : 'plates' }}</span>
+        <span>{{ platesLeftLabel }}</span>
       </p>
       <!--
         Whose board this is. Only worth saying at a table: with one seat it is always yours, and a
@@ -2755,6 +2785,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 }
 
 .game-id {
+  display: flex;
+  gap: 0.4ch;
   margin: 0;
   color: #79808f;
   font-size: var(--text-base);
@@ -3143,7 +3175,15 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
     padding: 8px 12px;
   }
 
-  .top .game-id {
+  /*
+   * The fixed half goes; the count stays.
+   *
+   * The line was hidden whole while all of it was reference — the mode and the round's budget never
+   * change, and the gear opens a panel that says them in full. What is left of it does change, and a
+   * phone is exactly where it is needed: the column is at its most cramped there, so the plates still
+   * to come are the least visible.
+   */
+  .top .game-id__fixed {
     display: none;
   }
 
