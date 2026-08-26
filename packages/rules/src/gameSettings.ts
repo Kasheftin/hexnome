@@ -348,17 +348,19 @@ export const DEFAULT_FINE_UNPLACED = true
 export const DEFAULT_REWARD_STEMS = true
 
 /**
- * Undo, **off unless asked for**.
+ * Undo, **on unless turned off** — and only ever alone.
  *
- * The opposite default to the switches above, and deliberately so. Those are part of how the game is
- * scored and a table that never touches them should still play the real game; undo changes what a
- * turn *is* — a decision you can see the consequences of and take back — so it is a thing a player
- * opts into rather than one they have to notice and turn off.
+ * It was off by default on the reasoning that undo changes what a turn *is*, so a player should opt
+ * into it rather than have to notice and turn it off. That reads well and was wrong about the game
+ * this turned out to be: a solo game here is a puzzle worked at rather than a match played, and the
+ * misclick you cannot take back is not a decision you made, it is a decision the mouse made. A player
+ * who wants the sterner version still has the dial.
  *
- * It is also why it stays singleplayer. Over a shared source, one player rewinding a draft everyone
- * else has already seen is not a mechanic, it is a broken table.
+ * **Nothing changes at a table.** `canUndo` refuses whenever there is more than one seat, whatever
+ * this says, because one player rewinding a draft everybody else has already seen is not a mechanic,
+ * it is a broken table. So this is a default for solo play and inert everywhere else.
  */
-export const DEFAULT_ALLOW_UNDO = false
+export const DEFAULT_ALLOW_UNDO = true
 export const DEFAULT_SINGLEPLAYER_MODE: SingleplayerMode = 'classic'
 
 export interface GameSettings {

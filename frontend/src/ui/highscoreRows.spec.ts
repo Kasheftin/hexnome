@@ -83,12 +83,16 @@ describe('a page of a board', () => {
 
 describe('what a board is called', () => {
   it('uses the preset it belongs to', () => {
-    expect(boardName('standard')).toBe('Standard')
-    expect(boardName('quick')).toBe('Quick')
+    expect(boardName('standard-2')).toBe('Standard')
+    expect(boardName('quick-2')).toBe('Quick')
   })
 
-  /* A board recorded under a preset that has since been renamed still has to be nameable. */
-  it('falls back to the id for a preset that is no longer offered', () => {
+  /*
+   * A board recorded under a ruleset that has since been retired still has to be nameable — and that
+   * is not hypothetical: `standard` is exactly such an id now that undo changed what the game deals.
+   */
+  it('falls back to the id for a ruleset no longer offered', () => {
+    expect(boardName('standard')).toBe('standard')
     expect(boardName('retired-preset')).toBe('retired-preset')
   })
 })

@@ -55,6 +55,13 @@ On your turn you do exactly one of three things:
 Passing is not skipping a turn. A player who passes is **out until the round ends**, and the round
 ends when everybody has passed. So passing is a decision about the round, not about the moment.
 
+**Playing alone, you may take a turn back** (*undo*) — the draft, the placement or the pass — as far
+back as the start of the round you are in, one turn at a time. The deck is put back as it was, so
+replaying the same turn deals the same tiles: the point is the misclick, not a second look at what was
+coming. It is on by default and there is a dial to turn it off. At a table there is no undo at all,
+because rewinding a draft everybody else has already played against is not a move you can take back
+alone.
+
 ![The action bar offering Take, Put and Pass](/rules/turn-bar.gif)
 
 ## The shared source

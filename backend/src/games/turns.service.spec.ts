@@ -458,7 +458,7 @@ describe('the end of a game', () => {
     }
 
     const row = await prisma.game.findUnique({ where: { id } })
-    expect(row?.presetId).toBe('standard')
+    expect(row?.presetId).toBe('standard-2')
     expect(row?.players).toBe(SOLO)
   })
 
@@ -481,7 +481,7 @@ describe('the end of a game', () => {
    * state credited every win at a table to "Player 2".
    */
   it('credits a joiner by the name they joined under', async () => {
-    const settings = presetSettings(findPreset('standard')!, 2)
+    const settings = presetSettings(findPreset('standard-2')!, 2)
     const first = await games.create({ settings, name: 'Ember' })
     made.push(first.game.id)
     const id = first.game.id
@@ -501,7 +501,7 @@ describe('the end of a game', () => {
     const state = await turns.stateOf(id)
     expect(state.finished).toBe(true)
     const row = await prisma.game.findUnique({ where: { id } })
-    expect(row?.presetId).toBe('standard')
+    expect(row?.presetId).toBe('standard-2')
     expect(row?.players).toBe(2)
     expect(row?.score).toBe(finalScoreOf(state, row!.winnerSeat!))
     // Whoever won, the name recorded is the one that seat actually joined under.

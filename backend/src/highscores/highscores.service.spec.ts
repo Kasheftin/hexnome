@@ -166,23 +166,23 @@ describe('what a board will be asked for', () => {
   })
 
   it('refuses a table nobody sits at', () => {
-    expect(() => highscoreQuery({ preset: 'standard', players: '9' })).toThrow(BadRequestException)
-    expect(() => highscoreQuery({ preset: 'standard' })).toThrow(BadRequestException)
+    expect(() => highscoreQuery({ preset: 'standard-2', players: '9' })).toThrow(BadRequestException)
+    expect(() => highscoreQuery({ preset: 'standard-2' })).toThrow(BadRequestException)
   })
 
   it('takes the usual slice when none is asked for', () => {
-    expect(highscoreQuery({ preset: 'standard', players: '1' }))
-      .toEqual({ presetId: 'standard', players: 1, limit: DEFAULT_LIMIT, offset: 0 })
+    expect(highscoreQuery({ preset: 'standard-2', players: '1' }))
+      .toEqual({ presetId: 'standard-2', players: 1, limit: DEFAULT_LIMIT, offset: 0 })
   })
 
   /* A page size is a request for work, so it is bounded rather than believed. */
   it('will not be talked into an enormous page', () => {
-    expect(highscoreQuery({ preset: 'standard', players: '1', limit: '5000' }).limit).toBe(MAX_LIMIT)
-    expect(highscoreQuery({ preset: 'standard', players: '1', limit: '0' }).limit).toBe(1)
+    expect(highscoreQuery({ preset: 'standard-2', players: '1', limit: '5000' }).limit).toBe(MAX_LIMIT)
+    expect(highscoreQuery({ preset: 'standard-2', players: '1', limit: '0' }).limit).toBe(1)
   })
 
   it('will not be sent counting into the millions', () => {
-    expect(highscoreQuery({ preset: 'standard', players: '1', offset: '5000000' }).offset)
+    expect(highscoreQuery({ preset: 'standard-2', players: '1', offset: '5000000' }).offset)
       .toBe(MAX_OFFSET)
   })
 
@@ -192,7 +192,7 @@ describe('what a board will be asked for', () => {
    */
   it('refuses a slice that is not a number, rather than guessing', () => {
     for (const bad of ['banana', '-1', '1.5']) {
-      expect(() => highscoreQuery({ preset: 'standard', players: '1', limit: bad }))
+      expect(() => highscoreQuery({ preset: 'standard-2', players: '1', limit: bad }))
         .toThrow(BadRequestException)
     }
   })

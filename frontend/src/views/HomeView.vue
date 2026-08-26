@@ -964,8 +964,6 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
                     v-bind="tip"
                     :ref="el => keepScoresButton(card.preset.id, el, true)"
                     :icon="mdiPodium"
-                    :border="false"
-                    variant="text"
                     class="hx-preset__scores"
                     :aria-label="`High scores for ${card.preset.label}`"
                     @click="openScores(card.preset.id)"
@@ -1549,7 +1547,7 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
   .hx-preset__scores {
     flex: none;
     align-self: center;
-    width: 44px;
+    width: 52px;
   }
 
   .hx-preset {

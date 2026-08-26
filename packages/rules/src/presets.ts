@@ -68,14 +68,14 @@ function platesBySeats(base: number): Readonly<Record<number, Partial<GameSettin
 
 export const GAME_PRESETS: readonly GamePreset[] = [
   {
-    id: 'standard',
+    id: 'standard-2',
     label: 'Standard',
     note: 'The game as it is meant to be played.',
     settings: { mode: 'classic', placementRule: 'regular', tileSlots: 12 },
     byPlayers: platesBySeats(4),
   },
   {
-    id: 'quick',
+    id: 'quick-2',
     label: 'Quick',
     note: 'One round, scored once at the end. A single sitting.',
     /*
@@ -87,7 +87,7 @@ export const GAME_PRESETS: readonly GamePreset[] = [
     settings: { mode: 'quick', placementRule: 'regular', tileSlots: 12, platesPerRound: 12 },
   },
   {
-    id: 'long',
+    id: 'long-2',
     label: 'Long & precise',
     note: 'Six rounds, every neighbour must match, and you may take a turn back.',
     /*
@@ -153,10 +153,20 @@ export function presetSettings(
  * **Retuning a preset means minting a new id, never editing one in place.**
  *
  * A high score board is the set of games whose settings match a preset, and a game records which
- * preset it matched at the moment it was created. Change what `standard` deals and every game already
- * on that board stays there, now sitting beside games of a different shape — a leaderboard quietly
- * comparing two things. `presets.spec.ts` pins each preset's full settings so that editing one fails a
- * test rather than a season of scores.
+ * preset it matched at the moment it was created. Change what a preset deals and every game already on
+ * that board stays there, now sitting beside games of a different shape — a leaderboard quietly
+ * comparing two things.
+ *
+ * The ids therefore name a *ruleset*, not a game. The `-2` on all three is the first application of
+ * the rule: turning undo on by default made a solo game materially easier, so the boards those ids
+ * name start again rather than mixing the two. The labels are unchanged, because what a player calls
+ * the game did not change — only what it deals.
+ *
+ * All three moved together even though only one had scores on it, so that "which ruleset is this?" has
+ * one answer per generation rather than three ids at three different vintages.
+ *
+ * `presets.spec.ts` pins what each one deals, so the *next* retune fails a test rather than a season
+ * of scores.
  */
 
 /**

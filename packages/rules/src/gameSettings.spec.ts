@@ -381,11 +381,13 @@ describe('the end-of-game switches', () => {
   })
 })
 
-describe('undo, which defaults the other way', () => {
+describe('undo, where a new game and an old record disagree', () => {
   /*
-   * The two switches above are on unless turned off, so a record written before they existed keeps
-   * playing the real game. Undo is the opposite: a record that never mentioned it must not acquire it,
-   * because it changes what a turn is rather than how one scores.
+   * The one place a default and a fallback are deliberately opposite, and the distinction is worth
+   * keeping: `defaultGameSettings` is what a game *starts* from, `parseGameSettings` is what a stored
+   * record *means*. A new solo game gets undo. A game recorded before anybody thought to write the
+   * field down was played without it, and reading it back must not hand it a mechanic it never had —
+   * least of all one that changes what a turn is.
    */
   it('stays off for a record that predates it', () => {
     const older: Record<string, unknown> = { ...valid }
@@ -393,8 +395,8 @@ describe('undo, which defaults the other way', () => {
     expect(parseGameSettings(older)?.allowUndo).toBe(false)
   })
 
-  it('is off for a fresh game', () => {
-    expect(defaultGameSettings(0).allowUndo).toBe(false)
+  it('is on for a fresh game', () => {
+    expect(defaultGameSettings(0).allowUndo).toBe(true)
   })
 
   it('needs an explicit true, and takes nothing else for one', () => {
