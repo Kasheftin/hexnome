@@ -21,6 +21,7 @@
  * offered to sort by date would silently ask for a different one.
  */
 import { computed, ref, watch } from 'vue'
+import { mdiPlayCircleOutline } from '@mdi/js'
 import { GAME_PRESETS } from '@hexnome/rules/presets'
 import { PLAYER_COUNT_CHOICES, SOLO } from '@hexnome/rules/gameSettings'
 import { ApiError } from '@/api/base'
@@ -76,6 +77,7 @@ const columns = [
   { title: 'Player', key: 'who', sortable: false },
   { title: 'Finished', key: 'finished', sortable: false },
   { title: 'Score', key: 'score', sortable: false, align: 'end' as const },
+  { title: '', key: 'watch', sortable: false, width: 56, align: 'end' as const },
 ]
 
 const title = computed(() => 'High scores')
@@ -197,6 +199,22 @@ const empty = computed(() => !loading.value && !problem.value && rows.value.leng
         One place for "there is nothing here", whichever reason it is. Keeping the failure above the
         table left an empty no-data row underneath it, so the panel said nothing twice.
       -->
+      <!--
+        A game on a board is a game you can watch. The link carries `replay=1`, which is all a replay
+        is — the same route, read differently — so this is an anchor rather than anything cleverer,
+        and it opens in place like every other link on the screen.
+      -->
+      <template #[`item.watch`]="{ item }">
+        <v-btn
+          :icon="mdiPlayCircleOutline"
+          :to="{ path: '/game', query: { id: item.gameId, replay: '1' } }"
+          :border="false"
+          variant="text"
+          density="comfortable"
+          :aria-label="`Watch ${item.who}'s game`"
+        />
+      </template>
+
       <template #no-data>
         <p
           v-if="problem"

@@ -55,9 +55,10 @@ export class HighscoresService {
  *
  * Named out rather than spread, exactly as `viewOf` in games.service.ts is: a `Game` row carries the
  * seed and the whole settings blob, and a spread here would be one careless line away from publishing
- * both. The game id is left off deliberately — see `HighscoreRow` in the wire module for why.
+ * both. The id goes out; the seed never does — see `HighscoreRow` in the wire module.
  */
 function rowOf(row: {
+  id: string
   presetId: string | null
   players: number | null
   score: number | null
@@ -66,6 +67,7 @@ function rowOf(row: {
   updatedAt: Date
 }): HighscoreRow {
   return {
+    gameId: row.id,
     presetId: row.presetId ?? '',
     players: row.players ?? 0,
     score: row.score ?? 0,

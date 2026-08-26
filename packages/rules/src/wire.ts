@@ -182,18 +182,26 @@ export interface SubmitResult {
 /**
  * One finished game, as a high score board shows it.
  *
- * **No game id, and that is deliberate.** `GET /games/:id` is public to anybody holding the id —
- * reading a table is not a privilege, and the id is already the capability to do it. A public,
- * enumerable list of ids would therefore publish every finished game's board and its whole command
- * log. Replaying a game from a board is a thing to want, and when it arrives it wants a route of its
- * own rather than an id handed out here.
+ * **The game id is here, and it took a second look to be sure it should be.** `GET /games/:id` is
+ * public to anybody holding the id — reading a table is not a privilege — so an enumerable list of
+ * ids makes every finished game's log readable. That was reason enough to leave it out until there
+ * was something to do with it.
  *
- * No seed either, for the older reason: it never leaves the server at all.
+ * Replay is that something, and the exposure turns out to be narrow. A finished game cannot be
+ * joined (`join` refuses anything but `waiting`) or written to (`submit` refuses anything but
+ * `running`), so an id here buys a stranger the *moves of a completed game* and nothing else — and
+ * the names beside them were already on the board. Watching somebody's game back is the feature, not
+ * the leak.
+ *
+ * No seed, though, and never: it does not leave the server at all, which is what stops the deal of a
+ * game still being played from being worked out.
  *
  * `winnerSeat` accompanies the name because a player may decline to give one — an empty name is a
  * real answer — and only the seat number lets a screen write "Player 3" instead.
  */
 export interface HighscoreRow {
+  /** Which game it was, so a board can offer to play it back. */
+  readonly gameId: string
   readonly presetId: string
   readonly players: number
   readonly score: number

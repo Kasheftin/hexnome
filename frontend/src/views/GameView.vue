@@ -2485,6 +2485,8 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       :over="gameOver"
       :final-tally="finalGroups"
       :retain-focus="!replaying"
+      :game-id="gameId"
+      :replaying="replaying"
       @select="showSeat"
       @next="startNextRound"
     />

@@ -12,6 +12,8 @@ import { SOLO } from '@hexnome/rules/gameSettings'
 export interface BoardRow {
   /** Where this row stands on the whole board, not on the page — so page two starts at 21. */
   readonly rank: number
+  /** The game behind the row, for the link that plays it back. */
+  readonly gameId: string
   readonly who: string
   readonly score: number
   readonly players: string
@@ -64,11 +66,12 @@ export function boardName(presetId: string): string {
 export function boardRows(rows: readonly HighscoreRow[], offset: number, locale?: string): BoardRow[] {
   return rows.map((row, index) => ({
     rank: offset + index + 1,
+    gameId: row.gameId,
     who: nameOf(row),
     score: row.score,
     players: tableOf(row.players),
     finished: finishedOn(row.finishedAt, locale),
-    // Neither the name nor the score is unique on a board; the position on it is.
-    key: `${offset + index}:${row.finishedAt}`,
+    // The game is unique where neither the name nor the score is.
+    key: row.gameId,
   }))
 }

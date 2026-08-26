@@ -145,12 +145,17 @@ describe('reading a board', () => {
     expect(walked).toEqual(days.map(day => day).sort((a, b) => a - b).map(day => `day-${day}`))
   })
 
-  /* A board is public, so what it does *not* carry is part of the contract. */
-  it('publishes no seed, no settings and no game id', async () => {
+  /*
+   * A board is public, so what it carries is part of the contract in both directions. The id goes
+   * out, because a board offers to replay the game; the seed never does, and nor does the settings
+   * blob it sits in.
+   */
+  it('carries the game id and nothing that was meant to stay in', async () => {
     const row = (await board()).rows[0]!
     expect(Object.keys(row).sort()).toEqual(
-      ['finishedAt', 'players', 'presetId', 'score', 'winnerName', 'winnerSeat'],
+      ['finishedAt', 'gameId', 'players', 'presetId', 'score', 'winnerName', 'winnerSeat'],
     )
+    expect(row.gameId).toMatch(/^[0-9a-f-]{36}$/)
   })
 })
 

@@ -66,6 +66,10 @@ const props = defineProps<{
    * because a prop that quietly works by attribute inheritance is a prop nobody knows is there.
    */
   retainFocus?: boolean
+  /** The game this panel is the end of, so it can offer to play it back. */
+  gameId?: string
+  /** True when this *is* a replay, which is when there is nothing to offer to replay. */
+  replaying?: boolean
 }>()
 
 const emit = defineEmits<{ next: [], select: [seat: number] }>()
@@ -398,14 +402,33 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           <span>Total score</span>
           <strong>{{ grandTotal }}</strong>
         </p>
-        <v-btn
-          to="/"
-          color="success"
-          variant="outlined"
-          class="action next"
-        >
-          Back to menu
-        </v-btn>
+        <!--
+          Two ways out of a finished game. Away first and louder, because the commoner answer to "that
+          is your score" is another game — watching this one back is the second thought, offered
+          quietly beneath it.
+
+          Only when the game is being read live: in a replay you are already watching it, and the
+          transport is right there for another look.
+        -->
+        <div class="ended">
+          <v-btn
+            to="/"
+            color="success"
+            variant="outlined"
+            class="action"
+          >
+            Back to menu
+          </v-btn>
+          <v-btn
+            v-if="props.gameId && !props.replaying"
+            :to="{ path: '/game', query: { id: props.gameId, replay: '1' } }"
+            color="muted"
+            variant="outlined"
+            class="action"
+          >
+            Replay the game
+          </v-btn>
+        </div>
       </template>
 
       <v-btn
@@ -599,6 +622,17 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
 .action {
   width: 100%;
   margin-top: 16px;
+}
+
+/*
+ * The two ways out of a finished game, stacked rather than side by side.
+ *
+ * `.action` is full-width, and the panel is a column of full-width things — a row of two halves here
+ * would be the only place in it that is not, and would read as a different kind of choice than it is.
+ */
+.ended {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Quieter than the advance: leaving early is allowed, not encouraged. */
