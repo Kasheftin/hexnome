@@ -30,6 +30,7 @@ import {
   type DeskState,
 } from '../rules/desk'
 import { parseGameSettings } from '../rules/gameSettings'
+import { dealKeyOf } from '../games/dealKey'
 import type { DeskKind } from '../rules/wire'
 import { PrismaService } from '../prisma.service'
 
@@ -69,7 +70,7 @@ export class DeskService {
 
     const copies = kind === 'tiles' ? settings.tileCopies : settings.plateCopies
     const exclude = kind === 'plates'
-      ? openingPlateCodes(game.id, settings.players)
+      ? openingPlateCodes(dealKeyOf(game), settings.players)
       : []
 
     // Distinct per kind, so one game's two desks deal different orders from one secret.

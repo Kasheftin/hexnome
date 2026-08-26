@@ -138,6 +138,9 @@ import {
   departureMillis,
 } from '@/scene/constants'
 import { forgetCurrentGame, rememberCurrentGame } from '@/composables/currentGame'
+import { playerName } from '@/composables/playerName'
+import { rememberSeat } from '@/composables/useSeat'
+import { cloneGame } from '@/api/games'
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
 import { measureHeader, resetHeaderBox } from '@/scene/headerBox'
 import {
@@ -177,6 +180,16 @@ const gameId = computed(() => {
  * about a game until it has loaded (stores/game.ts).
  */
 const settings = shallowRef<GameSettings | null>(store.game?.settings ?? null)
+
+/**
+ * The public seed this game is dealt from, read once beside the settings and for the same reason.
+ *
+ * Usually the id in the URL, and taken from the server rather than assumed to be. A game repeated
+ * from another inherits that game's key, and a client that used the id here would build a different
+ * agenda from the one the server is scoring against — with every other thing on screen looking
+ * exactly right. Falling back to the id keeps a game stored before this column existed working.
+ */
+const dealKey = shallowRef(store.game?.dealKey ?? gameId.value)
 
 const modeLabel = computed(() => {
   const s = settings.value
@@ -283,7 +296,7 @@ const platesPerRound = settings.value?.platesPerRound ?? DEFAULT_PLATES_PER_ROUN
  * Derived once and never stored: both inputs already survive a reload, and a saved agenda could
  * outlive the code that produced it (game/agenda.ts).
  */
-const agenda = createAgenda(gameId.value, settings.value?.mode ?? DEFAULT_SINGLEPLAYER_MODE)
+const agenda = createAgenda(dealKey.value, settings.value?.mode ?? DEFAULT_SINGLEPLAYER_MODE)
 
 /** Stems paid for enclosing a plate. Fixed for the game, so the tableau can hold it too. */
 const stemsPerInternalAnchor =
@@ -316,7 +329,7 @@ const gameOptions: GameOptions = {
    * from it. What the *desks* deal from is the server's own and never arrives here — see
    * `packages/rules/src/game.ts`.
    */
-  gameId: gameId.value,
+  dealKey: dealKey.value,
   settings: {
     ...(settings.value ?? defaultGameSettings(0)),
     /*
@@ -467,6 +480,36 @@ watch(replaying, async (replay) => {
     loadingLog.value = false
   }
 })
+
+/** True while the server is dealing a repeat, so the button cannot be pressed twice. */
+const repeating = shallowRef(false)
+
+/**
+ * Deal this game again, and go and sit at it.
+ *
+ * The server does the copying — both seeds are read from the row being repeated, so nothing about the
+ * deal travels through here and there is nothing for a caller to change on the way past. What comes
+ * back is a seat claim exactly like a new game's, so the routing is the same routing the setup screen
+ * does: a solo game is already running, a table has a lobby to fill.
+ */
+async function playAgain(): Promise<void> {
+  if (repeating.value) return
+  repeating.value = true
+  try {
+    const claim = await cloneGame(gameId.value, playerName())
+    // Before navigating, or the creator arrives at their own table as a spectator.
+    rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
+    rememberCurrentGame(claim.game.id)
+    await router.push({
+      path: claim.game.status === 'waiting' ? '/join' : '/game',
+      query: { id: claim.game.id },
+    })
+  } catch (error) {
+    reportTrouble(error)
+  } finally {
+    repeating.value = false
+  }
+}
 
 /** Which round the cursor is standing in, counted from the log rather than from the folded state. */
 const replayRound = computed(() => roundAt(
@@ -2538,7 +2581,9 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       :retain-focus="!replaying"
       :game-id="gameId"
       :replaying="replaying"
+      :repeating="repeating"
       @select="showSeat"
+      @again="playAgain"
       @next="startNextRound"
     />
 

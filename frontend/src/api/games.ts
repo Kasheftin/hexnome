@@ -46,6 +46,17 @@ export function joinGame(id: string, name: string): Promise<SeatClaim> {
 }
 
 /** Everything after a cursor. `since=0` is the whole log, which is how a fresh page loads. */
+/**
+ * Deal this game again, to whoever wants to beat it.
+ *
+ * Answers exactly as `createGame` does — a seat, a token and the new game — because it *is* a
+ * creation: same deal, new table, nobody's turn taken yet. So the caller routes on the status it gets
+ * back, a solo game arriving `running` and a table `waiting`.
+ */
+export function cloneGame(id: string, name: string): Promise<SeatClaim> {
+  return send<SeatClaim>(`/games/${encodeURIComponent(id)}/clone`, { name })
+}
+
 export function getCommands(id: string, since = 0): Promise<CommandSlice> {
   return request<CommandSlice>(`/games/${encodeURIComponent(id)}/commands?since=${since}`)
 }

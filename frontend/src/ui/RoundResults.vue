@@ -70,9 +70,16 @@ const props = defineProps<{
   gameId?: string
   /** True when this *is* a replay, which is when there is nothing to offer to replay. */
   replaying?: boolean
+  /** True while the server is dealing the repeat, so it cannot be asked for twice. */
+  repeating?: boolean
 }>()
 
-const emit = defineEmits<{ next: [], select: [seat: number] }>()
+const emit = defineEmits<{
+  /** Deal this same game again — same bags, same opening, same targets. */
+  again: []
+  next: []
+  select: [seat: number]
+}>()
 
 const reveal = shallowRef<InstanceType<typeof ScoringReveal> | null>(null)
 const finalReveal = shallowRef<InstanceType<typeof FinalScore> | null>(null)
@@ -419,6 +426,12 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
           >
             Back to menu
           </v-btn>
+          <!--
+            Two things to do with a game that is over, beyond leaving. Watching it back is reading;
+            playing it again is answering. The second deals the identical game — the same bags in the
+            same order, the same opening, the same targets — which is what makes a score worth
+            comparing rather than a different game with a familiar shape.
+          -->
           <v-btn
             v-if="props.gameId && !props.replaying"
             :to="{ path: '/game', query: { id: props.gameId, replay: '1' } }"
@@ -427,6 +440,16 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
             class="action"
           >
             Replay the game
+          </v-btn>
+          <v-btn
+            v-if="props.gameId"
+            :loading="props.repeating"
+            color="muted"
+            variant="outlined"
+            class="action"
+            @click="emit('again')"
+          >
+            Play this deal again
           </v-btn>
         </div>
       </template>

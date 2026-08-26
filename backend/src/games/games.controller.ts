@@ -5,6 +5,7 @@
  * POST /games                { settings, name? }        → { seat, token, game }
  * GET  /games/:id            Authorization: Seat …      → GameView
  * POST /games/:id/join       { name? }                  → { seat, token, game }
+ * POST /games/:id/clone      { name? }                  → { seat, token, game }
  * GET  /games/:id/commands   ?since=N                   → CommandSlice
  * POST /games/:id/commands   { cmdId, prevSeq, command } → SubmitResult
  * ```
@@ -50,6 +51,21 @@ export class GamesController {
   @Post(':id/join')
   join(@Param('id') id: string, @Body() raw: unknown): Promise<SeatClaim> {
     return this.games.join(id, joinBody(raw).name)
+  }
+
+  /**
+   * The same deal again, to somebody who wants to beat it.
+   *
+   * A `POST` to the game being repeated rather than to `/games` with a source in the body, because
+   * the thing being asked for is "another of *this*" — and because the settings and both seeds are
+   * then read from the row rather than taken from a caller who could change them on the way past.
+   *
+   * Answers exactly as creating a game does, so a client routes on the status it gets back: a solo
+   * game comes back `running` and a table comes back `waiting`, with a lobby to fill.
+   */
+  @Post(':id/clone')
+  clone(@Param('id') id: string, @Body() raw: unknown): Promise<SeatClaim> {
+    return this.games.clone(id, joinBody(raw).name)
   }
 
   /** Everything after a cursor. `since=0`, or a missing one, means the whole log. */

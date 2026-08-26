@@ -78,7 +78,7 @@ function table({
   }
   const options: GameOptions = {
     settings,
-    gameId: SEED,
+    dealKey: SEED,
     cells: hexRectangle(8, 8),
     sourceTilesPerLot: TILES_PER_LOT,
     agenda: createAgenda(SEED, settings.mode),
@@ -305,7 +305,7 @@ function servedTable({ tileCopies = 3, plateCopies = 1 } = {}) {
   }
   const options: GameOptions = {
     settings,
-    gameId: SEED,
+    dealKey: SEED,
     cells: hexRectangle(8, 8),
     sourceTilesPerLot: TILES_PER_LOT,
     agenda: createAgenda(SEED, settings.mode),

@@ -101,6 +101,19 @@ model Game {
   plateDeskId String? @db.VarChar(36)
 
   /**
+   * The **public seed**: the opening plates, the round targets and the petal stream.
+   *
+   * Null for a game that is its own, which is nearly all of them — a game's public seed is normally
+   * its id, and this column exists only so a *repeat* can inherit another game's. The two were the
+   * same value for as long as no game was ever dealt twice, and the primary key cannot be reused.
+   *
+   * Public, and safely so: it is some game's id, and an id was always the thing both ends derive the
+   * opening from. The secret half is `seed` above, which the desks are built from and which never
+   * leaves this process. A repeat inherits both, which is what makes it the same game.
+   */
+  dealKey String? @db.VarChar(36)
+
+  /**
    * Which named game this is, for the high score board — or null for one that is nobody's.
    *
    * **Derived at creation, never sent by a client.** `matchPreset` compares the validated settings

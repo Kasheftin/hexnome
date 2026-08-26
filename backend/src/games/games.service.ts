@@ -28,6 +28,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { MAX_PLAYERS } from '../rules/deck'
 import { parseGameSettings, type GameSettings } from '../rules/gameSettings'
 import { matchPreset } from '../rules/presets'
+import { dealKeyOf } from './dealKey'
 import type { GameStatus, GameView, SeatClaim } from '../rules/wire'
 import { DeskService } from '../desk/desk.service'
 import { PrismaService } from '../prisma.service'
@@ -40,8 +41,16 @@ import { TurnsService } from './turns.service'
 const CREATOR_SEAT = 0
 
 /** A row as this service reads it, with its seats in seating order. */
+/** What a repeated game inherits: both seeds, and nothing else. */
+interface Deal {
+  readonly seed: string
+  readonly dealKey: string
+}
+
 interface GameRow {
   id: string
+  /** Null for a game dealt from its own id, which is nearly all of them. See `dealKeyOf`. */
+  dealKey: string | null
   settings: unknown
   status: string
   seq: number
@@ -65,7 +74,7 @@ export class GamesService {
    * setting rather than something discovered as people arrive. A game that cannot be seated is
    * refused rather than trimmed — a table of nine is a request nobody meant to make.
    */
-  async create({ settings, name }: CreateGame): Promise<SeatClaim> {
+  async create({ settings, name }: CreateGame, from?: Deal): Promise<SeatClaim> {
     const players = settings.players
     if (players < 1 || players > MAX_PLAYERS) {
       throw new ConflictException(`a game seats 1 to ${MAX_PLAYERS}, not ${players}`)
@@ -77,8 +86,18 @@ export class GamesService {
     await this.prisma.game.create({
       data: {
         id,
-        // Minted here, and the reason this endpoint exists. Never leaves the server.
-        seed: randomUUID(),
+        /*
+         * Minted here, and the reason this endpoint exists. Never leaves the server — except into a
+         * repeat, which copies it without ever showing it to anybody. That is the whole trick: a
+         * player can play the same deal again and still cannot see what is coming.
+         */
+        seed: from?.seed ?? randomUUID(),
+        /*
+         * Null means "dealt from my own id", which is nearly every game. A repeat carries the key it
+         * is repeating, so it gets the same opening plates, the same round targets and the same petal
+         * stream — the other half of being the same game.
+         */
+        dealKey: from?.dealKey ?? null,
         /*
          * As parsed, and `parseGameSettings` no longer admits a seed at all. A game has two — this
          * column, which is secret, and the id, which is public and is what the opening plates come
@@ -213,6 +232,37 @@ export class GamesService {
     this.heads.moved(id, game.seq)
   }
 
+  /**
+   * Deal this game again, to somebody who wants to beat it.
+   *
+   * Both seeds are inherited and neither is shown. The secret one orders the bags; the public one
+   * decides the opening, the targets and the petals — and it is a *key* rather than an id precisely
+   * so that a second game can be dealt from the first one's.
+   *
+   * Everything else is new: a new id, a new table, new seats, an empty log. The settings come from
+   * the stored game rather than from the caller, because a repeat that let you change the rules would
+   * be a different game claiming to be a rematch.
+   *
+   * Only a finished game. Repeating one still being played would hand out its opening while somebody
+   * is still working out what to do with it.
+   */
+  async clone(id: string, name: string): Promise<SeatClaim> {
+    const game = await this.prisma.game.findUnique({ where: { id } })
+    if (!game) throw new NotFoundException(`no game ${id}`)
+    if (game.status !== 'finished') {
+      throw new ConflictException('a game can be played again once it is over')
+    }
+
+    const settings = parseGameSettings(game.settings)
+    if (!settings) throw new ConflictException(`game ${id} has settings this server cannot read`)
+
+    return this.create(
+      // The names go: whoever repeats it is seat 0, and the rest of the chairs are open again.
+      { settings: { ...settings, playerNames: [name] }, name },
+      { seed: game.seed, dealKey: dealKeyOf(game) },
+    )
+  }
+
   private async rowOf(id: string): Promise<GameRow> {
     const game = await this.prisma.game.findUnique({
       where: { id },
@@ -252,6 +302,8 @@ export class GamesService {
 
     return {
       id: game.id,
+      // Told rather than inferred: a repeated game's is another game's id — see `dealKeyOf`.
+      dealKey: dealKeyOf(game),
       status: game.status as GameStatus,
       seq: game.seq,
       settings,

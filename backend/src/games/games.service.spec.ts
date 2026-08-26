@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { ConflictException, NotFoundException } from '@nestjs/common'
 import { defaultGameSettings, SOLO, type GameSettings } from '../rules/gameSettings'
@@ -314,5 +315,137 @@ describe('joining', () => {
     const row = await prisma.seat.findMany({ where: { gameId: game.id }, orderBy: { seat: 'asc' } })
     expect(row.every(seat => seat.token !== null)).toBe(true)
     expect(new Set(row.map(seat => seat.token)).size).toBe(3)
+  })
+})
+
+/**
+ * Dealing the same game to somebody who wants to beat it.
+ *
+ * A game is dealt from two seeds and both have to be inherited, which is the whole reason this was
+ * more than copying a column. The secret one orders the bags. The public one — normally the game's
+ * own id, which is why `dealKey` exists at all — decides the opening plates, the round targets and
+ * the petal stream. Copy one and you get a different game with a familiar bag.
+ *
+ * So the test is not "did the columns copy" but "is it the same game", and the way to ask that is to
+ * look at what was dealt.
+ */
+describe('playing the same deal again', () => {
+  /** A finished solo game, played out by passing until it is over. */
+  async function finished(players = SOLO) {
+    const claim = await games.create({ settings: settingsFor(players), name: 'Ember' })
+    made.push(claim.game.id)
+    const id = claim.game.id
+    const tokens = [claim.token]
+    for (let seat = 1; seat < players; seat++) {
+      tokens.push((await games.join(id, `Seat ${seat}`)).token)
+    }
+    let guard = 0
+    while (!(await turns.stateOf(id)).finished && guard++ < 60) {
+      const state = await turns.stateOf(id)
+      const head = (await turns.since(id, 0)).head.seq
+      await turns.submit(id, randomUUID(), head, { kind: 'pass', seat: state.activeSeat },
+        tokens[state.activeSeat]!)
+    }
+    return id
+  }
+
+  const openingOf = async (id: string) =>
+    (await turns.since(id, 0)).commands.find(row => row.command.kind === 'deal')?.command
+
+  /**
+   * Both seeds, on the row.
+   *
+   * Stated directly because everything else about a repeat is downstream of these two values, and the
+   * tests that try to observe the deal are each blind to one half: the source's first lot comes out of
+   * the desks, so it is the *secret* seed that decides it, and the agenda comes out of the public key.
+   * Neither notices the other going wrong.
+   *
+   * An earlier version of this suite compared the seats' opening plates and looked like a third
+   * check. It was not: it read the original's *finished* tableau against the copy's fresh one, and
+   * passed with the public key deliberately randomised. Deleted rather than kept as reassurance.
+   */
+  it('inherits both seeds, which is what everything else follows from', async () => {
+    const original = await finished()
+    const copy = await games.clone(original, 'Rival')
+    made.push(copy.game.id)
+
+    const rows = await prisma.game.findMany({
+      where: { id: { in: [original, copy.game.id] } },
+      select: { id: true, seed: true, dealKey: true },
+    })
+    const before = rows.find(row => row.id === original)!
+    const after2 = rows.find(row => row.id === copy.game.id)!
+
+    expect(after2.seed).toBe(before.seed)
+    // The original was dealt from its own id, and the copy is dealt from the original's.
+    expect(before.dealKey).toBeNull()
+    expect(after2.dealKey).toBe(original)
+  })
+
+  it('deals the identical opening lot', async () => {
+    const original = await finished()
+    const copy = await games.clone(original, 'Rival')
+    made.push(copy.game.id)
+
+    expect(await openingOf(copy.game.id)).toEqual(await openingOf(original))
+  })
+
+  /* The other half of the same game: what each round is scored for. */
+  it('scores against the identical agenda', async () => {
+    const original = await finished()
+    const copy = await games.clone(original, 'Rival')
+    made.push(copy.game.id)
+
+    const before = await turns.stateOf(original)
+    const after2 = await turns.stateOf(copy.game.id)
+    expect(after2.options.agenda).toEqual(before.options.agenda)
+    expect(after2.options.dealKey).toBe(before.options.dealKey)
+  })
+
+  it('is a new game, not the old one wearing a hat', async () => {
+    const original = await finished()
+    const copy = await games.clone(original, 'Rival')
+    made.push(copy.game.id)
+
+    expect(copy.game.id).not.toBe(original)
+    expect(copy.game.seats[0]!.name).toBe('Rival')
+    expect((await turns.stateOf(copy.game.id)).finished).toBe(false)
+  })
+
+  /*
+   * The secret seed is copied and still never shown. That is what lets a player replay a deal without
+   * being able to see what is coming in a game they have not played yet.
+   */
+  it('inherits the secret seed without publishing it', async () => {
+    const original = await finished()
+    const copy = await games.clone(original, 'Rival')
+    made.push(copy.game.id)
+
+    const rows = await prisma.game.findMany({
+      where: { id: { in: [original, copy.game.id] } },
+      select: { seed: true },
+    })
+    expect(rows[0]!.seed).toBe(rows[1]!.seed)
+    expect(JSON.stringify(copy)).not.toContain(rows[0]!.seed)
+  })
+
+  it('starts a solo repeat straight away, and sits a table down to wait', async () => {
+    const solo = await games.clone(await finished(SOLO), 'Rival')
+    made.push(solo.game.id)
+    expect(solo.game.status).toBe('running')
+
+    const table = await games.clone(await finished(2), 'Rival')
+    made.push(table.game.id)
+    expect(table.game.status).toBe('waiting')
+  })
+
+  /* Repeating a game still being played would hand out its opening to somebody sitting at it. */
+  it('will not repeat a game that is not over', async () => {
+    const running = await newGame(SOLO)
+    await expect(games.clone(running.game.id, 'Rival')).rejects.toThrow(ConflictException)
+  })
+
+  it('has nothing to repeat for a game that does not exist', async () => {
+    await expect(games.clone(randomUUID(), 'Rival')).rejects.toThrow(NotFoundException)
   })
 })

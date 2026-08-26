@@ -53,6 +53,15 @@ export interface SeatView {
  * server was for. The id is a share link; the seed is a secret; one value cannot be both.
  */
 export interface GameView {
+  /**
+   * The public seed this game is dealt from — its opening plates, round targets and petal stream.
+   *
+   * Usually the id below, and sent anyway rather than left to be inferred. A game repeated from
+   * another inherits that game's key, and a client that assumed the id would fold a *different*
+   * agenda from the server's while every other thing on screen looked right. Sending it is the only
+   * way the two cannot drift.
+   */
+  readonly dealKey: string
   readonly id: string
   readonly status: GameStatus
   /**

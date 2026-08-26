@@ -71,8 +71,13 @@ export interface GameOptions {
    * never reaches a client, and nothing in this package has ever seen it — which is what stops a
    * player predicting the deal. Keeping the two apart is the whole arrangement, so they are not one
    * field with a comment.
+   *
+   * **Named for what it is rather than where it usually comes from.** For most games this *is* the
+   * game's id, which is why it read `gameId` for a long time. A game repeated from another one
+   * inherits that other game's key — same opening, same targets, same petals — and a field called
+   * `gameId` holding a different game's id is a trap laid for whoever reads it next.
    */
-  readonly gameId: string
+  readonly dealKey: string
   /** The playfield, which is a scene decision rather than a rule — see BOARD_HALF_COLS. */
   readonly cells: readonly Axial[]
   readonly sourceTilesPerLot: number
@@ -282,9 +287,9 @@ function specOf(code: number): TileSpec {
  * and the seed, so a replay rebuilds it before applying anything.
  */
 export function createGame(options: GameOptions): GameState {
-  const { settings, cells, sourceTilesPerLot, gameId } = options
+  const { settings, cells, sourceTilesPerLot, dealKey } = options
   const players = Math.max(1, Math.min(settings.players, MAX_PLAYERS))
-  const petals = createRandom(`${gameId}:petals`)
+  const petals = createRandom(`${dealKey}:petals`)
   const nextPetal = (): number => Math.floor(petals() * PETAL_COUNT)
 
   const source = createTableau({
@@ -296,7 +301,7 @@ export function createGame(options: GameOptions): GameState {
     idPrefix: 'src:',
   })
 
-  const opening = openingPlateCodes(gameId, players)
+  const opening = openingPlateCodes(dealKey, players)
 
   const seats = Array.from({ length: players }, (_, seat): SeatState => {
     const tableau = createTableau({

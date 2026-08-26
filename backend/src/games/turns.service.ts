@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common'
 import { createAgenda } from '../rules/agenda'
 import { boardCells } from '../rules/board'
+import { dealKeyOf } from './dealKey'
 import { tileCode, tileFromCode } from '../rules/desk'
 import {
   applyCommand,
@@ -128,7 +129,7 @@ export class TurnsService {
     if (!command) throw new UnprocessableEntityException('that is not a command this server can read')
     if (command.seat !== seat) throw new ForbiddenException(`that command claims seat ${command.seat}`)
 
-    const options = this.optionsFor(game.id, game.settings)
+    const options = this.optionsFor(game)
     const log = await this.log(gameId)
 
     // An undo cancels commands rather than changing a position, so it does not go through
@@ -272,7 +273,7 @@ export class TurnsService {
     const game = await this.prisma.game.findUnique({ where: { id: gameId } })
     if (!game) throw new NotFoundException(`no game ${gameId}`)
 
-    const state = replayGame(this.optionsFor(game.id, game.settings), [])
+    const state = replayGame(this.optionsFor(game), [])
     const dealt = await this.restock(game, state)
     if (dealt.length === 0) return
 
@@ -427,15 +428,16 @@ export class TurnsService {
    * the opening plates and the petal stream — and is deliberately not `game.seed`, which the desks
    * are built from and which never leaves this process.
    */
-  private optionsFor(gameId: string, stored: unknown): GameOptions {
-    const settings = parseGameSettings(stored)
-    if (!settings) throw new ConflictException(`game ${gameId} has settings this server cannot read`)
+  private optionsFor(game: { id: string, dealKey: string | null, settings: unknown }): GameOptions {
+    const settings = parseGameSettings(game.settings)
+    if (!settings) throw new ConflictException(`game ${game.id} has settings this server cannot read`)
+    const dealKey = dealKeyOf(game)
     return {
       settings,
-      gameId,
+      dealKey,
       cells: boardCells(),
       sourceTilesPerLot: SOURCE_TILES_PER_LOT,
-      agenda: createAgenda(gameId, settings.mode),
+      agenda: createAgenda(dealKey, settings.mode),
     }
   }
 
@@ -443,7 +445,7 @@ export class TurnsService {
   async stateOf(gameId: string): Promise<GameState> {
     const game = await this.prisma.game.findUnique({ where: { id: gameId } })
     if (!game) throw new NotFoundException(`no game ${gameId}`)
-    return replayGame(this.optionsFor(game.id, game.settings), await this.log(gameId))
+    return replayGame(this.optionsFor(game), await this.log(gameId))
   }
 }
 

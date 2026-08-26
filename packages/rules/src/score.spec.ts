@@ -35,7 +35,7 @@ const SEED = 'scoring'
 function optionsFor(settings: GameSettings): GameOptions {
   return {
     settings,
-    gameId: SEED,
+    dealKey: SEED,
     cells: hexRectangle(8, 8),
     sourceTilesPerLot: 4,
     agenda: createAgenda(SEED, settings.mode),

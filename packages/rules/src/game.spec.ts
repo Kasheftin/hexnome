@@ -38,7 +38,7 @@ function options(overrides: Partial<GameSettings> = {}): GameOptions {
   return {
     settings,
     // The public seed: the opening plates and the petal stream, and nothing a player could not see.
-    gameId: SEED,
+    dealKey: SEED,
     cells: hexRectangle(8, 8),
     sourceTilesPerLot: TILES_PER_LOT,
     agenda: createAgenda(SEED, settings.mode),
