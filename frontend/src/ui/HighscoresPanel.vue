@@ -64,10 +64,16 @@ watch(() => [props.presetId, props.players, props.open] as const, ([id, count, o
 /* Turning either toggle is a different board, so it starts at the top of it. */
 watch([preset, seats], () => { page.value = 1 })
 
+/*
+ * Four columns, and deliberately no "Table".
+ *
+ * A board is one seat count, so that column said the same thing on every row — and it was the width
+ * that pushed the score off the side of a phone, which is the one number a leaderboard exists to
+ * show. The toolbar above already says which table this is.
+ */
 const columns = [
   { title: '#', key: 'rank', sortable: false, width: 56 },
   { title: 'Player', key: 'who', sortable: false },
-  { title: 'Table', key: 'players', sortable: false },
   { title: 'Finished', key: 'finished', sortable: false },
   { title: 'Score', key: 'score', sortable: false, align: 'end' as const },
 ]
@@ -99,7 +105,14 @@ async function load(): Promise<void> {
   } catch (error) {
     rows.value = []
     total.value = 0
-    problem.value = error instanceof ApiError ? error.message : 'Cannot reach the scores.'
+    /*
+     * A message the server sent is worth repeating; the transport's is not. `ApiError`'s unreachable
+     * text is "Cannot reach the table" — right for the four calls it was written for, and wrong here,
+     * where a table is a game and this is a scoreboard. So only that one is replaced.
+     */
+    problem.value = error instanceof ApiError && !error.isUnreachable
+      ? error.message
+      : 'Cannot reach the scores. Is the server running?'
   } finally {
     loading.value = false
   }
@@ -164,13 +177,6 @@ const empty = computed(() => !loading.value && !problem.value && rows.value.leng
       </v-btn-toggle>
     </template>
 
-    <p
-      v-if="problem"
-      class="hx-scores__problem"
-    >
-      {{ problem }}
-    </p>
-
     <!--
       `items-per-page-options` is a single value: the page size is not a decision worth handing a
       player on a board this shape, and the server bounds it anyway.
@@ -187,11 +193,22 @@ const empty = computed(() => !loading.value && !problem.value && rows.value.leng
       density="comfortable"
       class="hx-scores"
     >
+      <!--
+        One place for "there is nothing here", whichever reason it is. Keeping the failure above the
+        table left an empty no-data row underneath it, so the panel said nothing twice.
+      -->
       <template #no-data>
-        <p class="hx-scores__empty">
-          <template v-if="empty">
-            No finished games on this board yet. Play one.
-          </template>
+        <p
+          v-if="problem"
+          class="hx-scores__problem"
+        >
+          {{ problem }}
+        </p>
+        <p
+          v-else-if="empty"
+          class="hx-scores__empty"
+        >
+          No finished games on this board yet. Play one.
         </p>
       </template>
     </v-data-table-server>
@@ -211,6 +228,32 @@ const empty = computed(() => !loading.value && !problem.value && rows.value.leng
    */
   .hx-scores .v-data-table-footer__items-per-page {
     display: none;
+  }
+
+  /*
+   * Let the toggles wrap rather than scroll.
+   *
+   * `v-btn-group` sets `overflow-x: auto` so a long strip can be swiped, which on a 390px phone meant
+   * "Long & precise" and "4 players" were simply cut off with a scrollbar under them — a filter you
+   * cannot see is a filter you will not use. Wrapping costs a line of height and nothing else.
+   */
+  .hx-flyout__toolbar .v-btn-toggle {
+    height: auto;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  /*
+   * Narrower cells on a phone, because the padding was the thing pushing the score off the edge.
+   *
+   * Four columns at 16px each side is 128px of air on a 296px table — measured, and it left the table
+   * seven pixels too wide to fit, so the one figure the board exists to show sat behind a scrollbar.
+   * Halving it buys 64px and the whole row fits with room to spare.
+   */
+  @media (max-width: 720px) {
+    .hx-scores :is(td, th) {
+      padding-inline: 8px;
+    }
   }
 
   .hx-scores__problem,

@@ -15,13 +15,19 @@ export class HighscoresService {
 
   async find({ presetId, players, limit, offset }: HighscoreQuery): Promise<HighscorePage> {
     /*
-     * `score: { not: null }` is the whole test for "this game finished and was scored".
+     * Both conditions, though one implies the other.
      *
-     * Not `status: 'finished'` as well. The two are written in the same statement, so they cannot
-     * disagree — and a query naming both would imply they might, which would be a worse thing to
-     * believe than to check.
+     * `score`, `winnerSeat`, `winnerName` and `status` are set by a single `UPDATE` guarded by
+     * `status: 'running'`, so a scored game is a finished game by construction and `score IS NOT NULL`
+     * would do on its own. It is stated anyway because this is the query somebody will read when they
+     * want to know what a board contains, and "finished games, best first" is the answer — leaving the
+     * status out made a reader check the write path to find out whether an abandoned game could show
+     * up. A condition that costs nothing and answers that question in place is worth the line.
+     *
+     * It also holds the line against a row edited by hand in the database, which is the one way the
+     * two could ever come apart.
      */
-    const where = { presetId, players, score: { not: null } }
+    const where = { presetId, players, status: 'finished', score: { not: null } }
 
     /*
      * **A total order, and it has to be.** `score DESC` alone is not one: MySQL may return equal

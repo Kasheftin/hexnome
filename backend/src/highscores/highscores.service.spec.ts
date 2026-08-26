@@ -84,6 +84,17 @@ describe('reading a board', () => {
     expect((await board()).rows).toHaveLength(3)
   })
 
+  /*
+   * The case the `status` condition exists for, and the only way the two can come apart: a row edited
+   * by hand. Nothing in the write path can produce this — score and status are set by one statement —
+   * so it is written here directly, which is exactly how it would arrive in real life.
+   */
+  it('will not show a scored row that is somehow not finished', async () => {
+    const id = await seed({ score: 1000 })
+    await prisma.game.update({ where: { id }, data: { status: 'running' } })
+    expect((await board()).rows.some(row => row.score === 1000)).toBe(false)
+  })
+
   it('is a different board for a different table size', async () => {
     expect((await board({ players: 3 })).rows.map(row => row.score)).toEqual([99])
   })
