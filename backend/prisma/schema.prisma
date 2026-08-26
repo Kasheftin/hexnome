@@ -100,10 +100,59 @@ model Game {
   tileDeskId  String? @db.VarChar(36)
   plateDeskId String? @db.VarChar(36)
 
+  /**
+   * Which named game this is, for the high score board — or null for one that is nobody's.
+   *
+   * **Derived at creation, never sent by a client.** `matchPreset` compares the validated settings
+   * against what each preset deals at that seat count, so a client cannot claim a board it did not
+   * play. See packages/rules/src/presets.ts.
+   *
+   * A preset that is retuned must be given a new id rather than edited in place, or every game
+   * already recorded under the old one keeps sitting on a board it no longer belongs to.
+   */
+  presetId String? @db.VarChar(16)
+
+  /**
+   * How many seats, duplicated out of `settings` on purpose.
+   *
+   * A board is a preset *and* a seat count — a score at two players says nothing about a score at
+   * four — and `settings` is a JSON column, so the count cannot be indexed where it already lives.
+   */
+  players Int?
+
+  /**
+   * The best score anybody made, written once when the game ends.
+   *
+   * Null until then, and null forever for a game that was abandoned, which is what keeps unfinished
+   * games off the board without a second condition to keep in step.
+   */
+  score Int?
+
+  /**
+   * Who made it. The seat, and the name it was carrying at the time.
+   *
+   * The seat is stored as well as the name because a player may decline to name themselves — the
+   * column allows an empty string — and only the seat number can produce "Player 3" afterwards.
+   * Ties go to the lowest seat: the first to sit.
+   *
+   * Denormalised from `Seat` deliberately. A name is fixed when the chair is claimed and never
+   * changes, so there is nothing here that can drift, and a board is a list ordered by a column on
+   * this table alone.
+   */
+  winnerSeat Int?
+  winnerName String? @db.VarChar(40)
+
   seats    Seat[]
   commands Command[]
 
   @@index([status, updatedAt])
+
+  /**
+   * The high score board, in one index: pick a preset and a seat count, then walk the scores
+   * downwards. Unfinished games have a null `score` and sort to the far end, so a page never reaches
+   * them.
+   */
+  @@index([presetId, players, score])
 }
 
 /// A place at a table, and the secret that proves it is yours.

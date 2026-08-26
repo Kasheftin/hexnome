@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto'
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
 import { MAX_PLAYERS } from '../rules/deck'
 import { parseGameSettings, type GameSettings } from '../rules/gameSettings'
+import { matchPreset } from '../rules/presets'
 import type { GameStatus, GameView, SeatClaim } from '../rules/wire'
 import { DeskService } from '../desk/desk.service'
 import { PrismaService } from '../prisma.service'
@@ -84,6 +85,17 @@ export class GamesService {
          * from. A third in the settings is the copy that would go stale.
          */
         settings: settings as unknown as object,
+        /*
+         * Which named game this is, worked out here rather than taken from the request.
+         *
+         * The client never says. `matchPreset` compares what arrived against what each preset deals
+         * at this seat count, so a game can only be on a board it was actually played on — see
+         * packages/rules/src/presets.ts. Null for a game that is nobody's, which is how custom
+         * settings stay off every board without anything having to exclude them.
+         */
+        presetId: matchPreset(settings),
+        // Out of the settings and into a column, because a board is a preset *and* a seat count.
+        players,
         seats: {
           create: Array.from({ length: players }, (_, seat) => ({
             seat,

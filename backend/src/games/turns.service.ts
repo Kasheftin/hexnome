@@ -21,6 +21,7 @@ import {
 } from '../rules/game'
 import { parseGameSettings } from '../rules/gameSettings'
 import { parseCommand } from '../rules/parseCommand'
+import { finalScoreOf } from '../rules/score'
 import { SOURCE_TILES_PER_LOT } from '../rules/source'
 import type { TileSpec } from '../rules/tableau'
 import type { CommandRow, CommandSlice, SubmitResult } from '../rules/wire'
@@ -142,6 +143,20 @@ export class TurnsService {
     // Whatever the turn left the source wanting.
     const dealt = await this.restock(game, state)
 
+    /*
+     * Scored **here**, before the log is written, and this ordering is the whole point.
+     *
+     * `append` is the commit: after it, the game is over as far as the log is concerned. Anything
+     * that throws past that leaves a log saying finished and a row saying running, and there is no
+     * way back — every later submit is refused by `applyCommand` with a 422, so the game can never be
+     * closed and never be scored. That hazard already existed for the status flip alone; putting a
+     * fold over four tableaux after the commit would have made it far likelier to fire.
+     *
+     * `state` is complete by now — the turn is applied and the restock is in — so nothing is lost by
+     * doing the arithmetic early.
+     */
+    const finish = state.finished ? finishOf(state, game.seats) : null
+
     const written = await this.append(gameId, prevSeq, [
       { author: seat, cmdId, command },
       ...dealt.map(deal => ({ author: SERVER_SEAT, cmdId: randomUUID(), command: deal })),
@@ -150,8 +165,15 @@ export class TurnsService {
 
     // The pile is the desk's, and the state cannot reach it — see `CommandResult.toDesk`.
     await this.returnToDesk(game, played.toDesk)
-    if (state.finished) {
-      await this.prisma.game.updateMany({ where: { id: gameId, status: 'running' }, data: { status: 'finished' } })
+    /*
+     * One conditional write, carrying the ending and what it was worth together. `status: 'running'`
+     * in the where makes it idempotent: a second attempt affects no rows rather than rescoring.
+     */
+    if (finish) {
+      await this.prisma.game.updateMany({
+        where: { id: gameId, status: 'running' },
+        data: { status: 'finished', ...finish },
+      })
     }
     /*
      * **Everything is announced, tidying included.**
@@ -450,4 +472,45 @@ function specOf(code: number): TileSpec {
  */
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002'
+}
+
+
+/** What a finished game is recorded as, beyond the fact that it is over. */
+interface Finish {
+  readonly score: number
+  readonly winnerSeat: number
+  readonly winnerName: string
+}
+
+/**
+ * Who won a finished game, and with what.
+ *
+ * **The name comes from the seat rows, not from the fold.** `GameState` carries a name per seat, and
+ * it is the wrong one for everybody except the creator: the rules read it from
+ * `settings.playerNames`, which only ever holds the name the game was made with. A joiner's name goes
+ * to their `Seat` row and never back into the settings, so scoring off the state would have credited
+ * every win at a table to "Player 2".
+ *
+ * Ties go to the lowest seat — the first to sit — rather than to whichever seat a reduction happened
+ * to visit last. `>` rather than `>=` is the whole of that rule, and it is stated here because it is
+ * otherwise an accident of the loop.
+ *
+ * An empty name is kept as it is. It means a player declined to say, which is allowed, and
+ * `winnerSeat` is what lets a screen write "Player 3" instead.
+ */
+function finishOf(state: GameState, seats: readonly { seat: number, name: string | null }[]): Finish {
+  let best = 0
+  let bestScore = finalScoreOf(state, 0)
+  for (let seat = 1; seat < state.seats.length; seat++) {
+    const score = finalScoreOf(state, seat)
+    if (score > bestScore) {
+      best = seat
+      bestScore = score
+    }
+  }
+  return {
+    score: bestScore,
+    winnerSeat: best,
+    winnerName: seats.find(row => row.seat === best)?.name ?? '',
+  }
 }

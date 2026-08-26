@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { ConflictException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common'
-import { draftItems, type PlayerCommand } from '../rules/game'
+import { roundAgenda, tallyRound } from '../rules/agenda'
+import { draftItems, replayGame, type PlayerCommand } from '../rules/game'
+import { findPreset, presetSettings } from '../rules/presets'
+import { finalScoreOf, finalTallyOf } from '../rules/score'
+import { tilesInReadingOrder } from '../rules/tableau'
 import { defaultGameSettings, SOLO, type GameSettings } from '../rules/gameSettings'
 import { DeskService } from '../desk/desk.service'
 import { PrismaService } from '../prisma.service'
@@ -406,6 +410,102 @@ describe('the end of a game', () => {
 
     expect((await turns.stateOf(id)).finished).toBe(true)
     expect((await prisma.game.findUnique({ where: { id } }))?.status).toBe('finished')
+  })
+
+  /**
+   * What a finished game is worth, checked against the arithmetic the *screen* does.
+   *
+   * `finalScoreOf` reads `banked`, which the fold accumulated as each round closed. The results panel
+   * instead rebuilds every round from the log and adds up what it finds. Those are two different
+   * routes to one number, and a high score board is only honest while they agree — so this walks the
+   * panel's route longhand and compares.
+   */
+  it('records what the winner scored, and it is what the panel would show', async () => {
+    const { id, tokens } = await table(SOLO)
+    const rounds = (await turns.stateOf(id)).options.agenda.length
+    for (let round = 0; round < rounds; round++) {
+      await turns.submit(id, randomUUID(), await head(id), pass(0), tokens[0]!)
+    }
+
+    const state = await turns.stateOf(id)
+    const log = (await turns.since(id, 0)).commands.map(row => row.command)
+
+    // The panel's route: every round rebuilt from the log, then the board it finished with.
+    let asThePanelWouldSay = 0
+    for (let round = 1; round <= rounds; round++) {
+      const asThen = replayGame(state.options, log, { throughRound: round })
+      const seat = asThen.seats[0]!
+      asThePanelWouldSay += tallyRound(
+        roundAgenda(state.options.agenda, round) ?? [],
+        tilesInReadingOrder(seat.tableau),
+      ).total + (seat.anchored[round - 1] ?? 0) - (seat.fined[round - 1] ?? 0)
+    }
+    asThePanelWouldSay += finalTallyOf(state.seats[0]!.tableau, state.options.settings).total
+
+    const row = await prisma.game.findUnique({ where: { id } })
+    expect(row?.score).toBe(finalScoreOf(state, 0))
+    expect(row?.score).toBe(asThePanelWouldSay)
+    expect(row?.winnerSeat).toBe(0)
+    expect(row?.winnerName).toBe('Ember')
+  })
+
+  /* A default solo game is exactly what the Standard card deals, so it lands on that board. */
+  it('records which named game it was', async () => {
+    const { id, tokens } = await table(SOLO)
+    const rounds = (await turns.stateOf(id)).options.agenda.length
+    for (let round = 0; round < rounds; round++) {
+      await turns.submit(id, randomUUID(), await head(id), pass(0), tokens[0]!)
+    }
+
+    const row = await prisma.game.findUnique({ where: { id } })
+    expect(row?.presetId).toBe('standard')
+    expect(row?.players).toBe(SOLO)
+  })
+
+  /*
+   * The same settings at two seats are *not* Standard — that preset widens the source to five plates
+   * for two players — so this game belongs to no board at all. Which is the point: a game nobody else
+   * played the same way cannot be compared with one.
+   */
+  it('leaves a game that is nobody\'s off every board', async () => {
+    const first = await games.create({ settings: settingsFor(2), name: 'Ember' })
+    made.push(first.game.id)
+    expect((await prisma.game.findUnique({ where: { id: first.game.id } }))?.presetId).toBeNull()
+  })
+
+  /**
+   * The winner's name comes from the seat rows, and this is the test that says so.
+   *
+   * `GameState` carries a name per seat and it is wrong for everybody but the creator: the rules read
+   * it from `settings.playerNames`, which only holds the name the game was made with. Scoring off the
+   * state credited every win at a table to "Player 2".
+   */
+  it('credits a joiner by the name they joined under', async () => {
+    const settings = presetSettings(findPreset('standard')!, 2)
+    const first = await games.create({ settings, name: 'Ember' })
+    made.push(first.game.id)
+    const id = first.game.id
+    const second = await games.join(id, 'Flux')
+
+    const tokens = [first.token, second.token]
+    const rounds = (await turns.stateOf(id)).options.agenda.length
+    for (let round = 0; round < rounds; round++) {
+      for (const seat of [0, 1]) {
+        const state = await turns.stateOf(id)
+        if (state.finished) break
+        await turns.submit(id, randomUUID(), await head(id), pass(state.activeSeat), tokens[state.activeSeat]!)
+        void seat
+      }
+    }
+
+    const state = await turns.stateOf(id)
+    expect(state.finished).toBe(true)
+    const row = await prisma.game.findUnique({ where: { id } })
+    expect(row?.presetId).toBe('standard')
+    expect(row?.players).toBe(2)
+    expect(row?.score).toBe(finalScoreOf(state, row!.winnerSeat!))
+    // Whoever won, the name recorded is the one that seat actually joined under.
+    expect(row?.winnerName).toBe(row?.winnerSeat === 0 ? 'Ember' : 'Flux')
   })
 
   it('refuses a turn once the game is over', async () => {
