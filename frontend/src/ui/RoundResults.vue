@@ -57,6 +57,15 @@ const props = defineProps<{
   over: boolean
   /** The finished board's groups. Only read once the game is over. */
   finalTally: FinalTally
+  /**
+   * Whether the dialog keeps the keyboard inside itself. True everywhere but a replay.
+   *
+   * A replay stops on round endings, which is exactly when this panel is up — and its transport lives
+   * outside the dialog, so a focus trap would leave the only controls that can move the game on
+   * clickable but not tabbable. Declared rather than left to fall through onto the `v-dialog`,
+   * because a prop that quietly works by attribute inheritance is a prop nobody knows is there.
+   */
+  retainFocus?: boolean
 }>()
 
 const emit = defineEmits<{ next: [], select: [seat: number] }>()
@@ -239,6 +248,7 @@ const grandTotal = computed(() => roundsTotal.value + props.finalTally.total)
   <v-dialog
     :model-value="true"
     :max-width="1100"
+    :retain-focus="props.retainFocus ?? true"
     persistent
     scrollable
     :aria-label="showingFinal ? 'Final score' : `Round ${latest?.round} results`"

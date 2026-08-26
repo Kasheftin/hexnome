@@ -123,6 +123,8 @@ import TableauView from '@/scene/TableauView.vue'
 import ActionBar from '@/ui/ActionBar.vue'
 import RoundResults from '@/ui/RoundResults.vue'
 import GameSettingsPanel from '@/ui/GameSettingsPanel.vue'
+import ReplayTransport from '@/ui/ReplayTransport.vue'
+import { replayScript, roundAt, type ReplayScript } from '@/ui/replayScript'
 import RulesPanel from '@/ui/RulesPanel.vue'
 import NoticePanel from '@/ui/NoticePanel.vue'
 import SourceEmpty from '@/ui/SourceEmpty.vue'
@@ -214,7 +216,18 @@ onMounted(async () => {
    * started, so a page never deals anything for itself.
    */
   try {
-    absorb(await sync.load())
+    const rows = await sync.load()
+    if (replaying.value) {
+      /*
+       * The whole game, kept rather than folded. A replay opens on the *opening* — the position
+       * before anybody moved — which is the one position a live game never shows you.
+       */
+      script.value = rows
+      moves.value = replayScript(rows)
+      seekTo(0)
+    } else {
+      absorb(rows)
+    }
   } catch (error) {
     reportTrouble(error)
     return
@@ -360,6 +373,84 @@ let state = createGame(gameOptions)
 const sync = useGameSync(gameId.value)
 
 /**
+ * Watching a finished game back, rather than sitting at a live one.
+ *
+ * `?replay=1` beside the id, so a replay is a *link* — the same game, read differently. Nothing about
+ * it is stored, and dropping the parameter is how you leave.
+ *
+ * What it changes is everything about who moves the game: the log stops growing, no turn may be
+ * submitted, and the position comes from a cursor rather than from the server. See `seekTo`.
+ */
+const replaying = computed(() => route.query.replay === '1')
+
+/** The whole game, as rows, kept immutable — the cursor walks it rather than consuming it. */
+const script = shallowRef<readonly CommandRow[]>([])
+const moves = shallowRef<ReplayScript>(replayScript([]))
+const atMove = shallowRef(0)
+const playing = shallowRef(false)
+
+/**
+ * Show the position after `position` moves.
+ *
+ * The same manoeuvre an undo makes, and for the same reason it is safe: `state` is reassigned rather
+ * than mutated, and nothing holds the old one — the board, the source and every seat are reached
+ * through `board()`, `boardOf()` and `source()`, which read the binding when they are called. Tile
+ * ids come from the log, so a position folded twice mints the same ids and the scene's views survive
+ * the move instead of being rebuilt.
+ *
+ * A round boundary raises the scoresheet, exactly as it does in a live game, because a replay that
+ * skipped the moment a round was counted would be missing the part worth watching.
+ */
+function seekTo(position: number): void {
+  const wanted = Math.max(0, Math.min(moves.value.moves, position))
+  const before = state.round
+  atMove.value = wanted
+
+  log.length = 0
+  for (const row of script.value.slice(0, moves.value.rows(wanted))) log.push(row.command)
+  state = replayGame(gameOptions, log)
+  revision.value++
+
+  // Stepping backwards over a boundary puts the sheet away again; only crossing one forwards raises it.
+  showResults.value = state.round > before || (state.finished && wanted === moves.value.moves)
+  if (state.finished && wanted === moves.value.moves) gameOver.value = true
+  else gameOver.value = false
+}
+
+/** Which round the cursor is standing in, counted from the log rather than from the folded state. */
+const replayRound = computed(() => roundAt(
+  script.value,
+  moves.value.rows(atMove.value),
+  settings.value?.players ?? 1,
+))
+
+/** One move a second is about reading speed: fast enough to watch, slow enough to follow. */
+const PLAYBACK_MS = 1000
+let ticking: ReturnType<typeof setTimeout> | null = null
+
+function stopTicking(): void {
+  if (ticking !== null) clearTimeout(ticking)
+  ticking = null
+}
+
+/*
+ * A timeout that re-arms rather than an interval, so a seek made while playing cannot leave two
+ * timers running at once — and so the clock restarts from the move just shown rather than from
+ * whenever the interval happened to be in its cycle.
+ */
+watch([playing, atMove], () => {
+  stopTicking()
+  if (!playing.value) return
+  if (atMove.value >= moves.value.moves) {
+    playing.value = false
+    return
+  }
+  ticking = setTimeout(() => seekTo(atMove.value + 1), PLAYBACK_MS)
+})
+
+onBeforeUnmount(stopTicking)
+
+/**
  * Go and look whenever the server says the game moved.
  *
  * The nudge carries a number and no game data, so this is where it turns into turns. It fires for
@@ -371,6 +462,9 @@ const stopListening = store.onMoved(() => { void catchUp() })
 onBeforeUnmount(stopListening)
 
 async function catchUp(): Promise<void> {
+  // A replay is a fixed script. Anything arriving from the server would be a different game moving
+  // under a cursor that is walking this one.
+  if (replaying.value) return
   absorb(await sync.catchUp())
 }
 
@@ -2352,7 +2446,7 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
 
     <Transition name="bar">
       <ActionBar
-        v-if="announcing === null && !showResults && !gameOver && !settling"
+        v-if="!replaying && announcing === null && !showResults && !gameOver && !settling"
         :watching-label="watchingLabel"
         :pass-label="scoresRounds ? 'Pass' : 'Finish'"
         :phase="phase"
@@ -2377,6 +2471,12 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       />
     </Transition>
 
+    <!--
+      `retain-focus` off in a replay, and this is the half of "reachable" that is easy to miss. The
+      transport sits above the scrim by z-index, so it can be clicked — but a dialog that retains
+      focus will not let the keyboard out of itself, and the controls the replay has stopped for would
+      be unreachable by tab at exactly the moment they are wanted.
+    -->
     <RoundResults
       v-if="showResults && roundRecords.length"
       :rounds="roundRecords"
@@ -2384,8 +2484,27 @@ const FILL_LIGHT_POSITION = new Vector3(8, 5, -6)
       :final="isFinalRound"
       :over="gameOver"
       :final-tally="finalGroups"
+      :retain-focus="!replaying"
       @select="showSeat"
       @next="startNextRound"
+    />
+
+    <!--
+      Outside every panel above, because it has to outlive them: a replay walks through round endings,
+      and each one raises a scoresheet over the board.
+    -->
+    <ReplayTransport
+      v-if="replaying && !loadingLog"
+      :at="atMove"
+      :moves="moves.moves"
+      :playing="playing"
+      :round="replayRound"
+      :rounds="totalRounds"
+      :anchor-x="drawerLayout.left + drawerLayout.width / 2"
+      :anchor-y="drawerLayout.top"
+      @seek="seekTo"
+      @play="playing = true"
+      @pause="playing = false"
     />
 
     <TurnAnnounce
