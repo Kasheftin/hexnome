@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { axialKey, hexRectangle } from '@hexnome/rules/hex'
 import { plateCells } from '@hexnome/rules/plate'
 import { createTableau, type PlateLocation, type TileSpec } from '@hexnome/rules/tableau'
-import { describeBoard, tilesInReadingOrder } from './boardDiagram'
+import { describeBoard } from './boardDiagram'
 import { HEX_SIZE } from './constants'
 
 const RED: TileSpec = { color: 0, value: 1 }
-const BLUE: TileSpec = { color: 3, value: 2 }
 
 const onBoard = (q: number, r: number): PlateLocation => ({ kind: 'board', hole: { q, r } })
 
@@ -124,38 +123,5 @@ describe('describing a board', () => {
       expect(describeBoard(two, HEX_SIZE).bounds.maxX)
         .toBeGreaterThan(describeBoard(one, HEX_SIZE).bounds.maxX)
     })
-  })
-})
-
-describe('reading order', () => {
-  /*
-   * The reveal follows this order, so it has to sweep rather than hop. Tiles are added here in an
-   * order deliberately unlike their layout, which is what a real game produces.
-   */
-  it('runs down the board and then across, whatever order tiles were placed in', () => {
-    const t = table()
-    const p = t.addPlate(onBoard(0, 0))!
-    // Petals 0..5 are E, NE, NW, W, SW, SE — so placing in petal order is not reading order.
-    for (let petal = 0; petal < 6; petal++) {
-      t.addTile({ color: petal, value: 1 }, { kind: 'onPlate', plateId: p.id, petal })
-    }
-
-    const cells = tilesInReadingOrder(t).map(tile => t.cellOfTile(tile.id)!)
-    const rows = cells.map(c => c.r)
-    expect([...rows].sort((a, b) => a - b)).toEqual(rows)
-
-    // Within a row, left to right.
-    for (let i = 1; i < cells.length; i++) {
-      if (cells[i]!.r === cells[i - 1]!.r) expect(cells[i]!.q).toBeGreaterThan(cells[i - 1]!.q)
-    }
-  })
-
-  it('returns every board tile exactly once', () => {
-    const t = table()
-    const p = t.addPlate(onBoard(0, 0))!
-    t.addTile(RED, { kind: 'onPlate', plateId: p.id, petal: 0 })
-    t.addTile(BLUE, { kind: 'onPlate', plateId: p.id, petal: 3 })
-    expect(tilesInReadingOrder(t).map(tile => tile.id).sort())
-      .toEqual(t.tilesOnBoard().map(tile => tile.id).sort())
   })
 })

@@ -44,7 +44,12 @@ import {
   type RoundAgenda,
 } from '@hexnome/rules/agenda'
 import { createDesk as createLocalDesk } from '@hexnome/rules/desk'
-import { finalTally, NOTHING_LEFT, type FinalTally } from '@hexnome/rules/groups'
+import {
+  DEFAULT_SCORING_RULES,
+  finalTally,
+  NOTHING_LEFT,
+  type FinalTally,
+} from '@hexnome/rules/groups'
 import {
   canConfirmDraft,
   completedStrategies,
@@ -104,7 +109,9 @@ import {
   type TurnPhase,
 } from '@hexnome/rules/turn'
 import type { Axial } from '@hexnome/rules/hex'
-import { describeBoard, describeLeftovers, tilesInReadingOrder } from '@/scene/boardDiagram'
+import { describeBoard } from '@/scene/boardDiagram'
+import { finalTallyOf, leftoversOf, scoringRulesOf } from '@hexnome/rules/score'
+import { tilesInReadingOrder } from '@hexnome/rules/tableau'
 import BoardCamera from '@/scene/BoardCamera.vue'
 import CellHighlight from '@/scene/CellHighlight.vue'
 import DrawerChrome from '@/scene/DrawerChrome.vue'
@@ -132,10 +139,6 @@ import { forgetCurrentGame, rememberCurrentGame } from '@/composables/currentGam
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
 import { measureHeader, resetHeaderBox } from '@/scene/headerBox'
 import {
-  DEFAULT_FINE_UNPLACED,
-  DEFAULT_GROUP_BONUSES,
-  DEFAULT_MIN_GROUP_SIZE,
-  DEFAULT_REWARD_STEMS,
   DEFAULT_PLATE_SLOTS,
   DEFAULT_PLATES_PER_ROUND,
   DEFAULT_SINGLEPLAYER_MODE,
@@ -1250,7 +1253,7 @@ function roundRecord(round: number, seat = viewedSeat.value): RoundRecord {
     tally: tallyRound(roundAgenda(agenda, round) ?? [], tilesInReadingOrder(asItWas)),
     anchors: (asThen.seats[seat] ?? asThen.seats[0]!).anchored[round - 1] ?? 0,
     fine: (asThen.seats[seat] ?? asThen.seats[0]!).fined[round - 1] ?? 0,
-    leftovers: describeLeftovers(asItWas),
+    leftovers: leftoversOf(asItWas),
   }
   derived.set(key, record)
   reportScoring(round, seat, asItWas, record)
@@ -1359,13 +1362,16 @@ const viewedScore = computed(() => {
   return { rounds, final, total: rounds + (final ?? 0) }
 })
 
-/** What the closing reckoning is scored under. One copy, read by every seat's tally. */
-const scoringRules = computed(() => ({
-  minGroupSize: settings.value?.minGroupSize ?? DEFAULT_MIN_GROUP_SIZE,
-  groupBonuses: settings.value?.groupBonuses ?? DEFAULT_GROUP_BONUSES,
-  fineUnplaced: settings.value?.fineUnplaced ?? DEFAULT_FINE_UNPLACED,
-  rewardStems: settings.value?.rewardStems ?? DEFAULT_REWARD_STEMS,
-}))
+/**
+ * What the closing reckoning is scored under. One copy, read by every seat's tally.
+ *
+ * `scoringRulesOf` rather than the four fields picked out here by hand, because the server scores a
+ * finished game with the same function — and a screen that chose its own four would be the second
+ * implementation of a number that has to match.
+ */
+const scoringRules = computed(() => (settings.value
+  ? scoringRulesOf(settings.value)
+  : DEFAULT_SCORING_RULES))
 
 /** A seat's closing reckoning, off the board it finished with. */
 function finalFor(seat: number): FinalTally {
@@ -1401,11 +1407,8 @@ const scoresRounds = computed(() => agenda.some(round => round.length > 0))
 const liveScore = computed(() => {
   void revision.value
   const board = boardOf(viewedSeat.value)
-  return roundPoints.value + finalTally(
-    describeBoard(board, HEX_SIZE).tiles,
-    scoringRules.value,
-    describeLeftovers(board),
-  ).total
+  const rules = settings.value
+  return roundPoints.value + (rules ? finalTallyOf(board, rules).total : 0)
 })
 
 /**

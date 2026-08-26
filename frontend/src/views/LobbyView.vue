@@ -181,7 +181,6 @@ async function join(): Promise<void> {
             @focus="(event) => (event.target as HTMLInputElement).select()"
           >
           <v-btn
-            density="comfortable"
             class="copy"
             @click="copyLink"
           >

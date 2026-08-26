@@ -2,8 +2,15 @@
  * A board reduced to what it takes to draw a picture of it.
  *
  * Pure data and functions — no `vue`, no `three`. It lives in `scene/` rather than `game/` because a
- * view description is not a rule: a server validating a move has no use for it, and `game/` is the
- * module that has to stay portable. `sourceScatter.ts` is the same shape of thing for the same reason.
+ * view description is not a rule: a server validating a move has no use for `plates`, `bounds` or a
+ * lit anchor, and `game/` is the module that has to stay portable. `sourceScatter.ts` is the same
+ * shape of thing for the same reason.
+ *
+ * Two things that lived here have since gone home to the rules, because they were never view
+ * descriptions at all: `tilesInReadingOrder` is a query over a tableau, and `describeLeftovers` —
+ * now `leftoversOf` in `rules/score` — builds a `groups.ts` type out of one. The server needs both to
+ * score a finished game, and a second copy of either would be a second answer to what a game was
+ * worth. See packages/rules/src/score.ts.
  *
  * ## Why a snapshot instead of the live model
  *
@@ -15,10 +22,9 @@
  *   `TableauView` needs only because it watches a mutable model.
  * - In multiplayer an opponent's board arrives as data, and this is already that shape.
  */
-import { axialKey, boundsOfCells, compareCellsInReadingOrder, type Axial, type WorldBounds } from '@hexnome/rules/hex'
-import type { Leftovers } from '@hexnome/rules/groups'
+import { axialKey, boundsOfCells, type Axial, type WorldBounds } from '@hexnome/rules/hex'
 import { plateCells } from '@hexnome/rules/plate'
-import type { AnchorKind, Tableau, Tile, TileSpec } from '@hexnome/rules/tableau'
+import { tilesInReadingOrder, type AnchorKind, type Tableau } from '@hexnome/rules/tableau'
 
 /** A plate's footprint: the hole it sits on, and the seven cells it covers. */
 export interface DiagramPlate {
@@ -49,30 +55,6 @@ export interface BoardDiagram {
   readonly anchors: readonly DiagramAnchor[]
   /** World extent of every covered cell, for framing. Degenerate when the board is empty. */
   readonly bounds: WorldBounds
-}
-
-/**
- * Board tiles in the order a reveal should visit them: down the board, then across.
- *
- * Exported because the order has to be applied **before** the tally, not after. `tallyRound` filters,
- * and filtering preserves order, so sorting the input once puts every row in sweep order — whereas
- * sorting each row afterwards would have to be done in as many places as there are rows.
- *
- * Without this the sequence follows tile *creation* order, which is the order the player happened to
- * place things in and looks like the panel is hopping about at random.
- */
-export function tilesInReadingOrder(tableau: Tableau): Tile[] {
-  const cells = new Map<string, Axial>()
-  for (const tile of tableau.tilesOnBoard()) {
-    const cell = tableau.cellOfTile(tile.id)
-    if (cell) cells.set(tile.id, cell)
-  }
-  return [...tableau.tilesOnBoard()].sort((a, b) => {
-    const ca = cells.get(a.id)
-    const cb = cells.get(b.id)
-    if (!ca || !cb) return 0
-    return compareCellsInReadingOrder(ca, cb)
-  })
 }
 
 /**
@@ -118,28 +100,4 @@ export function describeBoard(tableau: Tableau, size: number): BoardDiagram {
   })
 
   return { plates, tiles, anchors, bounds: boundsOfCells(unique, size) }
-}
-
-/**
- * What the player is still holding: loose drawer tiles, and the token of every plate left in a bay.
- *
- * A plate is charged for through its own tile, since that is the only value it has. Its token lives at
- * an `onPlate` location rather than in the drawer, so it has to be gathered separately — reading only
- * `kind: 'drawer'` would quietly let a hoarded plate off.
- *
- * Stems are counted rather than listed: they are interchangeable, and only how many survives.
- */
-export function describeLeftovers(tableau: Tableau): Leftovers {
-  const unplaced: TileSpec[] = []
-
-  for (const tile of tableau.tiles()) {
-    if (tile.location.kind === 'drawer') unplaced.push({ color: tile.color, value: tile.value })
-  }
-  for (const plate of tableau.plates()) {
-    if (plate.location.kind !== 'plateSlot') continue
-    const token = tableau.plateToken(plate.id)
-    if (token) unplaced.push({ color: token.color, value: token.value })
-  }
-
-  return { unplaced, stems: tableau.stems().length }
 }

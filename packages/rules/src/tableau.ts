@@ -20,7 +20,7 @@
  * A third kind of object, the **stem**, lives only in the drawer and shares its slots with tiles — see
  * `Stem`. Occupancy for both runs through one index, so a slot can never hold two things.
  */
-import { NEIGHBOR_DIRS, axialAdd, axialKey, type Axial } from './hex'
+import { NEIGHBOR_DIRS, axialAdd, axialKey, compareCellsInReadingOrder, type Axial } from './hex'
 import {
   DEFAULT_PLACEMENT_RULE,
   groupClash,
@@ -1416,6 +1416,33 @@ export function createTableau({
 
     isBoardCell,
   }
+}
+
+/**
+ * Board tiles in the order a reveal should visit them: down the board, then across.
+ *
+ * A free function rather than a method because it is a *reading* of a tableau built from two of its
+ * own queries, and the interface above is the set of things a tableau has to know about itself.
+ *
+ * The order has to be applied **before** a tally, not after. `tallyRound` filters, and filtering
+ * preserves order, so sorting the input once puts every row in sweep order — whereas sorting each row
+ * afterwards would have to be done in as many places as there are rows.
+ *
+ * Without it the sequence follows tile *creation* order, which is the order the player happened to
+ * place things in and looks like the panel is hopping about at random.
+ */
+export function tilesInReadingOrder(tableau: Tableau): Tile[] {
+  const cells = new Map<string, Axial>()
+  for (const tile of tableau.tilesOnBoard()) {
+    const cell = tableau.cellOfTile(tile.id)
+    if (cell) cells.set(tile.id, cell)
+  }
+  return [...tableau.tilesOnBoard()].sort((a, b) => {
+    const ca = cells.get(a.id)
+    const cb = cells.get(b.id)
+    if (!ca || !cb) return 0
+    return compareCellsInReadingOrder(ca, cb)
+  })
 }
 
 export { PETAL_COUNT }

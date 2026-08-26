@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { axialKey, hexRectangle } from './hex'
 import { normalizePetal, petalCell, plateCells } from './plate'
-import { createTableau, type PlateLocation, type TileLocation } from './tableau'
+import { createTableau, tilesInReadingOrder, type PlateLocation, type TileLocation } from './tableau'
 
 function tableau() {
   return createTableau({ cells: hexRectangle(6, 6), drawerSlots: 16, plateSlots: 2 })
@@ -1399,5 +1399,42 @@ describe('a tableau among others', () => {
     expect(source.addTile(RED, inDrawer(0))).toBeUndefined()
     expect(source.addPlate(onBoard(0, 0))).toBeUndefined()
     expect(source.freeDrawerSlots()).toEqual([])
+  })
+})
+
+/*
+ * Moved here with the function, from the scene module that first needed it. The order is a fact
+ * about a tableau, not about drawing one — and the server now reads a finished board through it.
+ */
+describe('reading order', () => {
+  /*
+   * The reveal follows this order, so it has to sweep rather than hop. Tiles are added here in an
+   * order deliberately unlike their layout, which is what a real game produces.
+   */
+  it('runs down the board and then across, whatever order tiles were placed in', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    // Petals 0..5 are E, NE, NW, W, SW, SE — so placing in petal order is not reading order.
+    for (let petal = 0; petal < 6; petal++) {
+      t.addTile({ color: petal, value: 1 }, { kind: 'onPlate', plateId: p.id, petal })
+    }
+
+    const cells = tilesInReadingOrder(t).map(tile => t.cellOfTile(tile.id)!)
+    const rows = cells.map(c => c.r)
+    expect([...rows].sort((a, b) => a - b)).toEqual(rows)
+
+    // Within a row, left to right.
+    for (let i = 1; i < cells.length; i++) {
+      if (cells[i]!.r === cells[i - 1]!.r) expect(cells[i]!.q).toBeGreaterThan(cells[i - 1]!.q)
+    }
+  })
+
+  it('returns every board tile exactly once', () => {
+    const t = tableau()
+    const p = t.addPlate(onBoard(0, 0))!
+    t.addTile({ color: 0, value: 1 }, { kind: 'onPlate', plateId: p.id, petal: 0 })
+    t.addTile({ color: 3, value: 2 }, { kind: 'onPlate', plateId: p.id, petal: 3 })
+    expect(tilesInReadingOrder(t).map(tile => tile.id).sort())
+      .toEqual(t.tilesOnBoard().map(tile => tile.id).sort())
   })
 })

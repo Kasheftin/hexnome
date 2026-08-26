@@ -137,3 +137,87 @@ export function presetSettings(
   if (!parsed) throw new Error(`preset ${preset.id} does not describe a valid game`)
   return parsed
 }
+
+
+/*
+ * ── Recognising a preset again ───────────────────────────────────────────────
+ *
+ * **Retuning a preset means minting a new id, never editing one in place.**
+ *
+ * A high score board is the set of games whose settings match a preset, and a game records which
+ * preset it matched at the moment it was created. Change what `standard` deals and every game already
+ * on that board stays there, now sitting beside games of a different shape — a leaderboard quietly
+ * comparing two things. `presets.spec.ts` pins each preset's full settings so that editing one fails a
+ * test rather than a season of scores.
+ */
+
+/**
+ * Every field that decides what game this is.
+ *
+ * `satisfies Record<RuleField, true>` is the point of the shape: it will not compile unless every
+ * rule-bearing setting is listed, so adding one to `GameSettings` fails a typecheck here instead of
+ * being silently left out of the comparison — which would quietly widen every board.
+ *
+ * The two that are absent are the two that are not rules. `playerNames` is who turned up, and
+ * `createdAt` is when.
+ */
+type RuleField = Exclude<keyof GameSettings, 'playerNames' | 'createdAt'>
+
+const RULE_FIELDS = {
+  kind: true,
+  mode: true,
+  players: true,
+  platesPerRound: true,
+  tileCopies: true,
+  plateCopies: true,
+  tileSlots: true,
+  plateSlots: true,
+  initialStems: true,
+  stemsPerInternalAnchor: true,
+  stemsPerExternalAnchor: true,
+  strictEnclosureBonus: true,
+  pointsPerInternalAnchor: true,
+  pointsPerExternalAnchor: true,
+  firstPassFine: true,
+  placementRule: true,
+  minGroupSize: true,
+  groupBonuses: true,
+  fineUnplaced: true,
+  rewardStems: true,
+  allowUndo: true,
+} as const satisfies Record<RuleField, true>
+
+/** Do these two describe the same game, whoever is playing it and whenever it was made? */
+export function sameRules(a: GameSettings, b: GameSettings): boolean {
+  for (const field of Object.keys(RULE_FIELDS) as RuleField[]) {
+    const left: unknown = a[field]
+    const right: unknown = b[field]
+    if (Array.isArray(left) || Array.isArray(right)) {
+      if (!Array.isArray(left) || !Array.isArray(right)) return false
+      if (left.length !== right.length) return false
+      if (left.some((entry, index) => entry !== right[index])) return false
+      continue
+    }
+    if (left !== right) return false
+  }
+  return true
+}
+
+/**
+ * Which preset this game is, or null for one that is nobody's.
+ *
+ * **Derived, never declared.** The obvious design is for the setup screen to say which card was
+ * pressed and for the server to write it down — and then a client can claim a `standard` board while
+ * dealing itself sixteen slots and undo, which makes the whole table decoration. There is nothing to
+ * lie about here: the settings arrive validated, `presetSettings` reconstructs exactly what each
+ * preset deals at that seat count, and the answer is whether they are the same game.
+ *
+ * A custom game dialled to match a preset exactly does match, and should: it *is* that game. What
+ * "custom games do not appear" means is that a game which is not one of these games has no board.
+ */
+export function matchPreset(settings: GameSettings): string | null {
+  const found = GAME_PRESETS.find(
+    preset => sameRules(presetSettings(preset, settings.players), settings),
+  )
+  return found?.id ?? null
+}
