@@ -196,7 +196,7 @@ export const DRAWER_ROWS = 2
  * zooms beneath it, so its layout is specified in pixels and converted to world units
  * every frame (scene/screenProjection.ts).
  */
-export const DRAWER_SLOT_PX = 83
+export const DRAWER_SLOT_PX = 87
 export const DRAWER_PADDING_PX = 13
 /** Gap between the drawer and the bottom of the canvas. */
 export const DRAWER_BOTTOM_PX = 22
@@ -212,8 +212,14 @@ export const DRAWER_BOTTOM_PX = 22
 export const DRAWER_SIDE_GAP_PX = 16
 export const DRAWER_MAX_HEIGHT_FRACTION = 0.32
 
-/** Tile width as a fraction of its slot, leaving the slot outline visible around it. */
-export const DRAWER_TILE_FILL = 0.9
+/**
+ * Tile width as a fraction of its slot, leaving the slot outline visible around it.
+ *
+ * Raised from 0.9 with the slot pitch: at 83px and 0.9 the tiles were 65px across with 18px of air
+ * between them, which read as a sparse grid rather than a full drawer. 87 and 0.95 puts 72px tiles
+ * 15px apart — bigger tiles and a smaller gap, from the two halves moving in opposite directions.
+ */
+export const DRAWER_TILE_FILL = 0.95
 
 /**
  * Plate slots in the drawer, and their width in screen pixels.
@@ -224,10 +230,13 @@ export const DRAWER_TILE_FILL = 0.9
  * grid.
  *
  * Scaled with the tile slots, so the bay stays very nearly plate-shaped. A plate is 1.039 times
- * wider than tall, and two rows of 83px slots make the bay 192px tall — so 198 keeps the plate
+ * wider than tall, and two rows of 87px slots make the bay 201px tall — so 208 keeps the plate
  * filling its bay rather than floating in a portrait box with slack above and below.
+ *
+ * It moves whenever `DRAWER_SLOT_PX` does, and for that reason: the bay's height is two tile rows, so
+ * a width that stayed put would turn the bay from plate-shaped into portrait.
  */
-export const PLATE_SLOT_PX = 198
+export const PLATE_SLOT_PX = 208
 /** Gap between the plate slots and the tile grid. */
 export const DRAWER_GROUP_GAP_PX = 16
 /** Plate width as a fraction of its slot. */
@@ -259,11 +268,19 @@ export const SOURCE_LEFT_PX = 16
 /**
  * The most lots the column sizes itself to fit at once.
  *
- * Beyond this it scrolls rather than shrinking. Six is the largest a scoring round deals, so every
- * mode that existed before quick is unaffected — this only stops a twenty-plate game from pinning
- * every lot to `SOURCE_LOT_MIN_PX` for a column that is rarely more than a few rows long.
+ * Beyond this it scrolls rather than shrinking. It is the **binding constraint on lot size** at every
+ * ordinary window: a lot is the available height divided by this, so raising `SOURCE_LOT_MAX_PX`
+ * alone changes nothing until the division stops being the smaller of the two.
+ *
+ * Five rather than six, which is what bought the heaped tiles their size. Those are drawn at drawer
+ * size and clamped by the plate's height, so a lot that is one-sixth of the column was clamping them
+ * to about four-fifths of the tiles they would become the moment they were drafted. A fifth of the
+ * height is a lot half again as tall, and the clamp lets go on a tall window.
+ *
+ * The cost is a row: a round dealing more than five plates now scrolls to show its last. That is the
+ * trade — a column that shows one fewer lot at a size worth reading, rather than every lot small.
  */
-export const SOURCE_SIZING_CAP = 6
+export const SOURCE_SIZING_CAP = 5
 
 export const SOURCE_HEADER_GAP_PX = 16
 /**
@@ -287,11 +304,18 @@ export const SOURCE_BOTTOM_GAP_PX = 12
  * unreadable on a short screen, accepting that the column may then be clipped rather than pretending
  * six fit where they do not.
  *
- * The max is set by tile parity, not by taste: a lot needs about `SOURCE_HEAP_SPAN` tile-radii to hold
- * four drawer-sized tiles legibly, which is ~172px. Capping below that would make parity unreachable
- * at *any* viewport size, so the cap sits just above it — see sourceTileScale in TableauView.vue.
+ * The max is set by tile parity, not by taste, and it is a **floor on the cap** rather than a limit
+ * anybody chose. A heaped tile is drawn at drawer size and clamped to `plateHeight / SOURCE_HEAP_SPAN`
+ * (see sourceTileScale in TableauView.vue), so parity needs
+ *
+ *     lotWidth >= DRAWER_SLOT_PX / 2 * DRAWER_TILE_FILL * SOURCE_HEAP_SPAN
+ *                 / (SOURCE_PLATE_FILL * LOT_ASPECT)
+ *
+ * which at the current drawer is 231px. Capping below that would make parity unreachable at *any*
+ * viewport, which is what the old 176 did once the drawer tiles grew: the lots had the room and the
+ * cap held them back. It moves with the drawer, and this is the arithmetic to redo when that changes.
  */
-export const SOURCE_LOT_MAX_PX = 176
+export const SOURCE_LOT_MAX_PX = 232
 /**
  * The floor, in screen pixels — below this the column scrolls instead of shrinking further.
  *

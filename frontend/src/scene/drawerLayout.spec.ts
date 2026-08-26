@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { PLATE_SLOT_CHOICES, TILE_SLOT_CHOICES } from '@hexnome/rules/gameSettings'
-import { DRAWER_SIDE_GAP_PX } from './constants'
+import {
+  DRAWER_PADDING_PX,
+  DRAWER_SIDE_GAP_PX,
+  DRAWER_SLOT_PX,
+  PLATE_SLOT_PX,
+} from './constants'
 import { createDrawerLayout, type DrawerShape } from './drawerLayout'
 
 const DEFAULT: DrawerShape = { tileSlots: 12, plateSlots: 2 }
@@ -23,11 +28,27 @@ describe('when the drawer fits', () => {
     expect(createDrawerLayout(5000, 4000, SMALLEST).scale).toBe(1)
   })
 
-  it('leaves the default drawer on a big screen exactly as it was', () => {
+  /*
+   * Against the constants, not against a copy of their values. The point is that a big screen scales
+   * nothing - the drawer is drawn at its designed size - and restating the numbers here only meant
+   * this failed every time the design changed, which is not what it is watching for.
+   */
+  it('leaves the default drawer on a big screen at exactly its designed size', () => {
     const layout = createDrawerLayout(1920, 1080, DEFAULT)
     expect(layout.scale).toBe(1)
-    expect(layout.slotSize).toBe(83)
-    expect(layout.plateSlotWidth).toBe(198)
+    expect(layout.slotSize).toBe(DRAWER_SLOT_PX)
+    expect(layout.plateSlotWidth).toBe(PLATE_SLOT_PX)
+  })
+
+  /*
+   * The bay holds a plate, which is 1.039 times wider than tall. Two tile rows set its height, so the
+   * plate slot's width has to move with `DRAWER_SLOT_PX` or the bay turns portrait and the plate
+   * floats in it with slack above and below.
+   */
+  it('keeps the plate bay plate-shaped', () => {
+    const layout = createDrawerLayout(1920, 1080, DEFAULT)
+    const bayHeight = layout.height - DRAWER_PADDING_PX * 2
+    expect(layout.plateSlotWidth / bayHeight).toBeCloseTo(1.039, 1)
   })
 
   it('centres it horizontally', () => {
