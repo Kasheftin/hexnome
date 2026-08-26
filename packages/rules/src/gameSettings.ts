@@ -98,15 +98,18 @@ export const SINGLEPLAYER_MODES: readonly SingleplayerModeInfo[] = [
 /**
  * Rounds deal a handful; quick deals the whole game at once.
  *
- * The scoring modes reach to ten because the count follows the table: the reference game deals more
- * factories to more players, and the presets do the same — 4, 5, 7, 9 from one seat to four. A range
- * that stopped at six could not express its own presets, and the parser would have repaired them into
- * a game nobody chose.
+ * The scoring modes reach to eleven because the count follows the table twice over: more seats draft
+ * from one source, and a longer game wants a wider one to start with. Standard opens at 4 and Long &
+ * precise at 6, and both add 1, 3 and 5 as the table fills — so the widest game a preset asks for is
+ * eleven. A range that stopped short could not express its own presets, and the parser would have
+ * repaired them into a game nobody chose.
+ *
+ * Eight values, which is also two tidy rows of four on the dial.
  */
 const PLATES_PER_ROUND_BY_MODE: Readonly<Record<SingleplayerMode, readonly number[]>> = {
-  classic: [4, 5, 6, 7, 8, 9, 10],
-  classicReversed: [4, 5, 6, 7, 8, 9, 10],
-  random: [4, 5, 6, 7, 8, 9, 10],
+  classic: [4, 5, 6, 7, 8, 9, 10, 11],
+  classicReversed: [4, 5, 6, 7, 8, 9, 10, 11],
+  random: [4, 5, 6, 7, 8, 9, 10, 11],
   quick: [8, 12, 16, 20],
 }
 

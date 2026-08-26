@@ -227,6 +227,31 @@ your own; click a player in the scoring panel to look at theirs, and click again
 A green dot beside a player means the game has heard from them in the last minute or so; a red warning
 triangle means it has not, and they may have closed the tab.
 
+## After the game: boards, replays and rematches
+
+A finished game is not only a score. It goes on a **high score board**, and it can be watched back or
+played again.
+
+**The boards.** One for each named setup — Standard, Quick, Long & precise — and each of those is
+kept separately for every table size, because a score made alone says nothing about a score made
+against three other people. A game only reaches a board if it was played on one of those setups: dial
+your own rules and you have a game nobody else can be compared with, which is a fine thing to play and
+not a thing to rank. Open a board with the podium button beside any of the cards on the setup screen.
+
+**Watching it back.** Any finished game can be replayed a move at a time — from its board, or from the
+panel at the end of the game you have just played. The controls sit at the bottom: back to the start,
+a move back, play, a move on, and on to the end. Rounds end as they did the first time, scoresheet and
+all, and the controls stay above it so you can keep going or step back over the boundary and watch it
+again.
+
+**Playing it again.** The stronger offer. *Play this deal again* deals the identical game: the same
+bags in the same order, the same opening plates, and the same targets for every round. Nothing about
+what is coming is revealed — the order stays on the server, exactly as in a game nobody has played —
+so you get the same problem and a second attempt at it. Solo, the new game starts at once. At a table,
+it opens a lobby with a link to send round, so the same deal can be set against different people.
+
+There is no limit. Play a deal until you are happy with what you did with it.
+
 ## The dials
 
 Everything on the setup screen, with its default. The game remembers what you last started, so the

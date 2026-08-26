@@ -48,11 +48,29 @@ describe('game presets', () => {
     }
   })
 
-  /* The plate count is the reason `byPlayers` exists, so state the table outright. */
+  /*
+   * The plate count is the reason `byPlayers` exists, so state both tables outright.
+   *
+   * One progression, two starting points: a seat adds 0, 1, 3, 5 to whatever the preset opens on.
+   * Standard opens at four; Long & precise wants more choice in front of it from the start, and opens
+   * at six — which is what puts eleven at the top of the dial's range.
+   */
   it('widens the source as the table fills', () => {
     const plates = (id: string, players: number) => presetSettings(findPreset(id)!, players).platesPerRound
     expect([1, 2, 3, 4].map(n => plates('standard', n))).toEqual([4, 5, 7, 9])
-    expect([1, 2, 3, 4].map(n => plates('long', n))).toEqual([4, 5, 7, 9])
+    expect([1, 2, 3, 4].map(n => plates('long', n))).toEqual([6, 7, 9, 11])
+  })
+
+  /*
+   * Undo is declared on the long preset and is inert at a table: `canUndo` refuses whenever there is
+   * more than one seat, because taking a turn back would rewind a source others have played against.
+   * So the *setting* travels at every seat count, and the rules decide what it means.
+   */
+  it('offers the long game its undo, whoever is at the table', () => {
+    for (const players of SEAT_COUNTS) {
+      expect(presetSettings(findPreset('long')!, players).allowUndo).toBe(true)
+    }
+    expect(presetSettings(findPreset('standard')!, SOLO).allowUndo).toBe(false)
   })
 
   /*

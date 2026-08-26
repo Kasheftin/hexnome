@@ -22,6 +22,7 @@ import {
 } from '@hexnome/rules/gameSettings'
 import { DISTINCT_TILES, TILE_VALUE_COUNT } from '@hexnome/rules/deck'
 import { COLOR_POINTS } from '@hexnome/rules/agenda'
+import { GAME_PRESETS } from '@hexnome/rules/presets'
 import { POINTS_PER_STEM } from '@hexnome/rules/groups'
 import { SOURCE_TILES_PER_LOT } from '@hexnome/rules/source'
 import rules from './rules.md?raw'
@@ -122,6 +123,18 @@ describe('what the rulebook says the numbers are', () => {
  * The rulebook is also a document the panel has to be able to show, and the panel builds its
  * navigation out of it. A section that loses its heading loses its way in.
  */
+/*
+ * The named setups, which the rulebook now lists by name. Renaming one is a change to a board a
+ * player may already be on, so it should not be possible to do it and leave the rules behind.
+ */
+describe('what the rulebook says about the boards', () => {
+  it('names every setup that has one', () => {
+    for (const preset of GAME_PRESETS) {
+      claims(`preset ${preset.id}`, preset.label)
+    }
+  })
+})
+
 describe('the rulebook as a document', () => {
   it('is divided into sections the panel can navigate', () => {
     const sections = sectionsOf(rules)

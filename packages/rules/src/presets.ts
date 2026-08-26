@@ -52,17 +52,18 @@ export interface GamePreset {
 }
 
 /**
- * Plates per round at one, two, three and four seats.
+ * How much wider the source gets as the table fills, by seat count.
  *
- * Shared by the two round-scoring presets because it is a fact about tables rather than about either
- * of them: more players draft from the same source, so the source has to be wider or the last player
- * of a round is choosing from leavings.
+ * A fact about tables rather than about any one preset: more players draft from the same source, so
+ * it has to be wider or the last player of a round is choosing from leavings. Stated once, as the
+ * *progression*, so a preset says only where it starts.
  */
-const PLATES_BY_SEATS: Readonly<Record<number, Partial<GameSettings>>> = {
-  1: { platesPerRound: 4 },
-  2: { platesPerRound: 5 },
-  3: { platesPerRound: 7 },
-  4: { platesPerRound: 9 },
+const WIDER_BY_SEATS = [0, 1, 3, 5]
+
+function platesBySeats(base: number): Readonly<Record<number, Partial<GameSettings>>> {
+  return Object.fromEntries(
+    WIDER_BY_SEATS.map((wider, seats) => [seats + 1, { platesPerRound: base + wider }]),
+  )
 }
 
 export const GAME_PRESETS: readonly GamePreset[] = [
@@ -71,7 +72,7 @@ export const GAME_PRESETS: readonly GamePreset[] = [
     label: 'Standard',
     note: 'The game as it is meant to be played.',
     settings: { mode: 'classic', placementRule: 'regular', tileSlots: 12 },
-    byPlayers: PLATES_BY_SEATS,
+    byPlayers: platesBySeats(4),
   },
   {
     id: 'quick',
@@ -88,9 +89,16 @@ export const GAME_PRESETS: readonly GamePreset[] = [
   {
     id: 'long',
     label: 'Long & precise',
-    note: 'Six rounds, and every neighbour must match.',
-    settings: { mode: 'random', placementRule: 'strict', tileSlots: 16 },
-    byPlayers: PLATES_BY_SEATS,
+    note: 'Six rounds, every neighbour must match, and you may take a turn back.',
+    /*
+     * `allowUndo` at a table is simply inert — `canUndo` refuses whenever there is more than one
+     * seat, because taking a turn back would rewind a source everybody else has already played
+     * against. Declared anyway rather than only for the solo variant, so the preset is one game with
+     * one description at every seat count.
+     */
+    settings: { mode: 'random', placementRule: 'strict', tileSlots: 16, allowUndo: true },
+    // A wider source than Standard's before the table is even counted: a long game wants the choice.
+    byPlayers: platesBySeats(6),
   },
 ]
 
