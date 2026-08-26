@@ -138,9 +138,7 @@ import {
   departureMillis,
 } from '@/scene/constants'
 import { forgetCurrentGame, rememberCurrentGame } from '@/composables/currentGame'
-import { playerName } from '@/composables/playerName'
-import { rememberSeat } from '@/composables/useSeat'
-import { cloneGame } from '@/api/games'
+import { useRepeatGame } from '@/composables/repeatGame'
 import { createDrawerLayout, type DrawerShape } from '@/scene/drawerLayout'
 import { measureHeader, resetHeaderBox } from '@/scene/headerBox'
 import {
@@ -481,33 +479,21 @@ watch(replaying, async (replay) => {
   }
 })
 
-/** True while the server is dealing a repeat, so the button cannot be pressed twice. */
-const repeating = shallowRef(false)
-
 /**
  * Deal this game again, and go and sit at it.
  *
- * The server does the copying — both seeds are read from the row being repeated, so nothing about the
- * deal travels through here and there is nothing for a caller to change on the way past. What comes
- * back is a seat claim exactly like a new game's, so the routing is the same routing the setup screen
- * does: a solo game is already running, a table has a lobby to fill.
+ * The five steps between pressing and arriving live in `useRepeatGame`, because a high score board
+ * offers the same thing from a row and two copies of a routing decision is one copy too many. All
+ * that is left here is where the failure goes.
  */
+const { pending: repeatingId, repeat } = useRepeatGame()
+const repeating = computed(() => repeatingId.value !== null)
+
 async function playAgain(): Promise<void> {
-  if (repeating.value) return
-  repeating.value = true
   try {
-    const claim = await cloneGame(gameId.value, playerName())
-    // Before navigating, or the creator arrives at their own table as a spectator.
-    rememberSeat(claim.game.id, { seat: claim.seat, token: claim.token })
-    rememberCurrentGame(claim.game.id)
-    await router.push({
-      path: claim.game.status === 'waiting' ? '/join' : '/game',
-      query: { id: claim.game.id },
-    })
+    await repeat(gameId.value)
   } catch (error) {
     reportTrouble(error)
-  } finally {
-    repeating.value = false
   }
 }
 

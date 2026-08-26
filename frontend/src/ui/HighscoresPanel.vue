@@ -21,11 +21,14 @@
  * offered to sort by date would silently ask for a different one.
  */
 import { computed, ref, watch } from 'vue'
-import { mdiPlayCircleOutline } from '@mdi/js'
+import { mdiPlayCircleOutline, mdiRestart } from '@mdi/js'
 import { GAME_PRESETS } from '@hexnome/rules/presets'
 import { PLAYER_COUNT_CHOICES, SOLO } from '@hexnome/rules/gameSettings'
 import { ApiError } from '@/api/base'
 import { getHighscores } from '@/api/highscores'
+import { useRepeatGame } from '@/composables/repeatGame'
+import { useMediaQuery } from '@/composables/mediaQuery'
+import { NARROW_SCREEN } from '@/composables/scoringPanel'
 import { boardRows, tableOf, type BoardRow } from './highscoreRows'
 import SettingsFlyout from './SettingsFlyout.vue'
 
@@ -72,13 +75,26 @@ watch([preset, seats], () => { page.value = 1 })
  * that pushed the score off the side of a phone, which is the one number a leaderboard exists to
  * show. The toolbar above already says which table this is.
  */
-const columns = [
-  { title: '#', key: 'rank', sortable: false, width: 56 },
+const narrow = useMediaQuery(NARROW_SCREEN)
+
+/**
+ * Four columns, or three on a phone.
+ *
+ * The date is the first thing to go when there is not room for everything, because a board answers
+ * *who, how much,* and *what can I do about it* — when it happened is the one column nobody scans.
+ * Measured rather than guessed: with both actions on the row, keeping it pushed the table wider than
+ * a 390px screen and put the buttons behind a scrollbar.
+ *
+ * "Table" is absent at every width for the older reason: a board is one seat count, so it said the
+ * same thing on every row.
+ */
+const columns = computed(() => [
+  { title: '#', key: 'rank', sortable: false, width: 48 },
   { title: 'Player', key: 'who', sortable: false },
-  { title: 'Finished', key: 'finished', sortable: false },
+  ...(narrow.value ? [] : [{ title: 'Finished', key: 'finished', sortable: false }]),
   { title: 'Score', key: 'score', sortable: false, align: 'end' as const },
-  { title: '', key: 'watch', sortable: false, width: 56, align: 'end' as const },
-]
+  { title: '', key: 'watch', sortable: false, width: 96, align: 'end' as const },
+])
 
 const title = computed(() => 'High scores')
 
@@ -130,6 +146,26 @@ watch(
   ([open]) => { if (open) void load() },
   { immediate: true },
 )
+
+/**
+ * Play one of these again, from the row.
+ *
+ * The same act the end-of-game panel offers, so it is the same composable — a board that routed its
+ * own way would be a second opinion about which games have lobbies. Failures land in the same place
+ * the load's do, because from a player's side "it did not work" is one thing however it was asked.
+ */
+const { pending: repeating, repeat } = useRepeatGame()
+
+async function playAgain(id: string): Promise<void> {
+  problem.value = ''
+  try {
+    await repeat(id)
+  } catch (error) {
+    problem.value = error instanceof ApiError && !error.isUnreachable
+      ? error.message
+      : 'Cannot deal that game again. Is the server running?'
+  }
+}
 
 const empty = computed(() => !loading.value && !problem.value && rows.value.length === 0)
 </script>
@@ -204,15 +240,40 @@ const empty = computed(() => !loading.value && !problem.value && rows.value.leng
         is — the same route, read differently — so this is an anchor rather than anything cleverer,
         and it opens in place like every other link on the screen.
       -->
+      <template #[`item.rank`]="{ item }">
+        <span class="hx-scores__rank">{{ item.rank }}</span>
+      </template>
+
+      <template #[`item.score`]="{ item }">
+        <span class="hx-scores__score">{{ item.score }}</span>
+      </template>
+
       <template #[`item.watch`]="{ item }">
-        <v-btn
-          :icon="mdiPlayCircleOutline"
-          :to="{ path: '/game', query: { id: item.gameId, replay: '1' } }"
-          :border="false"
-          variant="text"
-          density="comfortable"
-          :aria-label="`Watch ${item.who}'s game`"
-        />
+        <div class="hx-scores__actions">
+          <v-btn
+            :icon="mdiPlayCircleOutline"
+            :to="{ path: '/game', query: { id: item.gameId, replay: '1' } }"
+            :border="false"
+            variant="text"
+            density="comfortable"
+            :aria-label="`Watch ${item.who}'s game`"
+          />
+          <!--
+          The same deal, dealt again: the same bags in the same order, the same opening, the same
+          targets. Which is what makes the score above it something to beat rather than a number from
+          a game nobody else can play.
+        -->
+          <v-btn
+            :icon="mdiRestart"
+            :loading="repeating === item.gameId"
+            :disabled="repeating !== null"
+            :border="false"
+            variant="text"
+            density="comfortable"
+            :aria-label="`Play ${item.who}'s deal again`"
+            @click="playAgain(item.gameId)"
+          />
+        </div>
       </template>
 
       <template #no-data>
@@ -282,15 +343,28 @@ const empty = computed(() => !loading.value && !problem.value && rows.value.leng
     text-align: center;
   }
 
-  /* The score is what the board is ordered by, so it reads as the figure rather than a cell. */
-  .hx-scores td:last-child {
+  /*
+   * Named rather than counted.
+   *
+   * These were `td:last-child` and `td:first-child` — the score stopped being last the moment the row
+   * grew actions, and put its weight on a pair of icon buttons instead. Counting was going to keep
+   * being wrong: the columns now change with the width of the screen.
+   */
+  .hx-scores__score {
     font-variant-numeric: tabular-nums;
     font-weight: 600;
   }
 
-  .hx-scores td:first-child {
+  .hx-scores__rank {
     color: rgb(var(--v-theme-muted));
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Side by side, or a two-button cell makes every row twice as tall as it needs to be. */
+  .hx-scores__actions {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
   }
 }
 </style>
