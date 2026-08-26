@@ -216,18 +216,7 @@ onMounted(async () => {
    * started, so a page never deals anything for itself.
    */
   try {
-    const rows = await sync.load()
-    if (replaying.value) {
-      /*
-       * The whole game, kept rather than folded. A replay opens on the *opening* — the position
-       * before anybody moved — which is the one position a live game never shows you.
-       */
-      script.value = rows
-      moves.value = replayScript(rows)
-      seekTo(0)
-    } else {
-      absorb(rows)
-    }
+    await openAs(replaying.value)
   } catch (error) {
     reportTrouble(error)
     return
@@ -416,6 +405,68 @@ function seekTo(position: number): void {
   if (state.finished && wanted === moves.value.moves) gameOver.value = true
   else gameOver.value = false
 }
+
+/**
+ * Open the game the way this URL asks for, live or as a replay.
+ *
+ * One function for both, and called from two places — the mount, and the watch below — because the
+ * two are the same act. Written as two branches in the mount originally, and then the watch was
+ * needed and there was no shared thing to call.
+ *
+ * The log is fetched rather than reused. It is already in memory as commands, but a replay needs the
+ * *rows*: which seat authored each one is what says where a move begins, and the fold throws that
+ * away. A finished game is a cheap request and this happens once per switch.
+ */
+async function openAs(replay: boolean): Promise<void> {
+  const rows = await sync.load()
+
+  if (replay) {
+    /*
+     * The whole game, kept rather than folded. A replay opens on the *opening* — the position before
+     * anybody moved — which is the one position a live game never shows you.
+     */
+    script.value = rows
+    moves.value = replayScript(rows)
+    seekTo(0)
+    return
+  }
+
+  /*
+   * Back to a live game, which means back to a game folded from nothing: a replay leaves `state`
+   * standing at whatever position the cursor was on, and absorbing onto that would apply the log
+   * twice.
+   */
+  script.value = []
+  moves.value = replayScript([])
+  atMove.value = 0
+  log.length = 0
+  state = createGame(gameOptions)
+  gameOver.value = false
+  absorb(rows)
+}
+
+/**
+ * The URL changed under a mounted view.
+ *
+ * Pressing *Replay the game* is a router link, and it goes to the same route with one parameter more.
+ * Vue keeps the component and swaps the query, so `onMounted` never runs again — which left the
+ * transport on screen with a script it had never been given, reading `0 / 0`.
+ *
+ * Watching the flag rather than the whole query, because the id is the other half of this route and
+ * changing *that* is a different game, not a different way of reading this one.
+ */
+watch(replaying, async (replay) => {
+  stopTicking()
+  playing.value = false
+  loadingLog.value = true
+  try {
+    await openAs(replay)
+  } catch (error) {
+    reportTrouble(error)
+  } finally {
+    loadingLog.value = false
+  }
+})
 
 /** Which round the cursor is standing in, counted from the log rather than from the folded state. */
 const replayRound = computed(() => roundAt(
