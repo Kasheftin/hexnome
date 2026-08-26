@@ -177,3 +177,42 @@ export interface SubmitResult {
   /** True when this `cmdId` had already been stored and these are the original rows. */
   readonly duplicate: boolean
 }
+
+
+/**
+ * One finished game, as a high score board shows it.
+ *
+ * **No game id, and that is deliberate.** `GET /games/:id` is public to anybody holding the id —
+ * reading a table is not a privilege, and the id is already the capability to do it. A public,
+ * enumerable list of ids would therefore publish every finished game's board and its whole command
+ * log. Replaying a game from a board is a thing to want, and when it arrives it wants a route of its
+ * own rather than an id handed out here.
+ *
+ * No seed either, for the older reason: it never leaves the server at all.
+ *
+ * `winnerSeat` accompanies the name because a player may decline to give one — an empty name is a
+ * real answer — and only the seat number lets a screen write "Player 3" instead.
+ */
+export interface HighscoreRow {
+  readonly presetId: string
+  readonly players: number
+  readonly score: number
+  readonly winnerSeat: number
+  readonly winnerName: string
+  /** When the game ended, ISO-8601. `updatedAt`, which a finished game never moves again. */
+  readonly finishedAt: string
+}
+
+/**
+ * A page of a board, and how much of it there is.
+ *
+ * `total` is the count for the *filter*, not the page, so a table can size its own pagination without
+ * walking to the end. `limit` and `offset` are echoed for the same reason `CommandSlice` echoes its
+ * cursor: a response that describes itself cannot be misread by a client that has moved on.
+ */
+export interface HighscorePage {
+  readonly rows: readonly HighscoreRow[]
+  readonly total: number
+  readonly limit: number
+  readonly offset: number
+}
