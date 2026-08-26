@@ -14,7 +14,7 @@
  * whichever screen the game is actually on — `/join` for a table still filling, `/game` for one that
  * is already running (stores/game.ts).
  */
-import { mdiCog, mdiDiceMultiple } from '@mdi/js'
+import { mdiCog, mdiDiceMultiple, mdiPodium } from '@mdi/js'
 import { computed, nextTick, ref, watch, type ComponentPublicInstance, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -81,10 +81,12 @@ import {
   PLACEMENT_RULES,
   type PlacementRule,
 } from '@hexnome/rules/placement'
+import HighscoresPanel from '@/ui/HighscoresPanel.vue'
 import RulesPanel from '@/ui/RulesPanel.vue'
 import { bonusKey, textOf } from '@/ui/dialText'
 import SettingsFlyout from '@/ui/SettingsFlyout.vue'
-import { ApiError, createGame } from '@/api/games'
+import { ApiError } from '@/api/base'
+import { createGame } from '@/api/games'
 import { currentGame } from '@/composables/currentGame'
 import { playerName, rememberName, suggestName } from '@/composables/playerName'
 import { forgetSetup, rememberSetup, savedSetup, type SavedSetup } from '@/composables/savedSetup'
@@ -753,6 +755,31 @@ function settingsFromDials(): GameSettings {
   }
 }
 
+/**
+ * The board on screen, and the button to give focus back to when it closes.
+ *
+ * One panel serving three cards, so which card opened it has to be remembered — `focusButton` further
+ * up handles a single button, and here there are three that look alike. The map is keyed by preset id
+ * and holds only the icons; the card buttons are kept out of it by the `scores` flag.
+ */
+const scoresFor = ref<string | null>(null)
+const scoresButtons = new Map<string, ComponentPublicInstance | null>()
+
+function keepScoresButton(id: string, el: unknown, scores: boolean): void {
+  if (!scores) return
+  scoresButtons.set(id, (el ?? null) as ComponentPublicInstance | null)
+}
+
+function openScores(id: string): void {
+  scoresFor.value = id
+}
+
+function closeScores(): void {
+  const opened = scoresFor.value
+  scoresFor.value = null
+  if (opened) void nextTick(() => focusButton(scoresButtons.get(opened) ?? null))
+}
+
 const selectedMode = computed(() => modeInfo(mode.value))
 
 /** What a screen reader is told the panel is, since all three steps share one card. */
@@ -905,37 +932,70 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
             <legend class="hx-group__legend">
               Game
             </legend>
-            <v-btn
+            <!--
+              A row rather than a button, because the scores button cannot live *inside* the card:
+              a button nested in a button is not markup a browser will honour. The card keeps the
+              whole width it had; the icon sits beside it.
+            -->
+            <div
               v-for="card in presetCards"
               :key="card.preset.id"
-              block
-              :disabled="starting"
-              class="hx-option hx-preset"
-              @click="startPreset(card.preset)"
+              class="hx-preset-row"
             >
-              <span class="hx-preset__text">
-                <span class="hx-option__label">{{ card.preset.label }}</span>
-                <span class="hx-preset__note">{{ card.preset.note }}</span>
-                <span class="hx-preset__facts">{{ card.summary }}</span>
-              </span>
-            </v-btn>
+              <v-btn
+                :ref="el => keepScoresButton(card.preset.id, el, false)"
+                :disabled="starting"
+                class="hx-option hx-preset"
+                @click="startPreset(card.preset)"
+              >
+                <span class="hx-preset__text">
+                  <span class="hx-option__label">{{ card.preset.label }}</span>
+                  <span class="hx-preset__note">{{ card.preset.note }}</span>
+                  <span class="hx-preset__facts">{{ card.summary }}</span>
+                </span>
+              </v-btn>
+
+              <v-tooltip
+                :text="`High scores for ${card.preset.label}`"
+                location="top"
+              >
+                <template #activator="{ props: tip }">
+                  <v-btn
+                    v-bind="tip"
+                    :ref="el => keepScoresButton(card.preset.id, el, true)"
+                    :icon="mdiPodium"
+                    :border="false"
+                    variant="text"
+                    class="hx-preset__scores"
+                    :aria-label="`High scores for ${card.preset.label}`"
+                    @click="openScores(card.preset.id)"
+                  />
+                </template>
+              </v-tooltip>
+            </div>
 
             <!--
             Not a preset, and deliberately not in the list above: the others deal a game, this one
             opens the dials. Kept in the same group so it reads as the last of the ways to start.
           -->
-            <v-btn
-              block
-              :disabled="starting"
-              class="hx-option hx-preset"
-              @click="step = 'setup'"
-            >
-              <span class="hx-preset__text">
-                <span class="hx-option__label">Custom</span>
-                <span class="hx-preset__note">Set every rule yourself.</span>
-                <span class="hx-preset__facts">{{ visibleDials.length }} settings</span>
-              </span>
-            </v-btn>
+            <div class="hx-preset-row">
+              <v-btn
+                :disabled="starting"
+                class="hx-option hx-preset"
+                @click="step = 'setup'"
+              >
+                <span class="hx-preset__text">
+                  <span class="hx-option__label">Custom</span>
+                  <span class="hx-preset__note">Set every rule yourself.</span>
+                  <span class="hx-preset__facts">{{ visibleDials.length }} settings</span>
+                </span>
+              </v-btn>
+              <!--
+                No board, and no button — a game nobody else played the same way cannot be compared
+                with one. The gap is held open so the four cards still line up.
+              -->
+              <div class="hx-preset__scores hx-preset__scores--absent" />
+            </div>
           </fieldset>
 
           <p
@@ -1130,6 +1190,17 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
     <RulesPanel
       :open="rulesOpen"
       @close="closeRules"
+    />
+
+    <!--
+      One panel for all three boards. It opens on the card that was pressed and on the table size the
+      screen is set up for; its own toggles take it anywhere else.
+    -->
+    <HighscoresPanel
+      :open="scoresFor !== null"
+      :preset-id="scoresFor ?? ''"
+      :players="seats"
+      @close="closeScores"
     />
 
     <SettingsFlyout
@@ -1459,6 +1530,28 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
    * `height: auto` because a `v-btn` is a fixed height by default, and the lines below the first
    * would otherwise spill out of it.
    */
+  /*
+   * The card and its scores button, side by side. `min-width: 0` on the card because a long note
+   * would otherwise refuse to wrap and push the icon off the panel.
+   */
+  .hx-preset-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .hx-preset-row > .hx-preset {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Held open on the Custom row, which has no board, so all four cards still line up. */
+  .hx-preset__scores {
+    flex: none;
+    align-self: center;
+    width: 44px;
+  }
+
   .hx-preset {
     height: auto;
     min-height: 64px;

@@ -17,7 +17,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import { MAX_NAME_LENGTH } from '@hexnome/rules/gameSettings'
-import { ApiError } from '@/api/games'
+import { ApiError } from '@/api/base'
 import { playerName, rememberName } from '@/composables/playerName'
 import PresenceMark from '@/ui/PresenceMark.vue'
 import { useGameStore } from '@/stores/game'

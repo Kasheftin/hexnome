@@ -8,9 +8,9 @@
  * ## Why they live in the rules
  *
  * Because a preset is a statement about a game rather than about a screen, and because more than one
- * consumer needs it. The setup screen offers them; a table of high scores would need the same
- * definitions to say which games belong on which board, and it runs on the server. One copy, in the
- * package both already compile.
+ * consumer needs it. The setup screen offers them; the high score board uses the same definitions to
+ * say which games belong on which board, and it runs on the server — see `matchPreset` at the foot of
+ * this file. One copy, in the package both already compile.
  *
  * ## Patches, not settings
  *

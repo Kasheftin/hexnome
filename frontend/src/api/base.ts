@@ -49,3 +49,50 @@ export function apiSocketUrl(path: string): string {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return url.toString()
 }
+
+/**
+ * A request the server answered, and refused.
+ *
+ * The status matters to one caller — a join that comes back 409 means somebody took the chair, which
+ * is a thing to say rather than a thing to retry — so it is carried rather than folded into the
+ * message.
+ */
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+
+  /** The log moved on: somebody else wrote before us, or this tab is a turn behind. */
+  get isStale(): boolean {
+    return this.status === 409
+  }
+
+  /** The server would not have the move. A bug in one of the two ends, not a network hiccup. */
+  get isRefused(): boolean {
+    return this.status === 422
+  }
+
+  /** Nothing answered. The only failure worth sending again unchanged. */
+  get isUnreachable(): boolean {
+    return this.status === UNREACHABLE
+  }
+}
+
+/** Unreachable is its own status: 0, because no server said anything. */
+const UNREACHABLE = 0
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(apiUrl(path), init)
+  } catch {
+    throw new ApiError(UNREACHABLE, 'Cannot reach the table. Is the server running?')
+  }
+
+  if (!response.ok) {
+    const said = await response.json().catch(() => null) as { message?: unknown } | null
+    throw new ApiError(response.status, typeof said?.message === 'string' ? said.message : `${response.status}`)
+  }
+  return await response.json() as T
+}

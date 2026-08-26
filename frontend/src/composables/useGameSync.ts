@@ -1,6 +1,7 @@
 import { shallowRef } from 'vue'
 import type { CommandRow, PlayerCommand } from '@hexnome/rules/wire'
-import { ApiError, getCommands, submitCommand } from '@/api/games'
+import { ApiError } from '@/api/base'
+import { getCommands, submitCommand } from '@/api/games'
 import { seatToken } from '@/composables/useSeat'
 
 /**

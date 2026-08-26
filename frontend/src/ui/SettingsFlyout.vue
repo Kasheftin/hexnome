@@ -61,12 +61,24 @@ const emit = defineEmits<{ close: [] }>()
           :border="false"
           variant="text"
           density="comfortable"
-          aria-label="Close settings"
+          :aria-label="`Close ${title}`"
           @click="emit('close')"
         />
       </v-card-title>
 
       <v-divider />
+
+      <!--
+        A band that does not scroll, for whatever has to stay reachable from any point in the body —
+        a filter bar over a long table, say. The same idea as `aside` in the footer, at the other end.
+        Absent unless a caller fills it, so nothing changes for the panels that do not.
+      -->
+      <template v-if="$slots.toolbar">
+        <div class="hx-flyout__toolbar">
+          <slot name="toolbar" />
+        </div>
+        <v-divider />
+      </template>
 
       <div class="hx-flyout__body">
         <slot />
@@ -104,6 +116,19 @@ const emit = defineEmits<{ close: [] }>()
  * its body does, so the title stays put and Done stays reachable however long the dials get.
  */
 @layer components {
+  /*
+   * A band that keeps its place while the body scrolls. `flex: none` because the card is a column and
+   * a toolbar full of toggles would otherwise be the thing that gives when the dialog is short.
+   */
+  .hx-flyout__toolbar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+    align-items: center;
+    padding: 12px 16px;
+  }
+
   .hx-flyout {
     display: flex;
     flex-direction: column;

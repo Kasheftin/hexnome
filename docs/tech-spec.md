@@ -333,6 +333,7 @@ POST /games            { settings, name? }    -> { seat, token, game }
 GET  /games/:id        Authorization: Seat …  -> GameView
 POST /games/:id/join   { name? }              -> { seat, token, game }
 WS   /watch            <- { watch: gameId }   -> { gameId, seq }
+GET  /highscores       ?preset=&players=&limit=&offset= -> HighscorePage
 ```
 
 **Claiming a seat is a conditional write.** `UPDATE … WHERE gameId = ? AND seat = ? AND token IS
@@ -344,6 +345,13 @@ desk's version check.
 **Every game is a table**, singleplayer included: a solo game is one whose only seat is claimed by
 its creator, so it starts in the same breath and takes the same path. Attempt 1's worst bug was a
 guard that existed on one route and not the other (docs/backend-attempt1.md).
+
+**A board is public, and carries no game id.** `GET /highscores` needs nothing at all — it is the one
+route whose purpose is to be read by people holding no capability. That is precisely why a row carries
+no game id: reading a game needs no token either, so a public, enumerable list of ids would publish
+every finished game's board and whole command log. Which preset a game belongs to is *derived* from
+its settings when it is created (`matchPreset`), never claimed by the client, so a board cannot be
+joined by asserting membership of it.
 
 **A token is a capability, not an account.** It says "the holder may act as seat 2 in that game" and
 nothing else. It leaves the server exactly once, in the response to the join that mints it, and is

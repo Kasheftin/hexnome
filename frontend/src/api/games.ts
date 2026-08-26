@@ -1,62 +1,17 @@
 /**
  * The games endpoint, over the wire.
  *
- * Five calls and one error type. The shapes come from `@hexnome/rules/wire`, which both sides
- * import, so a field that changes on the server fails a typecheck here rather than arriving as
- * `undefined` in a browser.
+ * Five calls. The shapes come from `@hexnome/rules/wire`, which both sides import, so a field that
+ * changes on the server fails a typecheck here rather than arriving as `undefined` in a browser.
+ *
+ * The fetch wrapper and `ApiError` live in `base.ts`, with the URL building — they are the transport,
+ * not this resource, and a second endpoint module would otherwise have had to copy them.
  *
  * Nothing here holds state. Which game is open, and what it currently says, is the store's business
  * (`stores/game.ts`); this is the transport under it.
  */
 import type { CommandSlice, GameView, SeatClaim, SubmitResult } from '@hexnome/rules/wire'
-import { apiUrl } from './base'
-
-/**
- * A request the server answered, and refused.
- *
- * The status matters to one caller — a join that comes back 409 means somebody took the chair, which
- * is a thing to say rather than a thing to retry — so it is carried rather than folded into the
- * message.
- */
-export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message)
-    this.name = 'ApiError'
-  }
-
-  /** The log moved on: somebody else wrote before us, or this tab is a turn behind. */
-  get isStale(): boolean {
-    return this.status === 409
-  }
-
-  /** The server would not have the move. A bug in one of the two ends, not a network hiccup. */
-  get isRefused(): boolean {
-    return this.status === 422
-  }
-
-  /** Nothing answered. The only failure worth sending again unchanged. */
-  get isUnreachable(): boolean {
-    return this.status === UNREACHABLE
-  }
-}
-
-/** Unreachable is its own status: 0, because no server said anything. */
-const UNREACHABLE = 0
-
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(apiUrl(path), init)
-  } catch {
-    throw new ApiError(UNREACHABLE, 'Cannot reach the table. Is the server running?')
-  }
-
-  if (!response.ok) {
-    const said = await response.json().catch(() => null) as { message?: unknown } | null
-    throw new ApiError(response.status, typeof said?.message === 'string' ? said.message : `${response.status}`)
-  }
-  return await response.json() as T
-}
+import { request } from './base'
 
 function send<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, {
