@@ -1374,6 +1374,13 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
     margin: 0;
     padding: 0;
     border: 0;
+    /*
+     * A `<fieldset>` defaults to `min-inline-size: min-content`, which is a floor no flex parent can
+     * argue with — so on a phone the group stayed as wide as its widest unbreakable line and pushed
+     * itself out of the panel it lives in. Nothing else in the app has this, because nothing else is
+     * a fieldset.
+     */
+    min-inline-size: 0;
   }
 
   .hx-group + .hx-group {
@@ -1563,6 +1570,14 @@ const PANEL_LABELS: Readonly<Record<Step, string>> = {
      */
     .v-btn__content {
       justify-content: flex-start;
+      /*
+       * A `v-btn` sets `white-space: nowrap`, which is right for a button with a word on it and wrong
+       * for a card with three lines. The facts line inherited it — "6 ROUNDS · 6 PLATES/ROUND ·
+       * STRICT" became an unbreakable 331px, which set the card's minimum width and carried the whole
+       * row off the side of a phone. Set here rather than on each line, so a fourth line cannot
+       * reintroduce it.
+       */
+      white-space: normal;
     }
   }
 

@@ -427,21 +427,28 @@ onBeforeUnmount(() => watching?.disconnect())
   /*
    * Narrow: the rail goes above the prose rather than squeezing it. A 208px column against a phone
    * leaves the text about twenty characters wide, which is unreadable in a way no styling fixes.
+   *
+   * **This rule was written and then stopped applying.** It named `.columns`, `.rail` and
+   * `.rail-entry`, which the BEM pass renamed to `.hx-rules__*` — and CSS says nothing when a selector
+   * matches nothing, so the panel went on squeezing the prose to about eighty pixels on a phone with
+   * the fix for it sitting right here. Measured before repair: a 208px rail inside a 340px card.
    */
   @media (width <= 700px) {
-    .columns {
+    .hx-rules__columns {
       flex-direction: column;
     }
 
-    .rail {
+    .hx-rules__rail {
       flex-direction: row;
       width: auto;
+      padding: 8px 10px;
       overflow-x: auto;
+      overflow-y: hidden;
       border-right: none;
       border-bottom: 1px solid rgb(var(--v-theme-divider));
     }
 
-    .rail-entry {
+    .hx-rules__entry {
       white-space: nowrap;
     }
 }
@@ -457,7 +464,7 @@ onBeforeUnmount(() => watching?.disconnect())
 }
 
   @media (prefers-reduced-motion: reduce) {
-    .rail-entry,
+    .hx-rules__entry,
     .rules-enter-active,
     .rules-leave-active {
       transition: none;

@@ -25,6 +25,8 @@
  */
 import { computed } from 'vue'
 import type { TurnOptions, TurnPhase } from '@hexnome/rules/turn'
+import { useMediaQuery } from '@/composables/mediaQuery'
+import { NARROW_SCREEN } from '@/composables/scoringPanel'
 import TileChip from './TileChip.vue'
 import { TILE_COLORS } from '@/scene/constants'
 
@@ -135,12 +137,27 @@ const draftSummary = computed(() => {
   if (props.attribute === 'value') return `more ${first.value}s to take`
   return 'colour or symbol'
 })
+/**
+ * Where the bar hangs: on the drawer's centre normally, across the whole width on a phone.
+ *
+ * The horizontal half has to *leave* on a narrow screen, and not for taste. Absolutely positioned at
+ * `left: anchorX`, the bar's shrink-to-fit width is the room to the *right* of that point — about
+ * 195px on a phone, which is half the screen it could have had. It duly wrapped into four rows inside
+ * a 195px column while 390 were available. Anchoring both edges instead gives it the real width, and
+ * `justify-content: center` keeps it looking centred without a transform doing the centring.
+ */
+const narrow = useMediaQuery(NARROW_SCREEN)
+
+const anchor = computed(() => (narrow.value
+  ? { top: `${props.anchorY}px` }
+  : { left: `${props.anchorX}px`, top: `${props.anchorY}px` }))
+
 </script>
 
 <template>
   <div
     class="bar chrome-panel"
-    :style="{ left: `${anchorX}px`, top: `${anchorY}px` }"
+    :style="anchor"
   >
     <p class="turn">
       {{ watchingLabel ?? turnLabel }}
@@ -304,6 +321,66 @@ const draftSummary = computed(() => {
   align-items: center;
   padding: 16px;
   transform: translate(-50%, calc(-100% - 10px));
+
+  /*
+   * **It wraps, and the height follows.**
+   *
+   * This bar had no rule about width at all until a phone measured it at 548px inside 390 — spanning
+   * -79 to 469, so `Your turn` was off the left edge and `Undo` off the right, because a
+   * centre-anchored row overflows in both directions at once. That was not a phone problem so much as
+   * a *growth* problem: the bar gained an Undo button and nothing anywhere said what should give.
+   *
+   * Wrapping is what says it. Anchored by its bottom edge, a second row grows upward into the board
+   * rather than down into the drawer, and no future control can push another one off the screen —
+   * which is the failure this had, twice.
+   */
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 56px;
+  justify-content: center;
+}
+
+/*
+ * Tighter on a phone, so the four actions still make one row and only the label moves.
+ *
+ * Measured: at 16px gaps the buttons alone are 348px inside 390, which fits but leaves nothing. At 8
+ * they are 324 and the bar reads as a bar rather than as something wedged in.
+ */
+@media (max-width: 720px) {
+  .bar {
+    gap: 6px;
+    padding: 8px;
+    /*
+     * Both edges rather than a centred point, so the bar is offered the width of the screen instead of
+     * the width to one side of the drawer. `left` is left off the inline style here — see `anchor`.
+     */
+    left: 12px;
+    right: 12px;
+    transform: translateY(calc(-100% - 10px));
+  }
+
+  /*
+   * The label takes a row of its own, so the four actions stay on one line together.
+   *
+   * Left to wrap where it liked, the break fell between Put and Pass — the actions split across two
+   * rows with the label sharing the first, which reads as two unrelated groups. A full-width basis
+   * moves the break to the one place it means something.
+   */
+  .bar .turn {
+    flex-basis: 100%;
+    text-align: center;
+  }
+
+  /*
+   * Both separators go.
+   *
+   * The first is meaningless once the label has a row to itself, and the second cost the 16px that
+   * decided whether Undo sat with the other actions or alone on a third row. Measured: 358px of
+   * content in 342px of room, and the divider plus its gap was nine of the sixteen.
+   */
+  .bar .rule {
+    display: none;
+  }
 }
 
 .turn {
